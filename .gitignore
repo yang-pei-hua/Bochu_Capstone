@@ -1,0 +1,50 @@
+# Editor and operating-system state
+/.vscode/
+/.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*~
+
+# Python caches, virtual environments, and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# JavaScript package/build artifacts
+node_modules/
+dist/
+coverage/
+.next/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Native build and installed runtime artifacts
+/core/reconstruction/build/
+/core/reconstruction/install/
+
+# Downloaded Fountain-P11 payload (metadata stays tracked)
+/data/fountain-p11/fountain-p11.zip
+/data/fountain-p11/images/
+/data/fountain-p11/raw/
+
+# Generated reconstruction outputs (README stays tracked)
+/outputs/*
+!/outputs/.gitignore
+!/outputs/README.md
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
