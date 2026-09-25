@@ -58,10 +58,11 @@ def find_colmap_executable(explicit: str | Path | None = None) -> Path:
     if on_path:
         candidates.append(Path(on_path))
     root = Path(__file__).resolve().parents[1]
+    project_root = Path(__file__).resolve().parents[3]
     candidates.extend(
         [
-            root / "install" / "colmap" / "bin" / "colmap.exe",
-            root / "install" / "colmap" / "bin" / "colmap",
+            project_root / "deps" / "colmap" / "bin" / "colmap.exe",
+            project_root / "deps" / "colmap" / "bin" / "colmap",
             root / "build" / "colmap" / "src" / "colmap" / "exe" / "colmap.exe",
             root / "build" / "colmap" / "src" / "colmap" / "exe" / "colmap",
         ]

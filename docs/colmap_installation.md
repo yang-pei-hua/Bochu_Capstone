@@ -62,8 +62,8 @@ python -m venv .venv
 ## 3. 下载并安装 COLMAP 预编译包
 
 推荐使用官方预编译包，无需 Visual Studio、vcpkg 或 CUDA Toolkit。下面的命令会
-把固定版本下载到系统临时目录，并安装到项目的
-`core\reconstruction\install\colmap`。该目录已被 Git 和项目搜索规则忽略。
+把固定版本下载到系统临时目录，并安装到项目统一依赖目录
+`deps\colmap`。该目录已被 Git 和项目搜索规则忽略。
 
 ```powershell
 $ProjectRoot = (Get-Location).Path
@@ -72,7 +72,7 @@ $DownloadUrl = "https://github.com/colmap/colmap/releases/download/$ColmapVersio
 $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ece4500j-colmap-" + [guid]::NewGuid().ToString("N"))
 $ArchivePath = Join-Path $TempRoot "colmap-x64-windows-cuda.zip"
 $ExtractPath = Join-Path $TempRoot "extracted"
-$InstallPath = Join-Path $ProjectRoot "core\reconstruction\install\colmap"
+$InstallPath = Join-Path $ProjectRoot "deps\colmap"
 
 if (Test-Path -LiteralPath $InstallPath) {
     throw "COLMAP target already exists: $InstallPath"
@@ -95,7 +95,7 @@ Move-Item -LiteralPath $ExtractPath -Destination $InstallPath
 
 ```powershell
 $SourcePath = "D:\Downloads\colmap-x64-windows-cuda"
-$InstallPath = Join-Path (Get-Location).Path "core\reconstruction\install\colmap"
+$InstallPath = Join-Path (Get-Location).Path "deps\colmap"
 
 if (Test-Path -LiteralPath $InstallPath) {
     throw "COLMAP target already exists: $InstallPath"
@@ -110,7 +110,7 @@ Move-Item -LiteralPath $SourcePath -Destination $InstallPath
 直接运行版本检查：
 
 ```powershell
-& .\core\reconstruction\install\colmap\bin\colmap.exe version
+& .\deps\colmap\bin\colmap.exe version
 ```
 
 CUDA 包的期望输出类似：
@@ -129,7 +129,7 @@ python -c "from colmap_reconstruction.pipeline import find_colmap_executable; pr
 期望路径结尾为：
 
 ```text
-core\reconstruction\install\colmap\bin\colmap.exe
+deps\colmap\bin\colmap.exe
 ```
 
 ## 5. 克隆固定版本源码（仅审计或自行编译时需要）
@@ -209,21 +209,19 @@ CameraInfo 格式见
 
 ## 8. Git 与本地二进制
 
-COLMAP 预编译包体积较大，不应提交到 Git。项目的
-`core\reconstruction\.gitignore` 已包含：
+COLMAP 预编译包体积较大，不应提交到 Git。项目根 `.gitignore` 已包含：
 
 ```gitignore
-install/
+/deps/colmap/
 ```
 
 安装后可在 Git 仓库中用下列命令确认忽略状态：
 
 ```powershell
-git check-ignore -v .\core\reconstruction\install\colmap\bin\colmap.exe
+git check-ignore -v .\deps\colmap\bin\colmap.exe
 ```
 
-如果当前目录尚未初始化为 Git 仓库，该验证命令会失败，但嵌套的 `.gitignore`
-仍会在以后初始化 Git 时生效。
+如果当前目录尚未初始化为 Git 仓库，该验证命令会失败；初始化后再执行即可。
 
 ## 9. 常见问题
 
@@ -232,7 +230,7 @@ git check-ignore -v .\core\reconstruction\install\colmap\bin\colmap.exe
 确认文件存在：
 
 ```powershell
-Test-Path .\core\reconstruction\install\colmap\bin\colmap.exe
+Test-Path .\deps\colmap\bin\colmap.exe
 ```
 
 若把 COLMAP 放在其他目录，可在重建命令中显式指定：
@@ -251,4 +249,3 @@ PatchMatch Stereo 需要具备 GPU 后端的 COLMAP；仅 CPU 的预编译包只
 
 适配层为避免覆盖数据，只接受空工作目录。删除旧工作目录前请先确认其中没有要
 保留的结果，或通过 `--workspace` 指定一个新的目录。
-

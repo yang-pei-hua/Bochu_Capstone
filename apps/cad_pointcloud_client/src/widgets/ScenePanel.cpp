@@ -49,7 +49,7 @@ void ScenePanel::setScene(const Scene& scene)
     }
 
     m_tree->expandAll();
-    const auto modelItems = m_tree->findItems(QStringLiteral("DemoCube"), Qt::MatchExactly | Qt::MatchRecursive);
+    const auto modelItems = m_tree->findItems(QStringLiteral("DemoModel"), Qt::MatchExactly | Qt::MatchRecursive);
     if (!modelItems.isEmpty()) {
         m_tree->setCurrentItem(modelItems.first());
     }

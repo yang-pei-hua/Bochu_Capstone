@@ -1,7 +1,9 @@
-# CAD & Point Cloud Studio — UI Skeleton
+# CAD & Point Cloud Studio
 
-Windows desktop UI skeleton built with C++17, Qt 6 Widgets, CMake, MSVC 2022 x64,
-and VTK. The application currently displays and edits a VTK demo cube; the
+Windows desktop application built with C++17, Qt 6 Widgets, CMake, MSVC 2022 x64,
+VTK, and OpenCASCADE. The viewport renders the body produced by the parametric
+modeling core (`core/parametric_modeling`), so sketches, extrudes, and cuts are
+created through the core's command API and displayed as a tessellated solid. The
 reconstruction, fitting, AI, and real model-loading algorithms are intentionally
 outside this milestone.
 
@@ -10,8 +12,10 @@ outside this milestone.
 - Visual Studio 2022 with **Desktop development with C++**
 - CMake 3.24 or newer
 - Qt 6.5 or newer, built for MSVC 2022 x64
-- The local VTK 9.7.0 Release SDK at `deps/vtk-9.7.0` (built for the same
+- The repository-local VTK 9.7.0 Release SDK at `../../deps/vtk-9.7.0` (built for the same
   compiler and Qt version, including `GUISupportQt`)
+- The repository-local OpenCASCADE 8.0.1 MSVC x64 SDK at
+  `../../deps/occt-8.0.1`
 
 Qt and VTK must use the same architecture and compatible MSVC runtimes. A
 MinGW Qt package cannot be linked into the MSVC build.
@@ -27,40 +31,39 @@ cmake --preset msvc-debug `
 cmake --build --preset msvc-release
 ```
 
-To create an independent build directory that cannot reuse an older VTK cache:
-
-```powershell
-cmake -S . -B build/vtk-9.7-release `
-  -G "Visual Studio 17 2022" -A x64 `
-  -DCMAKE_PREFIX_PATH="D:/Qt/6.11.2/msvc2022_64"
-cmake --build build/vtk-9.7-release --config Release --parallel 8
-```
+If a cache is ever suspected of being stale, delete the `build/` directory and
+re-run the commands above rather than creating a second build tree — only
+`build/msvc-debug` is built and packaged.
 
 For VS Code, select the `msvc-debug` configure preset and the Release build
 configuration. The bundled SDK currently contains Release VTK libraries.
 
-Before running outside Visual Studio, make Qt and VTK runtime DLLs available on
-`PATH`, or deploy them next to the executable. For Qt:
+The executable is written to `build/msvc-debug/Release/CadPointCloudClient.exe`.
+The bundled Qt, VTK, and OpenCASCADE SDKs are not on `PATH`, and Windows resolves
+dependency DLLs from the executable's own directory first, so a CMake
+`POST_BUILD` step stages every required runtime DLL (plus the Qt platform, style,
+image-format, and TLS plugins) next to the executable. Launch it directly:
 
 ```powershell
-& "D:/Qt/6.11.2/msvc2022_64/bin/windeployqt.exe" `
-  "build/vtk-9.7-release/Release/CadPointCloudClient.exe"
+./build/msvc-debug/Release/CadPointCloudClient.exe
 ```
 
-Then add the local VTK and Qt DLL directories to `PATH` and run:
+Do not copy or move the executable out of `build/msvc-debug/Release`: it must stay
+beside the staged DLLs, otherwise startup fails with errors such as
+`找不到 vtkInteractionWidgets-9.7.dll`.
 
-```powershell
-$env:Path = "D:/Qt/6.11.2/msvc2022_64/bin;$PWD/deps/vtk-9.7.0/bin;$env:Path"
-./build/vtk-9.7-release/Release/CadPointCloudClient.exe
-```
-
-`deps/vtk-9.7.0` is intentionally excluded from Git and AI context because it
-is a large generated runtime/development dependency.
+The binary SDKs under the repository-root `deps/` directory are intentionally
+excluded from Git and AI context. See [`../../deps/README.md`](../../deps/README.md)
+for the canonical dependency layout and verification commands.
 
 ## Current scope
 
-- Dockable Scene, Properties, and Console panels
-- VTK viewport with trackball interaction, demo cube, and orientation axes
+- Dockable Scene, Properties, Modeling, and Console panels
+- Parametric model built through `ModelingCore` commands: rectangle sketch,
+  extrude, top-face sketch, and a through-cut hole, rendered via a read-only
+  OpenCASCADE → VTK tessellation adapter
+- Modeling panel that edits sketch/extrude/cut parameters and rebuilds the body
+- VTK viewport with trackball interaction and orientation axes
 - Object transform/display controls with live actor updates
 - Editable VTK camera parameters and six standard views
 - Perspective/orthographic switching
@@ -70,8 +73,11 @@ is a large generated runtime/development dependency.
 
 ## Deferred work
 
-- Real STEP/OBJ/PLY parsing and OpenCASCADE integration
-- Persistent project save/load
+- Interactive sketching, face picking, and SolidWorks-style mouse and keyboard
+  mapping
+- Undo/redo and a persistent feature tree with in-place editing
+- STEP export from the client
+- Real STEP/OBJ/PLY parsing and persistent project save/load
 - Multi-view dataset and camera-pose generation
 - Point-cloud reconstruction, geometric fitting, and AI editing
-- Production scene graph, selection, undo/redo, task progress, FPS, and mesh stats
+- Production scene graph, selection, task progress, FPS, and mesh stats

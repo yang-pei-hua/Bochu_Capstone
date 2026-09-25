@@ -1,11 +1,13 @@
 #pragma once
 
+#include "app/ModelingController.h"
 #include "core/Scene.h"
 
 #include <QMainWindow>
 
 class QAction;
 class QLabel;
+class ModelingPanel;
 class QPlainTextEdit;
 class PropertyPanel;
 class ScenePanel;
@@ -34,6 +36,10 @@ private:
     void applyDarkTheme();
 
     QWidget* createPipelineBar();
+    void createModelingController();
+    void generateDemoModel(const DemoModelParameters& parameters);
+    void onModelRebuilt();
+    void onModelError(const QString& message);
     void openModel();
     void closeModel();
     void saveProject();
@@ -43,6 +49,9 @@ private:
 
     Scene m_scene;
     VTKViewer* m_viewer = nullptr;
+    ModelingController* m_modelingController = nullptr;
+    ModelingPanel* m_modelingPanel = nullptr;
+    bool m_fitViewOnNextRebuild = false;
     ScenePanel* m_scenePanel = nullptr;
     PropertyPanel* m_propertyPanel = nullptr;
     QPlainTextEdit* m_console = nullptr;

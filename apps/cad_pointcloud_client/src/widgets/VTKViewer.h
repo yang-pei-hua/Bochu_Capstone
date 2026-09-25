@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/CameraController.h"
+#include "rendering/BodyActor.h"
 
 #include <QColor>
 #include <QString>
@@ -8,7 +9,7 @@
 
 #include <vtkSmartPointer.h>
 
-class vtkActor;
+class TopoDS_Shape;
 class vtkAxesActor;
 class vtkCallbackCommand;
 class vtkGenericOpenGLRenderWindow;
@@ -26,6 +27,13 @@ public:
 
     CameraParameters cameraParameters() const;
     bool captureImage(const QString& filePath, int width, int height);
+
+    // Replaces the displayed body with the triangulation of the given core
+    // shape. The viewer only consumes a shape; it never interprets features.
+    void setBodyShape(const TopoDS_Shape& shape);
+    void clearBody();
+    bool hasBody() const noexcept;
+    void renderNow();
 
 public slots:
     void resetCamera();
@@ -49,13 +57,11 @@ signals:
 private:
     static void onCameraModified(vtkObject* caller, unsigned long eventId,
                                  void* clientData, void* callData);
-    void render();
-    void createDemoCube();
     void createOrientationAxes();
 
     vtkSmartPointer<vtkGenericOpenGLRenderWindow> m_renderWindow;
     vtkSmartPointer<vtkRenderer> m_renderer;
-    vtkSmartPointer<vtkActor> m_cubeActor;
+    BodyActor m_bodyActor;
     vtkSmartPointer<vtkAxesActor> m_axesActor;
     vtkSmartPointer<vtkOrientationMarkerWidget> m_orientationWidget;
     vtkSmartPointer<vtkCallbackCommand> m_cameraCallback;

@@ -32,7 +32,10 @@ coverage/
 
 # Native build and installed runtime artifacts
 /core/reconstruction/build/
-/core/reconstruction/install/
+/core/parametric_modeling/build/
+/deps/occt-8.0.1/
+/deps/vtk-9.7.0/
+/deps/colmap/
 
 # Downloaded Fountain-P11 payload (metadata stays tracked)
 /data/fountain-p11/fountain-p11.zip

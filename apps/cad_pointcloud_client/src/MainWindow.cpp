@@ -3,6 +3,7 @@
 #include "core/CameraController.h"
 #include "io/ModelLoader.h"
 #include "widgets/CameraPanel.h"
+#include "widgets/ModelingPanel.h"
 #include "widgets/PropertyPanel.h"
 #include "widgets/RenderPanel.h"
 #include "widgets/ScenePanel.h"
@@ -51,8 +52,63 @@ MainWindow::MainWindow(QWidget* parent)
 
     logInfo(tr("Application started"));
     logInfo(tr("VTK renderer initialized"));
-    logInfo(tr("DemoCube created"));
-    logInfo(tr("Camera reset"));
+
+    createModelingController();
+    generateDemoModel(m_modelingPanel->parameters());
+}
+
+void MainWindow::createModelingController()
+{
+    m_modelingController = new ModelingController(this);
+    connect(m_modelingController, &ModelingController::modelRebuilt,
+            this, &MainWindow::onModelRebuilt);
+    connect(m_modelingController, &ModelingController::modelError,
+            this, &MainWindow::onModelError);
+}
+
+void MainWindow::generateDemoModel(const DemoModelParameters& parameters)
+{
+    // A brand new document has no meaningful previous view, so fit the camera
+    // once; later edits keep the camera untouched.
+    m_fitViewOnNextRebuild = true;
+
+    if (m_modelingController->createDemoModel(parameters)) {
+        logInfo(tr("Demo model generated: %1 features")
+                    .arg(m_modelingController->features().size()));
+    } else {
+        logError(tr("Demo model generation failed: %1")
+                     .arg(m_modelingController->lastError()));
+    }
+}
+
+void MainWindow::onModelRebuilt()
+{
+    m_viewer->setBodyShape(m_modelingController->bodyShape());
+    if (m_fitViewOnNextRebuild) {
+        m_fitViewOnNextRebuild = false;
+        m_viewer->resetCamera();
+    }
+    m_viewer->renderNow();
+
+    m_modelingPanel->setFeatures(m_modelingController->features());
+
+    const QString error = m_modelingController->lastError();
+    m_modelingPanel->setStatusText(
+        error.isEmpty()
+            ? tr("Rebuild succeeded | %1 features").arg(m_modelingController->features().size())
+            : error);
+}
+
+void MainWindow::onModelError(const QString& message)
+{
+    logError(message);
+    // A rejected command or a failed rebuild must be visible in the panel, not
+    // only in the console; the previous body stays on screen untouched.
+    m_modelingPanel->setFeatures(m_modelingController->features());
+    m_modelingPanel->setStatusText(message);
+    m_statusLabel->setText(tr("Ready | Model: Demo | Camera: %1")
+                               .arg(m_viewer->cameraParameters().parallelProjection
+                                        ? tr("Orthographic") : tr("Perspective")));
 }
 
 void MainWindow::logInfo(const QString& message)
@@ -218,11 +274,20 @@ void MainWindow::createDockPanels()
 
     resizeDocks({sceneDock, propertyDock}, {235, 380}, Qt::Horizontal);
     resizeDocks({consoleDock}, {150}, Qt::Vertical);
+
+    m_modelingPanel = new ModelingPanel(this);
+    auto* modelingDock = new QDockWidget(tr("Modeling"), this);
+    modelingDock->setObjectName(QStringLiteral("modelingDock"));
+    modelingDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    modelingDock->setWidget(m_modelingPanel);
+    modelingDock->setMinimumWidth(250);
+    addDockWidget(Qt::LeftDockWidgetArea, modelingDock);
+    splitDockWidget(sceneDock, modelingDock, Qt::Vertical);
 }
 
 void MainWindow::createStatusBar()
 {
-    m_statusLabel = new QLabel(tr("Ready | Model: DemoCube | Camera: Perspective"), this);
+    m_statusLabel = new QLabel(tr("Ready | Model: Demo | Camera: Perspective"), this);
     statusBar()->addWidget(m_statusLabel, 1);
 }
 
@@ -266,6 +331,21 @@ void MainWindow::connectUi()
         m_viewer->setParallelProjection(orthographic);
         m_projectionAction->setText(orthographic ? tr("Perspective") : tr("Orthographic"));
         updateCameraStatus(orthographic);
+    });
+
+    connect(m_modelingPanel, &ModelingPanel::generateRequested,
+            this, &MainWindow::generateDemoModel);
+    connect(m_modelingPanel, &ModelingPanel::applyRequested, this, [this](const DemoModelParameters& parameters) {
+        if (m_modelingController->updateDemoModel(parameters)) {
+            logInfo(tr("Parameters applied: %1 features")
+                        .arg(m_modelingController->features().size()));
+        } else {
+            logError(tr("Parameter update failed: %1")
+                         .arg(m_modelingController->lastError()));
+        }
+    });
+    connect(m_modelingPanel, &ModelingPanel::fitViewRequested, this, [this]() {
+        m_viewer->resetCamera();
     });
 
     connect(m_scenePanel, &ScenePanel::nodeSelected, this, [this](SceneNodeType type) {
@@ -372,7 +452,7 @@ void MainWindow::updateCameraStatus(bool parallelProjection)
 {
     const QString current = m_statusLabel->text();
     const int cameraSeparator = current.lastIndexOf(QStringLiteral(" | Camera:"));
-    const QString prefix = cameraSeparator >= 0 ? current.left(cameraSeparator) : tr("Ready | Model: DemoCube");
+    const QString prefix = cameraSeparator >= 0 ? current.left(cameraSeparator) : tr("Ready | Model: Demo");
     m_statusLabel->setText(prefix + QStringLiteral(" | Camera: ")
                            + (parallelProjection ? tr("Orthographic") : tr("Perspective")));
 }

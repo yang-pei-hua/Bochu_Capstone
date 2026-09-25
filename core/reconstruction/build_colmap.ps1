@@ -5,9 +5,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ModuleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ModuleRoot)
 $Source = Join-Path $ModuleRoot "third_party\colmap"
 $Build = Join-Path $ModuleRoot "build\colmap"
-$Install = Join-Path $ModuleRoot "install\colmap"
+$Install = Join-Path $ProjectRoot "deps\colmap"
 $CudaValue = if ($Cuda) { "ON" } else { "OFF" }
 
 cmake -S $Source -B $Build -G $Generator `
@@ -30,4 +31,3 @@ if (-not (Test-Path -LiteralPath $Executable)) {
     $Executable = Join-Path $Install "bin\colmap"
 }
 Write-Host "COLMAP installed at $Executable"
-

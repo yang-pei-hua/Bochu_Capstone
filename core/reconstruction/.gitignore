@@ -1,6 +1,4 @@
 build/
-install/
 *_workspace/
 __pycache__/
 *.pyc
-

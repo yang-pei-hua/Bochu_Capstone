@@ -7,15 +7,12 @@
 #include <vtkCallbackCommand.h>
 #include <vtkCamera.h>
 #include <vtkCommand.h>
-#include <vtkCubeSource.h>
 #include <vtkGenericOpenGLRenderWindow.h>
 #include <vtkImageResize.h>
 #include <vtkInteractorStyleTrackballCamera.h>
 #include <vtkNew.h>
 #include <vtkOrientationMarkerWidget.h>
 #include <vtkPNGWriter.h>
-#include <vtkPolyDataMapper.h>
-#include <vtkProperty.h>
 #include <vtkRenderWindowInteractor.h>
 #include <vtkRenderer.h>
 #include <vtkWindowToImageFilter.h>
@@ -40,13 +37,12 @@ VTKViewer::VTKViewer(QWidget* parent)
     vtkNew<vtkInteractorStyleTrackballCamera> interactionStyle;
     m_renderWindow->GetInteractor()->SetInteractorStyle(interactionStyle);
 
-    createDemoCube();
+    m_renderer->AddActor(m_bodyActor.surfaceActor());
+    m_renderer->AddActor(m_bodyActor.edgeActor());
     createOrientationAxes();
 
     CameraParameters initialCamera;
     CameraController::apply(m_renderer->GetActiveCamera(), initialCamera);
-    m_renderer->ResetCamera();
-    m_renderer->ResetCameraClippingRange();
 
     m_cameraCallback = vtkSmartPointer<vtkCallbackCommand>::New();
     m_cameraCallback->SetClientData(this);
@@ -54,7 +50,7 @@ VTKViewer::VTKViewer(QWidget* parent)
     m_cameraObserverTag = m_renderer->GetActiveCamera()->AddObserver(
         vtkCommand::ModifiedEvent, m_cameraCallback);
 
-    render();
+    renderNow();
 }
 VTKViewer::~VTKViewer()
 {
@@ -68,13 +64,35 @@ CameraParameters VTKViewer::cameraParameters() const
     return CameraController::parameters(m_renderer->GetActiveCamera());
 }
 
+void VTKViewer::setBodyShape(const TopoDS_Shape& shape)
+{
+    m_bodyActor.setShape(shape);
+    m_renderer->ResetCameraClippingRange();
+}
+
+void VTKViewer::clearBody()
+{
+    m_bodyActor.clear();
+    m_renderer->ResetCameraClippingRange();
+}
+
+bool VTKViewer::hasBody() const noexcept
+{
+    return m_bodyActor.hasShape();
+}
+
+void VTKViewer::renderNow()
+{
+    m_renderWindow->Render();
+}
+
 bool VTKViewer::captureImage(const QString& filePath, int width, int height)
 {
     if (filePath.isEmpty() || width <= 0 || height <= 0) {
         return false;
     }
 
-    render();
+    renderNow();
 
     vtkNew<vtkWindowToImageFilter> windowCapture;
     windowCapture->SetInput(m_renderWindow);
@@ -100,7 +118,7 @@ void VTKViewer::resetCamera()
 {
     m_renderer->ResetCamera();
     m_renderer->ResetCameraClippingRange();
-    render();
+    renderNow();
     emit cameraChanged(cameraParameters());
 }
 
@@ -109,7 +127,7 @@ void VTKViewer::setStandardView(CameraController::StandardView view)
     CameraController::applyStandardView(m_renderer->GetActiveCamera(), view);
     m_renderer->ResetCamera();
     m_renderer->ResetCameraClippingRange();
-    render();
+    renderNow();
     emit cameraChanged(cameraParameters());
 }
 
@@ -117,14 +135,14 @@ void VTKViewer::applyCamera(const CameraParameters& parameters)
 {
     CameraController::apply(m_renderer->GetActiveCamera(), parameters);
     m_renderer->ResetCameraClippingRange();
-    render();
+    renderNow();
     emit cameraChanged(cameraParameters());
 }
 
 void VTKViewer::setParallelProjection(bool enabled)
 {
     m_renderer->GetActiveCamera()->SetParallelProjection(enabled ? 1 : 0);
-    render();
+    renderNow();
     emit cameraChanged(cameraParameters());
 }
 
@@ -132,59 +150,46 @@ void VTKViewer::setObjectTransform(double px, double py, double pz,
                                    double rx, double ry, double rz,
                                    double sx, double sy, double sz)
 {
-    m_cubeActor->SetPosition(px, py, pz);
-    m_cubeActor->SetOrientation(rx, ry, rz);
-    m_cubeActor->SetScale(sx, sy, sz);
+    m_bodyActor.setTransform(px, py, pz, rx, ry, rz, sx, sy, sz);
     m_renderer->ResetCameraClippingRange();
-    render();
+    renderNow();
 }
 
 void VTKViewer::setObjectVisible(bool visible)
 {
-    m_cubeActor->SetVisibility(visible ? 1 : 0);
-    render();
+    m_bodyActor.setVisible(visible);
+    renderNow();
 }
 
 void VTKViewer::setObjectRepresentation(int representation)
 {
-    switch (representation) {
-    case 1:
-        m_cubeActor->GetProperty()->SetRepresentationToWireframe();
-        break;
-    case 2:
-        m_cubeActor->GetProperty()->SetRepresentationToPoints();
-        m_cubeActor->GetProperty()->SetPointSize(4.0F);
-        break;
-    default:
-        m_cubeActor->GetProperty()->SetRepresentationToSurface();
-        break;
-    }
-    render();
+    m_bodyActor.setRepresentation(representation);
+    renderNow();
 }
 
 void VTKViewer::setObjectOpacity(double opacity)
 {
-    m_cubeActor->GetProperty()->SetOpacity(std::clamp(opacity, 0.0, 1.0));
-    render();
+    m_bodyActor.setOpacity(std::clamp(opacity, 0.0, 1.0));
+    renderNow();
 }
 
 void VTKViewer::setObjectColor(const QColor& color)
 {
-    m_cubeActor->GetProperty()->SetColor(color.redF(), color.greenF(), color.blueF());
-    render();
+    m_bodyActor.setColor(color);
+    renderNow();
 }
 
 void VTKViewer::setBackgroundColor(const QColor& color)
 {
     m_renderer->GradientBackgroundOff();
     m_renderer->SetBackground(color.redF(), color.greenF(), color.blueF());
-    render();
+    renderNow();
 }
 
 void VTKViewer::setLightingEnabled(bool enabled)
 {
-    m_cubeActor->GetProperty()->SetLighting(enabled ? 1 : 0);
-    render();
+    m_bodyActor.setLightingEnabled(enabled);
+    renderNow();
 }
 
 void VTKViewer::onCameraModified(vtkObject*, unsigned long, void* clientData, void*)
@@ -193,29 +198,6 @@ void VTKViewer::onCameraModified(vtkObject*, unsigned long, void* clientData, vo
     if (viewer) {
         emit viewer->cameraChanged(viewer->cameraParameters());
     }
-}
-
-void VTKViewer::render()
-{
-    m_renderWindow->Render();
-}
-
-void VTKViewer::createDemoCube()
-{
-    vtkNew<vtkCubeSource> cube;
-    cube->SetXLength(1.5);
-    cube->SetYLength(1.5);
-    cube->SetZLength(1.5);
-
-    vtkNew<vtkPolyDataMapper> mapper;
-    mapper->SetInputConnection(cube->GetOutputPort());
-
-    m_cubeActor = vtkSmartPointer<vtkActor>::New();
-    m_cubeActor->SetMapper(mapper);
-    m_cubeActor->GetProperty()->SetColor(0.28, 0.57, 0.84);
-    m_cubeActor->GetProperty()->SetEdgeColor(0.08, 0.10, 0.12);
-    m_cubeActor->GetProperty()->EdgeVisibilityOn();
-    m_renderer->AddActor(m_cubeActor);
 }
 
 void VTKViewer::createOrientationAxes()
