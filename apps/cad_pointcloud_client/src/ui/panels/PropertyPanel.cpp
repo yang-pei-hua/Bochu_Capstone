@@ -1,7 +1,9 @@
-#include "widgets/PropertyPanel.h"
+#include "ui/panels/PropertyPanel.h"
 
-#include "widgets/CameraPanel.h"
-#include "widgets/RenderPanel.h"
+#include "ui/panels/CameraPanel.h"
+#include "ui/panels/CapturePanel.h"
+#include "ui/panels/ReconstructPanel.h"
+#include "ui/panels/RenderPanel.h"
 
 #include <QCheckBox>
 #include <QColorDialog>
@@ -47,11 +49,15 @@ PropertyPanel::PropertyPanel(QWidget* parent)
     , m_tabs(new QTabWidget(this))
     , m_cameraPanel(new CameraPanel(this))
     , m_renderPanel(new RenderPanel(this))
+    , m_capturePanel(new CapturePanel(this))
+    , m_reconstructPanel(new ReconstructPanel(this))
 {
     m_objectTab = createObjectTab();
     m_tabs->addTab(m_objectTab, tr("Object"));
     m_tabs->addTab(m_cameraPanel, tr("Camera"));
     m_tabs->addTab(m_renderPanel, tr("Render"));
+    // Capture and Reconstruct are tools, not permanent tabs: they are inserted
+    // on demand.
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -66,6 +72,55 @@ CameraPanel* PropertyPanel::cameraPanel() const
 RenderPanel* PropertyPanel::renderPanel() const
 {
     return m_renderPanel;
+}
+
+CapturePanel* PropertyPanel::capturePanel() const
+{
+    return m_capturePanel;
+}
+
+ReconstructPanel* PropertyPanel::reconstructPanel() const
+{
+    return m_reconstructPanel;
+}
+
+void PropertyPanel::showCapturePanel(bool visible)
+{
+    const int index = m_tabs->indexOf(m_capturePanel);
+    if (visible) {
+        if (index < 0) {
+            // removeTab() only detaches the page, so the panel keeps its shot
+            // list, output directory and orbit settings across a hide/show.
+            m_tabs->addTab(m_capturePanel, tr("Capture"));
+        }
+        m_tabs->setCurrentWidget(m_capturePanel);
+    } else if (index >= 0) {
+        m_tabs->removeTab(index);
+    }
+}
+
+bool PropertyPanel::isCapturePanelVisible() const
+{
+    return m_tabs->indexOf(m_capturePanel) >= 0;
+}
+
+void PropertyPanel::showReconstructPanel(bool visible)
+{
+    const int index = m_tabs->indexOf(m_reconstructPanel);
+    if (visible) {
+        if (index < 0) {
+            // Detaching keeps the paths and options across a hide/show.
+            m_tabs->addTab(m_reconstructPanel, tr("Reconstruct"));
+        }
+        m_tabs->setCurrentWidget(m_reconstructPanel);
+    } else if (index >= 0) {
+        m_tabs->removeTab(index);
+    }
+}
+
+bool PropertyPanel::isReconstructPanelVisible() const
+{
+    return m_tabs->indexOf(m_reconstructPanel) >= 0;
 }
 
 void PropertyPanel::showObjectProperties()

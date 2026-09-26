@@ -1,6 +1,9 @@
-#include "widgets/VTKViewer.h"
+#include "ui/viewport/VTKViewer.h"
+
+#include "io/PlyReader.h"
 
 #include <QByteArray>
+#include <QSize>
 
 #include <vtkActor.h>
 #include <vtkAxesActor.h>
@@ -39,6 +42,7 @@ VTKViewer::VTKViewer(QWidget* parent)
 
     m_renderer->AddActor(m_bodyActor.surfaceActor());
     m_renderer->AddActor(m_bodyActor.edgeActor());
+    m_renderer->AddActor(m_pointCloudActor.actor());
     createOrientationAxes();
 
     CameraParameters initialCamera;
@@ -112,6 +116,73 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     writer->SetInputConnection(resize->GetOutputPort());
     writer->Write();
     return writer->GetErrorCode() == 0;
+}
+
+QSize VTKViewer::captureSourceSize() const
+{
+    int* const size = m_renderWindow->GetSize();
+    if (size == nullptr || size[0] <= 0 || size[1] <= 0) {
+        return QSize();
+    }
+    return QSize(size[0], size[1]);
+}
+
+bool VTKViewer::loadPointCloud(const QString& plyPath, QString& error)
+{
+    PlyCloud cloud;
+    if (!PlyReader::read(plyPath, cloud, error)) {
+        return false;
+    }
+    if (!m_pointCloudActor.setCloud(cloud)) {
+        error = QStringLiteral("point cloud is empty: %1").arg(plyPath);
+        return false;
+    }
+    m_renderer->ResetCameraClippingRange();
+    renderNow();
+    return true;
+}
+
+void VTKViewer::clearPointCloud()
+{
+    m_pointCloudActor.clear();
+    m_renderer->ResetCameraClippingRange();
+    renderNow();
+}
+
+bool VTKViewer::hasPointCloud() const noexcept
+{
+    return m_pointCloudActor.hasCloud();
+}
+
+int VTKViewer::pointCloudPointCount() const noexcept
+{
+    return m_pointCloudActor.pointCount();
+}
+
+void VTKViewer::resetCameraToPointCloud()
+{
+    if (!m_pointCloudActor.hasCloud()) {
+        return;
+    }
+    double bounds[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    m_pointCloudActor.bounds(bounds);
+    m_renderer->ResetCameraClippingRange();
+    m_renderer->ResetCamera(bounds);
+    m_renderer->ResetCameraClippingRange();
+    renderNow();
+    emit cameraChanged(cameraParameters());
+}
+
+void VTKViewer::setPointCloudVisible(bool visible)
+{
+    m_pointCloudActor.setVisible(visible);
+    renderNow();
+}
+
+void VTKViewer::setPointCloudPointSize(double size)
+{
+    m_pointCloudActor.setPointSize(size);
+    renderNow();
 }
 
 void VTKViewer::resetCamera()

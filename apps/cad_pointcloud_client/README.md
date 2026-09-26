@@ -68,8 +68,35 @@ for the canonical dependency layout and verification commands.
 - Editable VTK camera parameters and six standard views
 - Perspective/orthographic switching
 - Background, lighting, output-size controls, and PNG capture
+- Reconstruct page (Tools → 点云重建) that runs
+  `core/reconstruction/reconstruct.py` on a folder of multi-view images and
+  loads the resulting PLY into the viewport, coexisting with the CAD body
 - Menus, toolbar, pipeline placeholder navigation, dark theme, and status bar
 - Abstract `ModelLoader` extension point for future STEP/OBJ/PLY loaders
+
+Each captured photo gets a `shot_NNN.json` sidecar next to it. Besides the
+camera pose it records `render {width, height}` - the render-window size the
+output image was stretched from. Reconstruction uses it to derive separate
+horizontal and vertical focal lengths; sidecars without it fall back to square
+pixels.
+
+## Outputs
+
+Everything the client writes stays inside the repository's `outputs/` folder,
+grouped by type and then by the timestamp of the batch:
+
+```
+outputs/captures/<yyyyMMdd_HHmmss>/         shot_NNN.png + shot_NNN.json + manifest.json
+outputs/reconstructions/<yyyyMMdd_HHmmss>/  cloud.ply + camera_info.json + workspace/
+outputs/screenshots/<yyyyMMdd_HHmmss>.png   single-frame capture from the toolbar
+```
+
+A second capture or run within the same second gets a `-2` suffix. The project
+root is found by walking up from the executable until
+`core/reconstruction/reconstruct.py` appears; the `QSettings` key
+`reconstruction/repoRoot` overrides it. Both panels still allow the folder to be
+changed, and if the root cannot be located the fallback is `outputs/` beside the
+executable - never the user's Pictures folder.
 
 ## Deferred work
 
@@ -78,6 +105,6 @@ for the canonical dependency layout and verification commands.
 - Undo/redo and a persistent feature tree with in-place editing
 - STEP export from the client
 - Real STEP/OBJ/PLY parsing and persistent project save/load
-- Multi-view dataset and camera-pose generation
-- Point-cloud reconstruction, geometric fitting, and AI editing
+- Point-cloud post-processing (downsampling, meshing) and CAD alignment
+- Geometric fitting and AI editing
 - Production scene graph, selection, task progress, FPS, and mesh stats

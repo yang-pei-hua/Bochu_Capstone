@@ -1,4 +1,4 @@
-#include "widgets/ModelingPanel.h"
+#include "ui/panels/ModelingPanel.h"
 
 #include <QDoubleSpinBox>
 #include <QGridLayout>

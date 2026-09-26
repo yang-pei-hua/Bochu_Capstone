@@ -1,4 +1,4 @@
-#include "widgets/ScenePanel.h"
+#include "ui/panels/ScenePanel.h"
 
 #include <QHash>
 #include <QTreeWidget>
@@ -53,4 +53,20 @@ void ScenePanel::setScene(const Scene& scene)
     if (!modelItems.isEmpty()) {
         m_tree->setCurrentItem(modelItems.first());
     }
+}
+
+bool ScenePanel::updateNodeLabel(SceneNodeType type, const QString& label)
+{
+    // Walking the tree keeps the order deterministic, which a hash lookup of
+    // node ids would not.
+    QTreeWidgetItemIterator iterator(m_tree);
+    while (*iterator != nullptr) {
+        QTreeWidgetItem* item = *iterator;
+        if (static_cast<SceneNodeType>(item->data(0, NodeTypeRole).toInt()) == type) {
+            item->setText(0, label);
+            return true;
+        }
+        ++iterator;
+    }
+    return false;
 }

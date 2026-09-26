@@ -1,4 +1,4 @@
-#include "widgets/RenderPanel.h"
+#include "ui/panels/RenderPanel.h"
 
 #include <QCheckBox>
 #include <QColorDialog>

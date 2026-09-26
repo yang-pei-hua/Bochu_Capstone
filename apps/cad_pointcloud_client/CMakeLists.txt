@@ -47,32 +47,50 @@ find_package(VTK REQUIRED COMPONENTS
 
 qt_add_executable(CadPointCloudClient WIN32
     src/main.cpp
-    src/MainWindow.h
-    src/MainWindow.cpp
+    src/app/MainWindow.h
+    src/app/MainWindow.cpp
     src/app/DemoModelIds.h
     src/app/ModelingController.h
     src/app/ModelingController.cpp
+    src/app/CaptureController.h
+    src/app/CaptureController.cpp
+    src/app/ProjectPaths.h
+    src/app/ProjectPaths.cpp
+    src/app/ReconstructionController.h
+    src/app/ReconstructionController.cpp
     src/core/Scene.h
     src/core/Scene.cpp
     src/core/CameraController.h
     src/core/CameraController.cpp
+    src/core/OrbitCamera.h
+    src/core/OrbitCamera.cpp
     src/io/ModelLoader.h
+    src/io/PlyReader.h
+    src/io/PlyReader.cpp
+    src/io/CameraInfoBuilder.h
+    src/io/CameraInfoBuilder.cpp
     src/rendering/BodyActor.h
     src/rendering/BodyActor.cpp
+    src/rendering/PointCloudActor.h
+    src/rendering/PointCloudActor.cpp
     src/rendering/OcctShapeTessellator.h
     src/rendering/OcctShapeTessellator.cpp
-    src/widgets/VTKViewer.h
-    src/widgets/VTKViewer.cpp
-    src/widgets/ModelingPanel.h
-    src/widgets/ModelingPanel.cpp
-    src/widgets/ScenePanel.h
-    src/widgets/ScenePanel.cpp
-    src/widgets/PropertyPanel.h
-    src/widgets/PropertyPanel.cpp
-    src/widgets/CameraPanel.h
-    src/widgets/CameraPanel.cpp
-    src/widgets/RenderPanel.h
-    src/widgets/RenderPanel.cpp
+    src/ui/viewport/VTKViewer.h
+    src/ui/viewport/VTKViewer.cpp
+    src/ui/panels/ModelingPanel.h
+    src/ui/panels/ModelingPanel.cpp
+    src/ui/panels/ScenePanel.h
+    src/ui/panels/ScenePanel.cpp
+    src/ui/panels/PropertyPanel.h
+    src/ui/panels/PropertyPanel.cpp
+    src/ui/panels/CameraPanel.h
+    src/ui/panels/CameraPanel.cpp
+    src/ui/panels/CapturePanel.h
+    src/ui/panels/CapturePanel.cpp
+    src/ui/panels/ReconstructPanel.h
+    src/ui/panels/ReconstructPanel.cpp
+    src/ui/panels/RenderPanel.h
+    src/ui/panels/RenderPanel.cpp
 )
 
 target_include_directories(CadPointCloudClient PRIVATE src)

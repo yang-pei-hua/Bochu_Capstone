@@ -6,11 +6,13 @@
 #include <array>
 
 class CameraPanel;
+class CapturePanel;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QPushButton;
 class QTabWidget;
+class ReconstructPanel;
 class RenderPanel;
 
 class PropertyPanel final : public QWidget
@@ -22,6 +24,13 @@ public:
 
     CameraPanel* cameraPanel() const;
     RenderPanel* renderPanel() const;
+    CapturePanel* capturePanel() const;
+    ReconstructPanel* reconstructPanel() const;
+
+    void showCapturePanel(bool visible);
+    bool isCapturePanelVisible() const;
+    void showReconstructPanel(bool visible);
+    bool isReconstructPanelVisible() const;
 
 public slots:
     void showObjectProperties();
@@ -46,6 +55,8 @@ private:
     QWidget* m_objectTab = nullptr;
     CameraPanel* m_cameraPanel = nullptr;
     RenderPanel* m_renderPanel = nullptr;
+    CapturePanel* m_capturePanel = nullptr;
+    ReconstructPanel* m_reconstructPanel = nullptr;
 
     std::array<QDoubleSpinBox*, 3> m_position{};
     std::array<QDoubleSpinBox*, 3> m_rotation{};

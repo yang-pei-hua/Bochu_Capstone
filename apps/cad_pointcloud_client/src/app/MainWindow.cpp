@@ -1,33 +1,36 @@
-#include "MainWindow.h"
+#include "app/MainWindow.h"
 
+#include "app/CaptureController.h"
+#include "app/ProjectPaths.h"
+#include "app/ReconstructionController.h"
 #include "core/CameraController.h"
 #include "io/ModelLoader.h"
-#include "widgets/CameraPanel.h"
-#include "widgets/ModelingPanel.h"
-#include "widgets/PropertyPanel.h"
-#include "widgets/RenderPanel.h"
-#include "widgets/ScenePanel.h"
-#include "widgets/VTKViewer.h"
+#include "ui/panels/CameraPanel.h"
+#include "ui/panels/CapturePanel.h"
+#include "ui/panels/ModelingPanel.h"
+#include "ui/panels/PropertyPanel.h"
+#include "ui/panels/ReconstructPanel.h"
+#include "ui/panels/RenderPanel.h"
+#include "ui/panels/ScenePanel.h"
+#include "ui/viewport/VTKViewer.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QDateTime>
 #include <QDockWidget>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFrame>
-#include <QHBoxLayout>
 #include <QLabel>
 #include <QKeySequence>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
-#include <QSignalBlocker>
 #include <QStatusBar>
 #include <QStyle>
 #include <QToolBar>
 #include <QToolButton>
-#include <QVBoxLayout>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -44,6 +47,9 @@ MainWindow::MainWindow(QWidget* parent)
     createCentralArea();
     createDockPanels();
     createStatusBar();
+    createModelingController();
+    createCaptureController();
+    createReconstructionController();
     connectUi();
     applyDarkTheme();
 
@@ -53,7 +59,6 @@ MainWindow::MainWindow(QWidget* parent)
     logInfo(tr("Application started"));
     logInfo(tr("VTK renderer initialized"));
 
-    createModelingController();
     generateDemoModel(m_modelingPanel->parameters());
 }
 
@@ -64,6 +69,71 @@ void MainWindow::createModelingController()
             this, &MainWindow::onModelRebuilt);
     connect(m_modelingController, &ModelingController::modelError,
             this, &MainWindow::onModelError);
+}
+
+void MainWindow::createCaptureController()
+{
+    m_captureController = new CaptureController(m_viewer, this);
+
+    // The panel shows the directory the controller will actually write to, and
+    // seeds its orbit distance from wherever the camera currently sits.
+    CapturePanel* capturePanel = m_propertyPanel->capturePanel();
+    capturePanel->setBaseDirectory(m_captureController->baseDirectory());
+    capturePanel->setDefaultDistance(m_captureController->currentDistance());
+}
+
+void MainWindow::createReconstructionController()
+{
+    m_reconstructionController = new ReconstructionController(this);
+
+    // "Use Latest Capture" has to know where captures land, which only the
+    // capture controller decides; the panel just mirrors it.
+    m_propertyPanel->reconstructPanel()->setCaptureBaseDirectory(
+        m_captureController->baseDirectory());
+}
+
+void MainWindow::startReconstruction(const ReconstructRequest& request)
+{
+    ReconstructPanel* panel = m_propertyPanel->reconstructPanel();
+    panel->setBusy(true);
+    if (!m_reconstructionController->start(request)) {
+        panel->setBusy(false);
+        const QString error = m_reconstructionController->lastError();
+        logError(error);
+        QMessageBox::warning(this, tr("Point Cloud Reconstruction"), error);
+    }
+}
+
+void MainWindow::onReconstructionFinished(const QString& pointCloudPath, int pointCount,
+                                          const QString& cameraMode, bool dense)
+{
+    ReconstructPanel* panel = m_propertyPanel->reconstructPanel();
+    panel->setBusy(false);
+
+    QString error;
+    if (!m_viewer->loadPointCloud(pointCloudPath, error)) {
+        logError(error);
+        panel->setStatusText(error);
+        QMessageBox::warning(this, tr("Point Cloud Reconstruction"), error);
+        return;
+    }
+
+    m_viewer->resetCameraToPointCloud();
+    m_scenePanel->updateNodeLabel(
+        SceneNodeType::PointCloud,
+        QStringLiteral("%1 (%2 points)").arg(QFileInfo(pointCloudPath).fileName()).arg(pointCount));
+
+    panel->setStatusText(tr("Point cloud loaded: %1 points (%2)")
+                             .arg(pointCount)
+                             .arg(dense ? tr("dense") : tr("sparse")));
+    // Fixed wording: the UI automation script asserts on this exact line.
+    logInfo(tr("Point Cloud loaded: %1 points").arg(pointCount));
+
+    if (cameraMode == QStringLiteral("estimated")) {
+        logWarning(tr("Camera poses were estimated by COLMAP; the point cloud "
+                      "scale is arbitrary until a reconstruction with capture "
+                      "metadata is available."));
+    }
 }
 
 void MainWindow::generateDemoModel(const DemoModelParameters& parameters)
@@ -130,6 +200,14 @@ void MainWindow::createActions()
 {
     m_openAction = new QAction(style()->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Model"), this);
     m_openAction->setShortcut(QKeySequence::Open);
+    // A cloud produced elsewhere (or by an earlier reconstruction run) can be
+    // inspected without going through the pipeline again.
+    m_openPointCloudAction = new QAction(tr("Open Point Cloud..."), this);
+    m_openPointCloudAction->setToolTip(tr("Load a .ply point cloud into the viewport"));
+    // Capturing the current viewport is the data-generation step of the
+    // pipeline, so it sits right next to Open Model in the toolbar.
+    m_captureAction = new QAction(tr("Capture Image"), this);
+    m_captureAction->setToolTip(tr("Save the current viewport as a PNG"));
     m_closeAction = new QAction(tr("Close Model"), this);
     m_saveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Save"), this);
     m_saveAction->setShortcut(QKeySequence::Save);
@@ -144,16 +222,20 @@ void MainWindow::createActions()
     m_topViewAction = new QAction(tr("Top View"), this);
     m_bottomViewAction = new QAction(tr("Bottom View"), this);
 
-    m_projectionAction = new QAction(tr("Orthographic"), this);
-    m_projectionAction->setCheckable(true);
-    m_projectionAction->setToolTip(tr("Toggle Perspective / Orthographic"));
-    m_captureAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Capture Image"), this);
+    m_captureToolAction = new QAction(tr("Capture"), this);
+    m_captureToolAction->setCheckable(true);
+    m_captureToolAction->setToolTip(tr("Show the capture panel in Properties"));
+
+    m_reconstructToolAction = new QAction(tr("点云重建"), this);
+    m_reconstructToolAction->setCheckable(true);
+    m_reconstructToolAction->setToolTip(tr("Reconstruct a point cloud from multi-view images"));
 }
 
 void MainWindow::createMenus()
 {
     QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
     fileMenu->addAction(m_openAction);
+    fileMenu->addAction(m_openPointCloudAction);
     fileMenu->addAction(m_closeAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_saveAction);
@@ -167,8 +249,8 @@ void MainWindow::createMenus()
                           m_rightViewAction, m_topViewAction, m_bottomViewAction});
 
     QMenu* toolsMenu = menuBar()->addMenu(tr("&Tools"));
-    QAction* placeholder = toolsMenu->addAction(tr("Reserved for future tools"));
-    placeholder->setEnabled(false);
+    toolsMenu->addAction(m_captureToolAction);
+    toolsMenu->addAction(m_reconstructToolAction);
 
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
     QAction* aboutAction = helpMenu->addAction(tr("About"));
@@ -181,66 +263,28 @@ void MainWindow::createToolBar()
     toolBar->setObjectName(QStringLiteral("mainToolBar"));
     toolBar->setMovable(true);
     toolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    // The toolbar carries the whole pipeline: load a model, generate the data
+    // by capturing images, then the stages reserved for later versions.
     toolBar->addAction(m_openAction);
     toolBar->addSeparator();
-    toolBar->addAction(m_resetCameraAction);
-    toolBar->addAction(m_frontViewAction);
-    toolBar->addAction(m_topViewAction);
-    QAction* sideViewAction = toolBar->addAction(tr("Side View"));
-    connect(sideViewAction, &QAction::triggered, m_rightViewAction, &QAction::trigger);
-    toolBar->addSeparator();
-    toolBar->addAction(m_projectionAction);
-    toolBar->addSeparator();
     toolBar->addAction(m_captureAction);
+    toolBar->addAction(m_reconstructToolAction);
+
+    const QStringList reservedStages{tr("几何拟合"), tr("AI 修改")};
+    for (const QString& stage : reservedStages) {
+        auto* button = new QToolButton(toolBar);
+        button->setText(stage);
+        button->setEnabled(false);
+        button->setToolTip(tr("Reserved for a future version"));
+        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        toolBar->addWidget(button);
+    }
 }
 
 void MainWindow::createCentralArea()
 {
-    auto* central = new QWidget(this);
-    auto* layout = new QVBoxLayout(central);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-    layout->addWidget(createPipelineBar());
-
-    m_viewer = new VTKViewer(central);
-    layout->addWidget(m_viewer, 1);
-    setCentralWidget(central);
-}
-
-QWidget* MainWindow::createPipelineBar()
-{
-    auto* bar = new QFrame(this);
-    bar->setObjectName(QStringLiteral("pipelineBar"));
-    bar->setFixedHeight(54);
-    auto* layout = new QHBoxLayout(bar);
-    layout->setContentsMargins(14, 7, 14, 7);
-    layout->setSpacing(2);
-
-    const QStringList stages{
-        tr("1  数据生成"), tr("2  点云重建"), tr("3  几何拟合"), tr("4  AI 修改")};
-
-    for (int index = 0; index < stages.size(); ++index) {
-        auto* button = new QToolButton(bar);
-        button->setText(stages[index]);
-        button->setCheckable(true);
-        button->setChecked(index == 0);
-        button->setEnabled(index == 0);
-        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        button->setMinimumWidth(135);
-        if (index > 0) {
-            button->setToolTip(tr("Reserved for a future version"));
-        }
-        layout->addWidget(button);
-        if (index < stages.size() - 1) {
-            auto* arrow = new QLabel(QStringLiteral("›"), bar);
-            arrow->setObjectName(QStringLiteral("pipelineArrow"));
-            arrow->setAlignment(Qt::AlignCenter);
-            arrow->setFixedWidth(18);
-            layout->addWidget(arrow);
-        }
-    }
-    layout->addStretch();
-    return bar;
+    m_viewer = new VTKViewer(this);
+    setCentralWidget(m_viewer);
 }
 
 void MainWindow::createDockPanels()
@@ -258,7 +302,7 @@ void MainWindow::createDockPanels()
     propertyDock->setObjectName(QStringLiteral("propertyDock"));
     propertyDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     propertyDock->setWidget(m_propertyPanel);
-    propertyDock->setMinimumWidth(350);
+    propertyDock->setMinimumWidth(400);
     addDockWidget(Qt::RightDockWidgetArea, propertyDock);
 
     m_console = new QPlainTextEdit(this);
@@ -294,10 +338,11 @@ void MainWindow::createStatusBar()
 void MainWindow::connectUi()
 {
     connect(m_openAction, &QAction::triggered, this, &MainWindow::openModel);
+    connect(m_openPointCloudAction, &QAction::triggered, this, &MainWindow::openPointCloud);
+    connect(m_captureAction, &QAction::triggered, this, &MainWindow::captureImage);
     connect(m_closeAction, &QAction::triggered, this, &MainWindow::closeModel);
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::saveProject);
     connect(m_exitAction, &QAction::triggered, qApp, &QApplication::closeAllWindows);
-    connect(m_captureAction, &QAction::triggered, this, &MainWindow::captureImage);
 
     connect(m_resetCameraAction, &QAction::triggered, this, [this]() {
         m_viewer->resetCamera();
@@ -327,12 +372,6 @@ void MainWindow::connectUi()
         m_viewer->setStandardView(CameraController::StandardView::Bottom);
         logInfo(tr("Bottom view selected"));
     });
-    connect(m_projectionAction, &QAction::toggled, this, [this](bool orthographic) {
-        m_viewer->setParallelProjection(orthographic);
-        m_projectionAction->setText(orthographic ? tr("Perspective") : tr("Orthographic"));
-        updateCameraStatus(orthographic);
-    });
-
     connect(m_modelingPanel, &ModelingPanel::generateRequested,
             this, &MainWindow::generateDemoModel);
     connect(m_modelingPanel, &ModelingPanel::applyRequested, this, [this](const DemoModelParameters& parameters) {
@@ -353,6 +392,11 @@ void MainWindow::connectUi()
             m_propertyPanel->showObjectProperties();
         } else if (type == SceneNodeType::Camera) {
             m_propertyPanel->showCameraProperties();
+        } else if (type == SceneNodeType::PointCloud) {
+            // The point cloud has no properties of its own yet, so selecting it
+            // surfaces the panel that produces one.
+            m_propertyPanel->showReconstructPanel(true);
+            m_reconstructToolAction->setChecked(true);
         }
     });
 
@@ -372,9 +416,6 @@ void MainWindow::connectUi()
     connect(cameraPanel, &CameraPanel::resetRequested, m_resetCameraAction, &QAction::trigger);
     connect(m_viewer, &VTKViewer::cameraChanged, this, [this, cameraPanel](const CameraParameters& parameters) {
         cameraPanel->setParameters(parameters);
-        const QSignalBlocker blocker(m_projectionAction);
-        m_projectionAction->setChecked(parameters.parallelProjection);
-        m_projectionAction->setText(parameters.parallelProjection ? tr("Perspective") : tr("Orthographic"));
         updateCameraStatus(parameters.parallelProjection);
     });
 
@@ -384,6 +425,88 @@ void MainWindow::connectUi()
     connect(renderPanel, &RenderPanel::lightingChanged,
             m_viewer, &VTKViewer::setLightingEnabled);
     connect(renderPanel, &RenderPanel::captureRequested, this, &MainWindow::captureImage);
+
+    CapturePanel* capturePanel = m_propertyPanel->capturePanel();
+    connect(m_captureToolAction, &QAction::toggled, this, [this](bool visible) {
+        m_propertyPanel->showCapturePanel(visible);
+    });
+    connect(capturePanel, &CapturePanel::baseDirectoryChanged,
+            m_captureController, &CaptureController::setBaseDirectory);
+    connect(capturePanel, &CapturePanel::capturePhotoRequested,
+            this, &MainWindow::capturePhoto);
+    connect(capturePanel, &CapturePanel::captureOrbitRequested,
+            this, &MainWindow::captureOrbit);
+
+    connect(m_captureController, &CaptureController::shotsChanged, this, [this, capturePanel]() {
+        capturePanel->setShots(m_captureController->shots());
+    });
+    connect(m_captureController, &CaptureController::progressChanged,
+            this, [this, capturePanel](const QString& message) {
+                capturePanel->setStatusText(message);
+                statusBar()->showMessage(message, 4000);
+            });
+    connect(m_captureController, &CaptureController::batchStateChanged,
+            this, [this, capturePanel](bool running) {
+                capturePanel->setBusy(running);
+                // The orbit sweep drives the camera directly, so the panel must
+                // stop echoing it back while the batch owns the pose.
+                m_propertyPanel->cameraPanel()->setFeedbackSuppressed(running);
+                if (running) {
+                    capturePanel->setStatusText(tr("Capturing orbit..."));
+                } else {
+                    // The pose was restored while feedback was still suppressed,
+                    // so re-read the live camera instead of trusting the stale
+                    // readout to happen to match.
+                    m_propertyPanel->cameraPanel()->setParameters(m_viewer->cameraParameters());
+                }
+            });
+    connect(m_captureController, &CaptureController::captureFailed,
+            this, [this](const QString& message) {
+                logError(message);
+                QMessageBox::warning(this, tr("Capture"), message);
+            });
+
+    ReconstructPanel* reconstructPanel = m_propertyPanel->reconstructPanel();
+    connect(m_reconstructToolAction, &QAction::toggled, this, [this](bool visible) {
+        m_propertyPanel->showReconstructPanel(visible);
+    });
+    connect(capturePanel, &CapturePanel::baseDirectoryChanged,
+            reconstructPanel, &ReconstructPanel::setCaptureBaseDirectory);
+    connect(reconstructPanel, &ReconstructPanel::reconstructRequested,
+            this, &MainWindow::startReconstruction);
+    connect(reconstructPanel, &ReconstructPanel::cancelRequested,
+            m_reconstructionController, &ReconstructionController::cancel);
+
+    connect(m_reconstructionController, &ReconstructionController::started,
+            this, [this, reconstructPanel](const QString& runDirectory, const QString& cameraModeHint) {
+                reconstructPanel->setStatusText(cameraModeHint);
+                logInfo(tr("Reconstruction started in %1").arg(runDirectory));
+            });
+    connect(m_reconstructionController, &ReconstructionController::progressChanged,
+            this, [this, reconstructPanel](int stage, int totalStages, const QString& label) {
+                reconstructPanel->setProgress(stage, totalStages);
+                reconstructPanel->setStatusText(
+                    tr("Stage %1/%2: %3").arg(stage).arg(totalStages).arg(label));
+                statusBar()->showMessage(tr("Reconstruction %1/%2: %3")
+                                             .arg(stage).arg(totalStages).arg(label), 4000);
+            });
+    connect(m_reconstructionController, &ReconstructionController::logMessage,
+            this, &MainWindow::logInfo);
+    connect(m_reconstructionController, &ReconstructionController::failed,
+            this, [this, reconstructPanel](const QString& message) {
+                reconstructPanel->setBusy(false);
+                reconstructPanel->setStatusText(message);
+                if (m_reconstructionController->wasCancelled()) {
+                    // The user asked for this, so it is a state change rather
+                    // than a fault worth interrupting them with a dialog.
+                    logWarning(message);
+                    return;
+                }
+                logError(message);
+                QMessageBox::warning(this, tr("Point Cloud Reconstruction"), message);
+            });
+    connect(m_reconstructionController, &ReconstructionController::finished,
+            this, &MainWindow::onReconstructionFinished);
 }
 
 void MainWindow::openModel()
@@ -404,6 +527,37 @@ void MainWindow::openModel()
     logWarning(tr("Loader interface reserved; '%1' is not parsed in this skeleton.").arg(info.fileName()));
 }
 
+void MainWindow::openPointCloud()
+{
+    // A cloud on disk carries no capture metadata, so no scale warning applies;
+    // the file is read straight into the same actor the pipeline feeds.
+    const QString filePath = QFileDialog::getOpenFileName(
+        this, tr("Open Point Cloud"), ProjectPaths::outputsRoot(),
+        tr("Point Cloud Files (*.ply)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    QString error;
+    if (!m_viewer->loadPointCloud(filePath, error)) {
+        logError(error);
+        QMessageBox::warning(this, tr("Open Point Cloud"), error);
+        return;
+    }
+
+    const QFileInfo info(filePath);
+    const int pointCount = m_viewer->pointCloudPointCount();
+    m_viewer->resetCameraToPointCloud();
+    m_scenePanel->updateNodeLabel(
+        SceneNodeType::PointCloud,
+        QStringLiteral("%1 (%2 points)").arg(info.fileName()).arg(pointCount));
+    m_statusLabel->setText(tr("Ready | Point Cloud: %1 | Camera: %2")
+                               .arg(info.fileName(),
+                                    m_viewer->cameraParameters().parallelProjection
+                                        ? tr("Orthographic") : tr("Perspective")));
+    logInfo(tr("Point cloud loaded from %1: %2 points").arg(info.fileName()).arg(pointCount));
+}
+
 void MainWindow::closeModel()
 {
     m_viewer->setObjectVisible(false);
@@ -421,8 +575,19 @@ void MainWindow::saveProject()
 
 void MainWindow::captureImage()
 {
+    // A single-frame capture is named after the moment it was taken and offered
+    // inside the project's outputs folder; a relative default would resolve
+    // against the process working directory and could land outside the project.
+    // The folder is created up front because the save dialog cannot start in a
+    // directory that does not exist yet.
+    const QString screenshotsRoot = ProjectPaths::screenshotsRoot();
+    QDir().mkpath(screenshotsRoot);
+    const QString defaultPath = QDir(screenshotsRoot).filePath(
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"))
+        + QStringLiteral(".png"));
+
     QString filePath = QFileDialog::getSaveFileName(
-        this, tr("Capture Image"), QStringLiteral("viewport.png"), tr("PNG Image (*.png)"));
+        this, tr("Capture Image"), defaultPath, tr("PNG Image (*.png)"));
     if (filePath.isEmpty()) {
         return;
     }
@@ -437,6 +602,30 @@ void MainWindow::captureImage()
     } else {
         logError(tr("Failed to capture image: %1").arg(filePath));
         QMessageBox::warning(this, tr("Capture Image"), tr("The image could not be saved."));
+    }
+}
+
+void MainWindow::capturePhoto()
+{
+    const RenderPanel* renderPanel = m_propertyPanel->renderPanel();
+    if (m_captureController->captureSingle(renderPanel->outputWidth(),
+                                           renderPanel->outputHeight())) {
+        const CaptureShot& shot = m_captureController->shots().back();
+        logInfo(tr("Photo captured: %1/%2").arg(shot.groupName, shot.imageName));
+    }
+}
+
+void MainWindow::captureOrbit(int count, double elevationDeg, double distance)
+{
+    const RenderPanel* renderPanel = m_propertyPanel->renderPanel();
+    const std::size_t before = m_captureController->shots().size();
+    if (m_captureController->captureOrbit(count, elevationDeg, distance,
+                                          renderPanel->outputWidth(),
+                                          renderPanel->outputHeight())) {
+        const std::size_t captured = m_captureController->shots().size() - before;
+        logInfo(tr("Orbit capture finished: %1 photos at %2 degrees elevation")
+                    .arg(captured)
+                    .arg(elevationDeg, 0, 'f', 1));
     }
 }
 
@@ -471,8 +660,6 @@ void MainWindow::applyDarkTheme()
         QToolButton:pressed, QPushButton:pressed { background: #2d638f; }
         QToolButton:checked { background: #315f86; border-color: #4f91c7; }
         QToolButton:disabled { color: #777b82; background: #292b2f; }
-        #pipelineBar { background: #202226; border-bottom: 1px solid #454951; }
-        #pipelineArrow { color: #777c84; font-size: 20px; }
         QDockWidget { color: #e2e3e5; }
         QDockWidget::title { background: #303339; padding: 6px; border-bottom: 1px solid #474b52; }
         QTreeWidget, QPlainTextEdit, QTabWidget::pane { background: #202226; border: 1px solid #41444a; }
