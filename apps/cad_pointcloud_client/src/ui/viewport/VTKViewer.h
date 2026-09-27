@@ -16,6 +16,7 @@
 #include <vtkSmartPointer.h>
 
 #include <optional>
+#include <string>
 
 class TopoDS_Shape;
 class vtkAxesActor;
@@ -62,6 +63,17 @@ public:
     bool hasPointCloud() const noexcept;
     int pointCloudPointCount() const noexcept;
     void resetCameraToPointCloud();
+
+    // Texture projection. The image is cast onto the body from one direction
+    // instead of being unwrapped onto it, so any picture lands on any model
+    // without an authoring step. Axis 0 lets the body pick the direction, 1/2/3
+    // pin it to X/Y/Z.
+    bool loadBodyTexture(const QString& imagePath, QString& error);
+    void clearBodyTexture();
+    void setBodyTextureEnabled(bool enabled);
+    bool hasBodyTexture() const noexcept;
+    void setTextureProjection(int axis);
+    int textureProjection() const noexcept;
 
     // --- In-viewport modeling interaction ---
     //
@@ -143,6 +155,11 @@ signals:
     void sketchPointRequested(modeling::Point2D point);
     void sketchCancelled();
 
+    // The Delete key was pressed while a sketch is being edited. The viewer has
+    // no idea what is selected - the window owns the selection - so it only asks
+    // for the removal and lets the window resolve it.
+    void sketchDeleteRequested();
+
 private:
     static void onCameraModified(vtkObject* caller, unsigned long eventId,
                                  void* clientData, void* callData);
@@ -151,6 +168,7 @@ private:
     void onLeftButtonPressed(int x, int y);
     void onMouseMoved(int x, int y);
     void onCancelRequested();
+    void onKeyPressed(const std::string& keySym);
 
     bool sketchPointAt(int x, int y, modeling::Point2D& point);
     // Projection of a display position onto the sketch plane, snapped onto an
@@ -183,4 +201,9 @@ private:
     bool m_hasSketchPlane = false;
     sketchapp::PlaneFrame m_sketchPlane;
     std::optional<modeling::Point2D> m_draftAnchor;
+
+    // Editing aids, kept so captureImage() can put them back exactly as they
+    // were after taking them out of the photographed frame.
+    int m_highlightedFace = -1;
+    bool m_datumPlanesVisible = false;
 };

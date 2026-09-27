@@ -90,6 +90,9 @@ VTKViewer::VTKViewer(QWidget* parent)
     };
     m_interactorStyle->mouseMoved = [this](int x, int y) { onMouseMoved(x, y); };
     m_interactorStyle->cancelRequested = [this]() { onCancelRequested(); };
+    m_interactorStyle->keyPressed = [this](const std::string& keySym) {
+        onKeyPressed(keySym);
+    };
     m_renderWindow->GetInteractor()->SetInteractorStyle(m_interactorStyle);
 
     m_renderer->AddActor(m_bodyActor.surfaceActor());
@@ -233,18 +236,21 @@ bool VTKViewer::hasSketchVertexAt(const modeling::Point2D& point,
 
 void VTKViewer::highlightFace(int faceId)
 {
+    m_highlightedFace = faceId;
     m_bodyActor.highlightFace(faceId);
     renderNow();
 }
 
 void VTKViewer::clearFaceHighlight()
 {
+    m_highlightedFace = -1;
     m_bodyActor.clearHighlight();
     renderNow();
 }
 
 void VTKViewer::setDatumPlanesVisible(bool visible)
 {
+    m_datumPlanesVisible = visible;
     m_datumPlanes.setVisible(visible);
     renderNow();
 }
@@ -609,10 +615,34 @@ void VTKViewer::onCancelRequested()
     emit sketchCancelled();
 }
 
+void VTKViewer::onKeyPressed(const std::string& keySym)
+{
+    // Outside a sketch the Delete key means nothing here, so it stays unclaimed
+    // for whatever widget owns the focus.
+    if (!m_sketchInteraction) {
+        return;
+    }
+    if (keySym == "Delete") {
+        emit sketchDeleteRequested();
+    }
+}
+
 bool VTKViewer::captureImage(const QString& filePath, int width, int height)
 {
     if (filePath.isEmpty() || width <= 0 || height <= 0) {
         return false;
+    }
+
+    // A photo is of the model. The datum planes, the corner orientation marker
+    // and the face highlight are editing aids, so they are taken out of the frame
+    // for the write and put back exactly as they were, which keeps a capture
+    // usable as reconstruction input whatever the editor was showing.
+    const bool datumPlanesWereVisible = m_datumPlanesVisible;
+    const int highlightedFace = m_highlightedFace;
+    m_datumPlanes.setVisible(false);
+    m_bodyActor.clearHighlight();
+    if (m_orientationWidget) {
+        m_orientationWidget->SetEnabled(0);
     }
 
     renderNow();
@@ -634,7 +664,18 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     writer->SetFileName(nativePath.constData());
     writer->SetInputConnection(resize->GetOutputPort());
     writer->Write();
-    return writer->GetErrorCode() == 0;
+    const bool written = writer->GetErrorCode() == 0;
+
+    m_datumPlanes.setVisible(datumPlanesWereVisible);
+    if (highlightedFace >= 0) {
+        m_bodyActor.highlightFace(highlightedFace);
+    }
+    if (m_orientationWidget) {
+        m_orientationWidget->SetEnabled(1);
+    }
+    renderNow();
+
+    return written;
 }
 
 QSize VTKViewer::captureSourceSize() const
@@ -690,6 +731,43 @@ void VTKViewer::resetCameraToPointCloud()
     m_renderer->ResetCameraClippingRange();
     renderNow();
     emit cameraChanged(cameraParameters());
+}
+
+bool VTKViewer::loadBodyTexture(const QString& imagePath, QString& error)
+{
+    if (!m_bodyActor.setTextureFromFile(imagePath, error)) {
+        return false;
+    }
+    renderNow();
+    return true;
+}
+
+void VTKViewer::clearBodyTexture()
+{
+    m_bodyActor.clearTexture();
+    renderNow();
+}
+
+void VTKViewer::setBodyTextureEnabled(bool enabled)
+{
+    m_bodyActor.setTextureEnabled(enabled);
+    renderNow();
+}
+
+bool VTKViewer::hasBodyTexture() const noexcept
+{
+    return m_bodyActor.hasTexture();
+}
+
+void VTKViewer::setTextureProjection(int axis)
+{
+    m_bodyActor.setTextureProjection(axis);
+    renderNow();
+}
+
+int VTKViewer::textureProjection() const noexcept
+{
+    return m_bodyActor.textureProjection();
 }
 
 void VTKViewer::setPointCloudVisible(bool visible)

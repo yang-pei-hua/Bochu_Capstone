@@ -49,10 +49,6 @@ void ScenePanel::setScene(const Scene& scene)
     }
 
     m_tree->expandAll();
-    const auto modelItems = m_tree->findItems(QStringLiteral("Model"), Qt::MatchExactly | Qt::MatchRecursive);
-    if (!modelItems.isEmpty()) {
-        m_tree->setCurrentItem(modelItems.first());
-    }
 }
 
 bool ScenePanel::updateNodeLabel(SceneNodeType type, const QString& label)

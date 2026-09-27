@@ -5,6 +5,7 @@
 #include "app/ReconstructionController.h"
 #include "core/CameraController.h"
 #include "io/ModelLoader.h"
+#include "io/PointCloudAdapter.h"
 #include "ui/panels/CameraPanel.h"
 #include "ui/panels/CapturePanel.h"
 #include "ui/panels/ModelingPanel.h"
@@ -18,6 +19,7 @@
 #include "ui/viewport/VTKViewer.h"
 
 #include <modeling/SketchValidation.h>
+#include <reconstruction/BoxRecognizer.h>
 
 #include <QAction>
 #include <QApplication>
@@ -131,7 +133,11 @@ void MainWindow::onReconstructionFinished(const QString& pointCloudPath, int poi
         return;
     }
 
+    // The freshly built cloud is now what the recognized-model entry works on.
+    m_pointCloudPath = pointCloudPath;
+    m_reconstructCadAction->setEnabled(true);
     m_viewer->resetCameraToPointCloud();
+    syncCaptureDistance();
     m_scenePanel->updateNodeLabel(
         SceneNodeType::PointCloud,
         QStringLiteral("%1 (%2 points)").arg(QFileInfo(pointCloudPath).fileName()).arg(pointCount));
@@ -536,6 +542,21 @@ void MainWindow::onSketchEntityAdded(const modeling::SketchGeometry& geometry)
     logInfo(tr("Sketch entity %1 added").arg(createdId));
 }
 
+void MainWindow::deleteSelectedSketchEntity()
+{
+    if (!m_sketchMode) {
+        return;
+    }
+    // The keyboard acts on the same selection the Delete Entity button uses, so
+    // the two paths can never disagree about what is being removed.
+    const modeling::SketchEntityId id = m_sketchPanel->selectedEntityId();
+    if (id == modeling::kInvalidSketchEntityId) {
+        m_sketchPanel->setStatusText(tr("Select an entity to delete"));
+        return;
+    }
+    onSketchEntityRemoved(id);
+}
+
 void MainWindow::onSketchEntityRemoved(modeling::SketchEntityId entityId)
 {
     if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
@@ -713,6 +734,17 @@ void MainWindow::createActions()
     // inspected without going through the pipeline again.
     m_openPointCloudAction = new QAction(tr("Open Point Cloud..."), this);
     m_openPointCloudAction->setToolTip(tr("Load a .ply point cloud into the viewport"));
+    // Turning observations into a model is the second half of the pipeline, so
+    // it sits next to the loader and stays inert until a cloud exists.
+    m_reconstructCadAction = new QAction(tr("Reconstruct CAD"), this);
+    m_reconstructCadAction->setToolTip(
+        tr("Recognize a box in the loaded point cloud and add it to the model"));
+    m_reconstructCadAction->setEnabled(false);
+    // Texturing is a presentation step rather than a modeling one, so it sits
+    // next to the loading actions and appears as soon as a body exists.
+    m_textureAction = new QAction(tr("Apply Texture..."), this);
+    m_textureAction->setToolTip(
+        tr("Project an image onto the model without unwrapping it"));
     // Capturing the current viewport is the data-generation step of the
     // pipeline, so it sits right next to Open Model in the toolbar.
     m_captureAction = new QAction(tr("Capture Image"), this);
@@ -752,6 +784,8 @@ void MainWindow::createMenus()
     QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
     fileMenu->addAction(m_openAction);
     fileMenu->addAction(m_openPointCloudAction);
+    fileMenu->addAction(m_reconstructCadAction);
+    fileMenu->addAction(m_textureAction);
     fileMenu->addAction(m_closeAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_saveAction);
@@ -891,6 +925,8 @@ void MainWindow::connectUi()
 {
     connect(m_openAction, &QAction::triggered, this, &MainWindow::openModel);
     connect(m_openPointCloudAction, &QAction::triggered, this, &MainWindow::openPointCloud);
+    connect(m_reconstructCadAction, &QAction::triggered, this, &MainWindow::reconstructCad);
+    connect(m_textureAction, &QAction::triggered, this, &MainWindow::chooseTexture);
     connect(m_captureAction, &QAction::triggered, this, &MainWindow::captureImage);
     connect(m_closeAction, &QAction::triggered, this, &MainWindow::closeModel);
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::saveProject);
@@ -898,6 +934,9 @@ void MainWindow::connectUi()
 
     connect(m_resetCameraAction, &QAction::triggered, this, [this]() {
         m_viewer->resetCamera();
+        // Reset Camera is the framing the user has just chosen, so the orbit
+        // distance follows it instead of keeping whatever it held before.
+        syncCaptureDistance();
         logInfo(tr("Camera reset"));
     });
     connect(m_frontViewAction, &QAction::triggered, this, [this]() {
@@ -954,6 +993,8 @@ void MainWindow::connectUi()
     connect(m_viewer, &VTKViewer::sketchSelectionCleared,
             this, &MainWindow::onSketchSelectionCleared);
     connect(m_viewer, &VTKViewer::sketchCancelled, this, &MainWindow::onSketchCancelled);
+    connect(m_viewer, &VTKViewer::sketchDeleteRequested,
+            this, &MainWindow::deleteSelectedSketchEntity);
 
     connect(m_scenePanel, &ScenePanel::nodeSelected, this, [this](SceneNodeType type) {
         if (type == SceneNodeType::Model) {
@@ -993,6 +1034,21 @@ void MainWindow::connectUi()
     connect(renderPanel, &RenderPanel::lightingChanged,
             m_viewer, &VTKViewer::setLightingEnabled);
     connect(renderPanel, &RenderPanel::captureRequested, this, &MainWindow::captureImage);
+    // The texture controls only ask for a change; the dialog and the texture
+    // itself stay with the window and the viewport.
+    connect(renderPanel, &RenderPanel::textureBrowseRequested,
+            this, &MainWindow::chooseTexture);
+    connect(renderPanel, &RenderPanel::textureCleared, this, &MainWindow::clearTexture);
+    connect(renderPanel, &RenderPanel::textureEnabledChanged, this, [this](bool enabled) {
+        m_viewer->setBodyTextureEnabled(enabled);
+        logInfo(enabled ? tr("Texture display on") : tr("Texture display off"));
+    });
+    connect(renderPanel, &RenderPanel::textureProjectionChanged, this, [this](int axis) {
+        m_viewer->setTextureProjection(axis);
+        static const char* const labels[] = {"Auto", "X", "Y", "Z", "Per Face"};
+        logInfo(tr("Texture projection set to %1")
+                    .arg(QString::fromLatin1(labels[std::clamp(axis, 0, 4)])));
+    });
 
     CapturePanel* capturePanel = m_propertyPanel->capturePanel();
     connect(m_captureToolAction, &QAction::toggled, this, [this](bool visible) {
@@ -1115,7 +1171,12 @@ void MainWindow::openPointCloud()
 
     const QFileInfo info(filePath);
     const int pointCount = m_viewer->pointCloudPointCount();
+    // A cloud is now in the viewport, so the recognized-model entry becomes
+    // usable and works on this file.
+    m_pointCloudPath = filePath;
+    m_reconstructCadAction->setEnabled(true);
     m_viewer->resetCameraToPointCloud();
+    syncCaptureDistance();
     m_scenePanel->updateNodeLabel(
         SceneNodeType::PointCloud,
         QStringLiteral("%1 (%2 points)").arg(info.fileName()).arg(pointCount));
@@ -1124,6 +1185,106 @@ void MainWindow::openPointCloud()
                                     m_viewer->cameraParameters().parallelProjection
                                         ? tr("Orthographic") : tr("Perspective")));
     logInfo(tr("Point cloud loaded from %1: %2 points").arg(info.fileName()).arg(pointCount));
+}
+
+void MainWindow::reconstructCad()
+{
+    if (m_pointCloudPath.isEmpty()) {
+        logWarning(tr("Load a point cloud before reconstructing a model."));
+        statusBar()->showMessage(tr("No point cloud is loaded"), 3500);
+        return;
+    }
+
+    PlyCloud cloud;
+    QString error;
+    if (!PlyReader::read(m_pointCloudPath, cloud, error)) {
+        logError(error);
+        QMessageBox::warning(this, tr("Reconstruct CAD"), error);
+        return;
+    }
+
+    // The file carries no capture metadata, so the cloud's unit is unknown and
+    // is recorded as such; the tolerances below follow its size instead.
+    const reconstruction::PointStore points = PointCloudAdapter::toPointStore(
+        cloud, reconstruction::LengthUnit::Arbitrary);
+
+    reconstruction::BoxCandidate candidate;
+    std::string failure;
+    if (!reconstruction::reconstructBox(points, PointCloudAdapter::planeOptionsFor(cloud),
+                                        reconstruction::BoxRecognitionOptions{}, candidate,
+                                        failure)) {
+        // No box in the cloud is an ordinary outcome for an arbitrary scan, not
+        // an error, so it is reported in the log and the panel rather than in a
+        // dialog the user has to dismiss.
+        const QString message = tr("No box could be recognized in %1: %2")
+                                    .arg(QFileInfo(m_pointCloudPath).fileName(),
+                                         QString::fromStdString(failure));
+        logWarning(message);
+        m_modelingPanel->setStatusText(message);
+        statusBar()->showMessage(message, 5000);
+        return;
+    }
+
+    if (!m_modelingController->commitReconstructedBox(candidate)) {
+        const QString message = m_modelingController->lastError();
+        logError(message);
+        QMessageBox::warning(this, tr("Reconstruct CAD"), message);
+        return;
+    }
+
+    const modeling::BoxPrimitiveParams& box = candidate.primitive;
+    logInfo(tr("Reconstructed box: %1 x %2 x %3 at (%4, %5, %6), confidence %7")
+                .arg(box.sizeX, 0, 'f', 3)
+                .arg(box.sizeY, 0, 'f', 3)
+                .arg(box.sizeZ, 0, 'f', 3)
+                .arg(box.pose.origin.x, 0, 'f', 3)
+                .arg(box.pose.origin.y, 0, 'f', 3)
+                .arg(box.pose.origin.z, 0, 'f', 3)
+                .arg(candidate.confidence, 0, 'f', 3));
+    m_statusLabel->setText(tr("Ready | Model: Reconstructed Box | Camera: %1")
+                               .arg(m_viewer->cameraParameters().parallelProjection
+                                        ? tr("Orthographic") : tr("Perspective")));
+}
+
+void MainWindow::chooseTexture()
+{
+    if (!m_viewer->hasBody()) {
+        logWarning(tr("Model a body before projecting a texture onto it."));
+        statusBar()->showMessage(tr("Nothing to texture yet"), 3500);
+        return;
+    }
+
+    // Any picture will do: it is projected onto the body rather than unwrapped
+    // onto it, so no texture coordinates have to be authored first.
+    const QString filePath = QFileDialog::getOpenFileName(
+        this, tr("Apply Texture"), ProjectPaths::outputsRoot(),
+        tr("Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    QString error;
+    if (!m_viewer->loadBodyTexture(filePath, error)) {
+        logError(error);
+        QMessageBox::warning(this, tr("Apply Texture"), error);
+        return;
+    }
+
+    RenderPanel* renderPanel = m_propertyPanel->renderPanel();
+    renderPanel->setTexturePath(filePath);
+    renderPanel->setTextureEnabled(true);
+    const QString name = QFileInfo(filePath).fileName();
+    statusBar()->showMessage(tr("Texture projected from %1").arg(name), 4000);
+    logInfo(tr("Texture projected from %1").arg(name));
+}
+
+void MainWindow::clearTexture()
+{
+    m_viewer->clearBodyTexture();
+    RenderPanel* renderPanel = m_propertyPanel->renderPanel();
+    renderPanel->setTexturePath(QString());
+    renderPanel->setTextureEnabled(false);
+    logInfo(tr("Texture removed"));
 }
 
 void MainWindow::closeModel()
@@ -1183,11 +1344,20 @@ void MainWindow::capturePhoto()
     }
 }
 
-void MainWindow::captureOrbit(int count, double elevationDeg, double distance)
+void MainWindow::captureOrbit(int count, double elevationDeg, double distance,
+                              bool includeLower, double lowerElevationDeg)
 {
+    // Both rings share the requested count and distance; only the height they
+    // are shot from differs, so one group covers the sides and the under-side.
+    std::vector<OrbitRing> rings;
+    rings.push_back({count, elevationDeg});
+    if (includeLower) {
+        rings.push_back({count, lowerElevationDeg});
+    }
+
     const RenderPanel* renderPanel = m_propertyPanel->renderPanel();
     const std::size_t before = m_captureController->shots().size();
-    if (m_captureController->captureOrbit(count, elevationDeg, distance,
+    if (m_captureController->captureOrbit(rings, distance,
                                           renderPanel->outputWidth(),
                                           renderPanel->outputHeight())) {
         const std::size_t captured = m_captureController->shots().size() - before;
@@ -1195,6 +1365,12 @@ void MainWindow::captureOrbit(int count, double elevationDeg, double distance)
                     .arg(captured)
                     .arg(elevationDeg, 0, 'f', 1));
     }
+}
+
+void MainWindow::syncCaptureDistance()
+{
+    m_propertyPanel->capturePanel()->setDefaultDistance(
+        m_captureController->currentDistance());
 }
 
 void MainWindow::showAbout()

@@ -52,6 +52,36 @@ double residual(const PlaneEquation& plane, const Vec3& point) {
     return std::abs(math3::dot(plane.normal, point) + plane.offset);
 }
 
+Vec3 centroidOf(
+    const std::vector<PointSample>& points,
+    const std::vector<std::size_t>& indices) {
+    Vec3 centroid{};
+    for (const std::size_t index : indices) {
+        centroid = math3::add(centroid, points[index].position);
+    }
+    return math3::scale(
+        centroid, 1.0 / static_cast<double>(indices.size()));
+}
+
+bool isDuplicatePlane(
+    const PlaneEquation& candidate,
+    const Vec3& candidateCentroid,
+    const PlaneEquation& accepted,
+    const Vec3& acceptedCentroid,
+    const PlaneDetectionOptions& options) {
+    const double minimumNormalAlignment =
+        std::cos(options.duplicatePlaneAngularToleranceRadians);
+    if (std::abs(math3::dot(candidate.normal, accepted.normal)) <
+        minimumNormalAlignment) {
+        return false;
+    }
+
+    const double distanceTolerance = options.distanceThreshold *
+        options.duplicatePlaneDistanceMultiplier;
+    return residual(accepted, candidateCentroid) <= distanceTolerance &&
+        residual(candidate, acceptedCentroid) <= distanceTolerance;
+}
+
 }  // namespace
 
 bool detectPlanes(
@@ -68,7 +98,14 @@ bool detectPlanes(
     if (!std::isfinite(options.distanceThreshold) ||
         options.distanceThreshold <= 0.0 ||
         options.minimumSupportPoints < 3U || options.maximumPlanes == 0U ||
-        options.ransacIterations == 0U) {
+        options.ransacIterations == 0U ||
+        !std::isfinite(options.duplicatePlaneAngularToleranceRadians) ||
+        options.duplicatePlaneAngularToleranceRadians <= 0.0 ||
+        options.duplicatePlaneAngularToleranceRadians >=
+            1.5707963267948966 ||
+        !std::isfinite(options.duplicatePlaneDistanceMultiplier) ||
+        options.duplicatePlaneDistanceMultiplier < 1.0 ||
+        options.maximumCandidatePlaneMultiplier == 0U) {
         error = "Plane detection options are invalid";
         return false;
     }
@@ -79,8 +116,18 @@ bool detectPlanes(
         remaining[index] = index;
     }
     std::mt19937 generator(options.randomSeed);
+    std::vector<Vec3> acceptedCentroids;
+    const std::size_t maximumCandidatePlanes =
+        options.maximumPlanes >
+                std::numeric_limits<std::size_t>::max() /
+                    options.maximumCandidatePlaneMultiplier
+            ? std::numeric_limits<std::size_t>::max()
+            : options.maximumPlanes *
+                options.maximumCandidatePlaneMultiplier;
+    std::size_t candidatePlaneCount = 0U;
 
     while (output.size() < options.maximumPlanes &&
+           candidatePlaneCount < maximumCandidatePlanes &&
            remaining.size() >= options.minimumSupportPoints) {
         std::vector<std::size_t> bestInliers;
         double bestResidual = std::numeric_limits<double>::infinity();
@@ -147,6 +194,7 @@ bool detectPlanes(
             break;
         }
         refined = fitPlane(points, finalInliers);
+        ++candidatePlaneCount;
 
         PlaneEvidence evidence;
         evidence.id = static_cast<SurfaceId>(output.size() + 1U);
@@ -168,7 +216,24 @@ bool detectPlanes(
             1.0 - evidence.meanAbsoluteResidual / options.distanceThreshold,
             0.0,
             1.0);
-        output.push_back(std::move(evidence));
+
+        const Vec3 candidateCentroid = centroidOf(points, finalInliers);
+        bool duplicate = false;
+        for (std::size_t index = 0; index < output.size(); ++index) {
+            if (isDuplicatePlane(
+                    evidence.plane,
+                    candidateCentroid,
+                    output[index].plane,
+                    acceptedCentroids[index],
+                    options)) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) {
+            output.push_back(std::move(evidence));
+            acceptedCentroids.push_back(candidateCentroid);
+        }
 
         std::vector<bool> consumed(points.size(), false);
         for (const std::size_t index : finalInliers) {

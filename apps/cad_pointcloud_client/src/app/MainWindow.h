@@ -70,6 +70,7 @@ private:
     void onSketchCancelled();
 
     void onSketchEntityRemoved(modeling::SketchEntityId entityId);
+    void deleteSelectedSketchEntity();
     void onSketchEntityAdded(const modeling::SketchGeometry& geometry);
     void onSketchEntitySelected(modeling::SketchEntityId entityId);
     void onSketchEntitySelectionCleared();
@@ -94,11 +95,19 @@ private:
                                   const QString& cameraMode, bool dense);
     void openModel();
     void openPointCloud();
+    // Recognizes a box in the loaded cloud and commits it to the model.
+    void reconstructCad();
+    void chooseTexture();
+    void clearTexture();
     void closeModel();
     void saveProject();
     void captureImage();
     void capturePhoto();
-    void captureOrbit(int count, double elevationDeg, double distance);
+    void captureOrbit(int count, double elevationDeg, double distance,
+                      bool includeLower, double lowerElevationDeg);
+    // Re-seeds the orbit distance from the live camera so an orbit reframes the
+    // model exactly the way the last camera reset did.
+    void syncCaptureDistance();
     void showAbout();
     void updateCameraStatus(bool parallelProjection);
 
@@ -142,6 +151,7 @@ private:
 
     QAction* m_openAction = nullptr;
     QAction* m_openPointCloudAction = nullptr;
+    QAction* m_textureAction = nullptr;
     QAction* m_closeAction = nullptr;
     QAction* m_saveAction = nullptr;
     QAction* m_exitAction = nullptr;
@@ -156,4 +166,9 @@ private:
     QAction* m_newSketchAction = nullptr;
     QAction* m_captureToolAction = nullptr;
     QAction* m_reconstructToolAction = nullptr;
+    QAction* m_reconstructCadAction = nullptr;
+
+    // Cloud the "Reconstruct CAD" entry works on. It is the file last loaded
+    // into the viewport, whether it was opened directly or produced here.
+    QString m_pointCloudPath;
 };

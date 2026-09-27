@@ -6,6 +6,7 @@
 
 #include <vector>
 
+class QCheckBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
@@ -37,7 +38,10 @@ public:
 signals:
     void baseDirectoryChanged(const QString& directory);
     void capturePhotoRequested();
-    void captureOrbitRequested(int count, double elevationDeg, double distance);
+    // A second ring under the model can be added to the same group, which is what
+    // makes an orbit cover the underside as well as the sides.
+    void captureOrbitRequested(int count, double elevationDeg, double distance,
+                               bool includeLower, double lowerElevationDeg);
 
 private:
     void browseForDirectory();
@@ -49,6 +53,8 @@ private:
     QSpinBox* m_count = nullptr;
     QDoubleSpinBox* m_elevation = nullptr;
     QDoubleSpinBox* m_distance = nullptr;
+    QCheckBox* m_includeLower = nullptr;
+    QDoubleSpinBox* m_lowerElevation = nullptr;
     QPushButton* m_photoButton = nullptr;
     QPushButton* m_orbitButton = nullptr;
     QTreeWidget* m_shots = nullptr;

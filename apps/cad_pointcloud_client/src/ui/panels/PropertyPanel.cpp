@@ -54,8 +54,18 @@ PropertyPanel::PropertyPanel(QWidget* parent)
     , m_reconstructPanel(new ReconstructPanel(this))
     , m_sketchEntityPanel(new SketchEntityPanel(this))
 {
+    // The sketch editor is built detached from the tab widget, so it has to stay
+    // hidden until showSketchEntityPanel() inserts it. A child widget that is
+    // never laid out would otherwise float at the panel's top-left corner and
+    // paint its "No entity selected" line straight over the tab bar.
+    m_sketchEntityPanel->hide();
+
     m_objectTab = createObjectTab();
-    m_tabs->addTab(m_objectTab, tr("Object"));
+    // Like the sketch editor below, the Object page is built detached from the tab
+    // widget and only inserted once the Model node is picked; a child that is never
+    // laid out would float at the panel's top-left corner and paint its Transform
+    // and Display groups straight over the tab bar.
+    m_objectTab->hide();
     m_tabs->addTab(m_cameraPanel, tr("Camera"));
     m_tabs->addTab(m_renderPanel, tr("Render"));
     // Capture and Reconstruct are tools, not permanent tabs: they are inserted
@@ -152,6 +162,11 @@ bool PropertyPanel::isSketchEntityPanelVisible() const
 
 void PropertyPanel::showObjectProperties()
 {
+    // Inserting rather than switching: the page joins the tabs the first time the
+    // Model node is picked, and detaching keeps the transform fields across runs.
+    if (m_tabs->indexOf(m_objectTab) < 0) {
+        m_tabs->insertTab(0, m_objectTab, tr("Object"));
+    }
     m_tabs->setCurrentWidget(m_objectTab);
 }
 

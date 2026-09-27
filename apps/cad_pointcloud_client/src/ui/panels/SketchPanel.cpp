@@ -7,9 +7,11 @@
 #include <QDoubleValidator>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -149,6 +151,12 @@ SketchPanel::SketchPanel(QWidget* parent)
     outer->addWidget(m_status);
 
     connect(deleteButton, &QPushButton::clicked, this, &SketchPanel::deleteSelected);
+    // The Delete key is the keyboard equivalent of that button, but only while
+    // the list itself holds the focus: anywhere else in the window the key still
+    // has to edit text.
+    auto* deleteShortcut = new QShortcut(QKeySequence::Delete, m_entities);
+    deleteShortcut->setContext(Qt::WidgetShortcut);
+    connect(deleteShortcut, &QShortcut::activated, this, &SketchPanel::deleteSelected);
     connect(extrudeButton, &QPushButton::clicked, this, [this] {
         emit extrudeRequested(extrudeDepthValue(), m_extrudeReverse->isChecked(),
                               operationAt(m_extrudeOperation->currentIndex()));

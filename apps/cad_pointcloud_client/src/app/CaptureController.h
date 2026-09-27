@@ -21,6 +21,15 @@ struct CaptureShot
     double distance = 0.0;
 };
 
+// One elevation ring of an orbit: how many azimuth steps are taken and the
+// height they are taken from. A group usually holds one ring, but a second one
+// below the horizon lets the same group also see the under-side of the model.
+struct OrbitRing
+{
+    int count = 0;
+    double elevationDeg = 0.0;
+};
+
 // Turns camera poses into a folder of images plus machine-readable metadata.
 // The viewer stays the single source of truth for the camera; this class only
 // drives it, records what it saw, and restores the pose afterwards.
@@ -41,7 +50,9 @@ public:
     const QString& lastError() const noexcept;
 
     bool captureSingle(int width, int height);
-    bool captureOrbit(int count, double elevationDeg, double distance,
+    // Every ring lands in one timestamped group, with shot numbers and file
+    // names running on across the rings so the group stays a single sequence.
+    bool captureOrbit(const std::vector<OrbitRing>& rings, double distance,
                       int width, int height);
 
 signals:
@@ -58,6 +69,7 @@ private:
                       const CameraParameters& camera, int width, int height);
     bool writeManifest(const QString& directory, const QString& groupName,
                        const QString& mode, const OrbitParameters& orbit, bool hasOrbit,
+                       const std::vector<OrbitRing>& rings,
                        const std::vector<CaptureShot>& groupShots,
                        int width, int height);
 

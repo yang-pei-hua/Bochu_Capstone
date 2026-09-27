@@ -56,3 +56,14 @@ void SketchInteractorStyle::OnMouseMove()
     }
     vtkInteractorStyleTrackballCamera::OnMouseMove();
 }
+
+void SketchInteractorStyle::OnKeyPress()
+{
+    if (keyPressed == nullptr || this->Interactor == nullptr) {
+        return;
+    }
+    const char* keySym = this->Interactor->GetKeySym();
+    if (keySym != nullptr) {
+        keyPressed(std::string(keySym));
+    }
+}

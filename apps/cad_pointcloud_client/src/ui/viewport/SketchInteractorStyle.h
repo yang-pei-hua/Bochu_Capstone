@@ -3,6 +3,7 @@
 #include <vtkInteractorStyleTrackballCamera.h>
 
 #include <functional>
+#include <string>
 
 // SolidWorks-like navigation for the modeling viewport.
 //
@@ -22,6 +23,7 @@ public:
     void OnMiddleButtonDown() override;
     void OnRightButtonDown() override;
     void OnMouseMove() override;
+    void OnKeyPress() override;
 
     // Display-pixel position of the left-button press.
     std::function<void(int, int)> leftButtonPressed;
@@ -29,6 +31,9 @@ public:
     std::function<void(int, int)> mouseMoved;
     // The right button cancels the pending tool operation.
     std::function<void()> cancelRequested;
+    // VTK key symbol of a key pressed while the viewport has focus, such as
+    // "Delete". The style only reports it; the viewer decides what it means.
+    std::function<void(const std::string&)> keyPressed;
 
 protected:
     SketchInteractorStyle() = default;

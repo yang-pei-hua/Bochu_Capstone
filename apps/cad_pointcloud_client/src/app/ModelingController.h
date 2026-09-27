@@ -3,6 +3,7 @@
 #include <modeling/Feature.h>
 #include <modeling/ModelCommand.h>
 #include <modeling/ModelingCore.h>
+#include <reconstruction/ReconstructionCandidate.h>
 
 #include <TopoDS_Shape.hxx>
 
@@ -15,8 +16,9 @@
 // Front-end orchestration layer. It turns UI intents into modeling commands and
 // publishes the resulting body; it contains no geometry code of its own.
 //
-// The document it owns starts empty: every feature is authored through the
-// sketch workflow, so the client never seeds geometry of its own.
+// The document it owns starts empty: a feature either comes from the sketch
+// workflow or from a recognized primitive, so the client never seeds geometry
+// of its own.
 class ModelingController final : public QObject
 {
     Q_OBJECT
@@ -45,6 +47,11 @@ public:
                  modeling::FeatureId& createdId);
     bool cut(modeling::FeatureId sketchId, double depth, bool throughAll, bool reverse,
              modeling::FeatureId& createdId);
+
+    // Commits a box recognized from observed points. Reconstruction is another
+    // author of the same feature graph, so it enters through the core's atomic
+    // patch boundary rather than through the sketch commands.
+    bool commitReconstructedBox(const reconstruction::BoxCandidate& candidate);
 
     // Deleting a feature that other features consume has to cascade, otherwise
     // the document can no longer rebuild. dependentsOf() is what the UI shows

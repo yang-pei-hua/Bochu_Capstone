@@ -3,6 +3,8 @@
 #include <modeling/FeatureParams.h>
 #include <modeling/Sketch.h>
 
+#include <reconstruction/ModelingAdapter.h>
+
 namespace {
 
 const TopoDS_Shape& nullShape()
@@ -103,6 +105,27 @@ bool ModelingController::cut(modeling::FeatureId sketchId, double depth, bool th
         return false;
     }
     return rebuildAndPublish();
+}
+
+bool ModelingController::commitReconstructedBox(const reconstruction::BoxCandidate& candidate)
+{
+    if (!m_core) {
+        return false;
+    }
+
+    // The patch carries rebuild = true, so the document is up to date as soon
+    // as it reports success; the UI follows from that alone.
+    const modeling::ModelPatchResult result =
+        reconstruction::commitBoxCandidate(candidate, *m_core);
+    if (!result.success) {
+        m_lastError = QString::fromStdString(result.error);
+        emit modelError(m_lastError);
+        return false;
+    }
+
+    m_lastError.clear();
+    emit modelRebuilt();
+    return true;
 }
 
 bool ModelingController::removeFeature(modeling::FeatureId id, bool cascade)

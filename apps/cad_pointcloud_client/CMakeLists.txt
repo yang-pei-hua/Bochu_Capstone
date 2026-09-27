@@ -30,6 +30,14 @@ add_subdirectory(
     "${CMAKE_CURRENT_BINARY_DIR}/cad_model_core"
 )
 
+# Point-cloud reconstruction is the bridge from observed points to the modeling
+# core. Its own test target is not built here: the client consumes the library.
+set(GEOMETRIC_RECONSTRUCTION_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../core/geometric_reconstruction"
+    "${CMAKE_CURRENT_BINARY_DIR}/geometric_reconstruction"
+)
+
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
 find_package(VTK REQUIRED COMPONENTS
     CommonCore
@@ -66,6 +74,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/core/SketchFrame.h
     src/core/SketchFrame.cpp
     src/io/ModelLoader.h
+    src/io/PointCloudAdapter.h
+    src/io/PointCloudAdapter.cpp
     src/io/PlyReader.h
     src/io/PlyReader.cpp
     src/io/CameraInfoBuilder.h
@@ -114,6 +124,7 @@ target_link_libraries(CadPointCloudClient PRIVATE
     Qt6::Widgets
     ${VTK_LIBRARIES}
     CadModelCore::CadModelCore
+    GeometricReconstruction::GeometricReconstruction
 )
 
 if(MSVC)

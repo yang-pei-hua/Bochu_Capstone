@@ -180,6 +180,82 @@ void testRotatedNoisyBoxWithOutliers(
     require(modeling::exportStep(core.bodyShape(), stepPath, &error), error);
 }
 
+void testDuplicateDepthLayersDoNotHideBoxFaces() {
+    std::vector<reconstruction::PointSample> samples;
+    reconstruction::PointId nextId = 1;
+    const auto addGrid = [&samples, &nextId](
+                             int firstCount,
+                             int secondCount,
+                             const auto& positionAt) {
+        for (int first = 0; first < firstCount; ++first) {
+            for (int second = 0; second < secondCount; ++second) {
+                samples.push_back({
+                    nextId++,
+                    positionAt(first, second),
+                    std::nullopt,
+                    1.0,
+                });
+            }
+        }
+    };
+
+    // The two Y faces deliberately dominate the cloud. Two lower-density
+    // depth layers sit just outside their RANSAC bands, while the real Z faces
+    // have still lower support. A raw six-candidate cutoff therefore misses Z.
+    for (const double y : {0.0, 30.0}) {
+        addGrid(41, 41, [y](int x, int z) {
+            return modeling::Vec3{1.25 * x, y, 0.5 * z};
+        });
+    }
+    for (const double x : {0.0, 50.0}) {
+        addGrid(21, 21, [x](int y, int z) {
+            return modeling::Vec3{x, 1.5 * y, static_cast<double>(z)};
+        });
+    }
+    for (const double y : {0.18, 29.82}) {
+        addGrid(16, 16, [y](int x, int z) {
+            return modeling::Vec3{
+                (50.0 / 15.0) * x,
+                y,
+                (20.0 / 15.0) * z,
+            };
+        });
+    }
+    for (const double z : {0.0, 20.0}) {
+        addGrid(11, 11, [z](int x, int y) {
+            return modeling::Vec3{5.0 * x, 3.0 * y, z};
+        });
+    }
+
+    const reconstruction::PointStore points(
+        std::move(samples), reconstruction::LengthUnit::Millimeter);
+    reconstruction::PlaneDetectionOptions planeOptions;
+    planeOptions.distanceThreshold = 0.08;
+    planeOptions.minimumSupportPoints = 80;
+    planeOptions.maximumPlanes = 6;
+    planeOptions.ransacIterations = 1600;
+    planeOptions.randomSeed = 19;
+
+    reconstruction::BoxCandidate candidate;
+    reconstruction::BoxRecognitionOptions boxOptions;
+    std::string error;
+    require(reconstruction::reconstructBox(
+                points, planeOptions, boxOptions, candidate, error),
+            error);
+    require(candidate.sourceSurfaces.size() == 6U,
+            "Duplicate depth layers must not consume physical face slots");
+
+    std::array<double, 3> dimensions{
+        candidate.primitive.sizeX,
+        candidate.primitive.sizeY,
+        candidate.primitive.sizeZ,
+    };
+    std::sort(dimensions.begin(), dimensions.end());
+    requireNear(dimensions[0], 20.0, 0.05, "layered box smallest dimension");
+    requireNear(dimensions[1], 30.0, 0.05, "layered box middle dimension");
+    requireNear(dimensions[2], 50.0, 0.05, "layered box largest dimension");
+}
+
 }  // namespace
 
 int main() {
@@ -187,6 +263,7 @@ int main() {
         testSyntheticBoxToCad(RECONSTRUCTION_TEST_OUTPUT_DIR);
         testRecognitionRequiresKnownScale();
         testRotatedNoisyBoxWithOutliers(RECONSTRUCTION_TEST_OUTPUT_DIR);
+        testDuplicateDepthLayersDoNotHideBoxFaces();
         std::cout << "Geometric reconstruction vertical-slice test passed.\n";
         return 0;
     } catch (const std::exception& exception) {

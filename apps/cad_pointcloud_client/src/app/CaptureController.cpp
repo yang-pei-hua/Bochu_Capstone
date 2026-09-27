@@ -168,7 +168,7 @@ bool CaptureController::captureSingle(int width, int height)
     // one directory's worth of shots.
     const std::vector<CaptureShot> group{shot};
     if (!writeManifest(directory, shot.groupName, QStringLiteral("single"), orbit, false,
-                       group, width, height)) {
+                       {}, group, width, height)) {
         emit captureFailed(m_lastError);
         return false;
     }
@@ -178,13 +178,23 @@ bool CaptureController::captureSingle(int width, int height)
     return true;
 }
 
-bool CaptureController::captureOrbit(int count, double elevationDeg, double distance,
+bool CaptureController::captureOrbit(const std::vector<OrbitRing>& rings, double distance,
                                      int width, int height)
 {
     if (m_viewer == nullptr || m_batchRunning) {
         return false;
     }
-    if (count < 1 || width <= 0 || height <= 0) {
+
+    int totalCount = 0;
+    for (const OrbitRing& ring : rings) {
+        if (ring.count < 1) {
+            m_lastError = tr("Capture count and output size must be positive");
+            emit captureFailed(m_lastError);
+            return false;
+        }
+        totalCount += ring.count;
+    }
+    if (totalCount < 1 || width <= 0 || height <= 0) {
         m_lastError = tr("Capture count and output size must be positive");
         emit captureFailed(m_lastError);
         return false;
@@ -203,49 +213,61 @@ bool CaptureController::captureOrbit(int count, double elevationDeg, double dist
     m_batchRunning = true;
     emit batchStateChanged(true);
 
-    const double step = 360.0 / static_cast<double>(count);
     const int firstIndex = static_cast<int>(m_shots.size());
     std::vector<CaptureShot> groupShots;
-    groupShots.reserve(static_cast<std::size_t>(count));
+    groupShots.reserve(static_cast<std::size_t>(totalCount));
 
     QString failure;
-    for (int i = 0; i < count; ++i) {
-        const double azimuth = step * static_cast<double>(i);
-        const OrbitParameters orbit{distance, azimuth, elevationDeg};
+    int taken = 0;
+    for (const OrbitRing& ring : rings) {
+        const double step = 360.0 / static_cast<double>(ring.count);
+        for (int i = 0; i < ring.count && failure.isEmpty(); ++i) {
+            const double azimuth = step * static_cast<double>(i);
+            const OrbitParameters orbit{distance, azimuth, ring.elevationDeg};
 
-        m_viewer->applyCamera(OrbitCamera::toCamera(orbit, original, true));
+            m_viewer->applyCamera(OrbitCamera::toCamera(orbit, original, true));
 
-        CaptureShot shot;
-        shot.index = firstIndex + i + 1;
-        shot.groupName = groupName;
-        shot.imageName = QStringLiteral("shot_%1.png").arg(i, 3, 10, QLatin1Char('0'));
-        shot.azimuthDeg = azimuth;
-        shot.elevationDeg = elevationDeg;
-        shot.distance = distance;
+            CaptureShot shot;
+            shot.index = firstIndex + taken + 1;
+            shot.groupName = groupName;
+            shot.imageName = QStringLiteral("shot_%1.png").arg(taken, 3, 10, QLatin1Char('0'));
+            shot.azimuthDeg = azimuth;
+            shot.elevationDeg = ring.elevationDeg;
+            shot.distance = distance;
 
-        const CameraParameters camera = m_viewer->cameraParameters();
-        if (!m_viewer->captureImage(directory + QLatin1Char('/') + shot.imageName, width, height)
-            || !writeSidecar(directory, shot, camera, width, height)) {
-            failure = tr("Failed to capture %1").arg(shot.imageName);
+            const CameraParameters camera = m_viewer->cameraParameters();
+            if (!m_viewer->captureImage(directory + QLatin1Char('/') + shot.imageName,
+                                        width, height)
+                || !writeSidecar(directory, shot, camera, width, height)) {
+                failure = tr("Failed to capture %1").arg(shot.imageName);
+                break;
+            }
+
+            ++taken;
+            m_shots.push_back(shot);
+            groupShots.push_back(shot);
+            emit shotsChanged();
+            emit progressChanged(tr("Capturing %1/%2").arg(taken).arg(totalCount));
+
+            // Rendering does not pump the event loop, so the progress label and
+            // shot list only repaint if events are flushed here. User input stays
+            // excluded so a click cannot re-enter this loop.
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        }
+        if (!failure.isEmpty()) {
             break;
         }
-
-        m_shots.push_back(shot);
-        groupShots.push_back(shot);
-        emit shotsChanged();
-        emit progressChanged(tr("Capturing %1/%2").arg(i + 1).arg(count));
-
-        // Rendering does not pump the event loop, so the progress label and shot
-        // list only repaint if events are flushed here. User input stays excluded
-        // so a click cannot re-enter this loop.
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     }
 
     m_viewer->applyCamera(original);
 
-    const OrbitParameters manifestOrbit{distance, 0.0, elevationDeg};
+    // The legacy "orbit" block keeps describing the first ring, which is what a
+    // single-ring run has always written; the rings array carries the rest.
+    const double firstElevation = rings.empty() ? 0.0 : rings.front().elevationDeg;
+    const OrbitParameters manifestOrbit{distance, 0.0, firstElevation};
     const bool manifestWritten = writeManifest(directory, groupName, QStringLiteral("orbit"),
-                                               manifestOrbit, true, groupShots, width, height);
+                                               manifestOrbit, true, rings, groupShots,
+                                               width, height);
 
     // Release the busy state before reporting, because the report opens a modal
     // dialog that runs a nested event loop.
@@ -304,7 +326,7 @@ bool CaptureController::writeSidecar(const QString& directory, const CaptureShot
 
 bool CaptureController::writeManifest(const QString& directory, const QString& groupName,
                                       const QString& mode, const OrbitParameters& orbit,
-                                      bool hasOrbit,
+                                      bool hasOrbit, const std::vector<OrbitRing>& rings,
                                       const std::vector<CaptureShot>& groupShots,
                                       int width, int height)
 {
@@ -327,15 +349,35 @@ bool CaptureController::writeManifest(const QString& directory, const QString& g
     root.insert(QStringLiteral("mode"), mode);
 
     if (hasOrbit) {
-        const double count = groupShots.empty() ? 0.0 : static_cast<double>(groupShots.size());
+        // The orbit block describes the first ring alone, so a run without the
+        // under-side keeps the exact shape it has always had; the rings array
+        // below is what distinguishes a two-ring group.
+        const int firstCount = rings.empty() ? static_cast<int>(groupShots.size())
+                                             : rings.front().count;
         QJsonObject orbitObject;
-        orbitObject.insert(QStringLiteral("count"), static_cast<int>(count));
+        orbitObject.insert(QStringLiteral("count"), firstCount);
         orbitObject.insert(QStringLiteral("startAzimuthDeg"), orbit.azimuthDeg);
         orbitObject.insert(QStringLiteral("stepAzimuthDeg"),
-                           count > 0.0 ? 360.0 / count : 0.0);
+                           firstCount > 0 ? 360.0 / firstCount : 0.0);
         orbitObject.insert(QStringLiteral("elevationDeg"), orbit.elevationDeg);
         orbitObject.insert(QStringLiteral("distance"), orbit.distance);
         root.insert(QStringLiteral("orbit"), orbitObject);
+
+        if (rings.size() > 1) {
+            QJsonArray ringArray;
+            int firstShot = 0;
+            for (const OrbitRing& ring : rings) {
+                QJsonObject entry;
+                entry.insert(QStringLiteral("count"), ring.count);
+                entry.insert(QStringLiteral("elevationDeg"), ring.elevationDeg);
+                entry.insert(QStringLiteral("startAzimuthDeg"), 0.0);
+                entry.insert(QStringLiteral("stepAzimuthDeg"), 360.0 / ring.count);
+                entry.insert(QStringLiteral("firstShotNumber"), firstShot + 1);
+                ringArray.append(entry);
+                firstShot += ring.count;
+            }
+            root.insert(QStringLiteral("rings"), ringArray);
+        }
     } else {
         root.insert(QStringLiteral("orbit"), QJsonValue::Null);
     }
