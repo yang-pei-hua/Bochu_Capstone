@@ -1,5 +1,6 @@
 #include "modeling/StepExporter.h"
 #include "reconstruction/AxisAlignedBoxRecognizer.h"
+#include "reconstruction/BoxRecognizer.h"
 #include "reconstruction/ModelingAdapter.h"
 #include "reconstruction/SyntheticPointCloud.h"
 
@@ -7,6 +8,8 @@
 #include <GProp_GProps.hxx>
 
 #include <cmath>
+#include <algorithm>
+#include <array>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -114,12 +117,76 @@ void testRecognitionRequiresKnownScale() {
             "Recognition must reject point clouds without a physical scale");
 }
 
+void testRotatedNoisyBoxWithOutliers(
+    const std::filesystem::path& outputDirectory) {
+    constexpr double kAngle = 0.5235987755982988;  // 30 degrees
+    reconstruction::SyntheticBoxRequest request;
+    request.box.pose.origin = modeling::Vec3{-12.0, 8.0, 4.0};
+    request.box.pose.xDirection =
+        modeling::Vec3{std::cos(kAngle), std::sin(kAngle), 0.0};
+    request.box.pose.zDirection = modeling::Vec3{
+        -0.25,
+        0.4330127018922193,
+        0.8660254037844386,
+    };
+    request.box.sizeX = 50.0;
+    request.box.sizeY = 30.0;
+    request.box.sizeZ = 20.0;
+    request.samplesPerEdge = 18;
+    request.gaussianNoiseSigma = 0.015;
+    request.outlierCount = 120;
+    request.randomSeed = 42;
+    const reconstruction::PointStore points =
+        reconstruction::makeSyntheticBoxSurface(request);
+
+    reconstruction::PlaneDetectionOptions planeOptions;
+    planeOptions.distanceThreshold = 0.07;
+    planeOptions.minimumSupportPoints = 180;
+    planeOptions.maximumPlanes = 6;
+    planeOptions.ransacIterations = 1200;
+    planeOptions.randomSeed = 7;
+    reconstruction::BoxRecognitionOptions boxOptions;
+    boxOptions.angularToleranceRadians = 0.05235987755982989;  // 3 degrees
+
+    reconstruction::BoxCandidate candidate;
+    std::string error;
+    require(reconstruction::reconstructBox(
+                points, planeOptions, boxOptions, candidate, error),
+            error);
+    require(candidate.sourceSurfaces.size() == 6U,
+            "General box reconstruction must recover six planes");
+    require(candidate.confidence > 0.65,
+            "Rotated noisy box should retain useful reconstruction confidence");
+
+    std::array<double, 3> dimensions{
+        candidate.primitive.sizeX,
+        candidate.primitive.sizeY,
+        candidate.primitive.sizeZ,
+    };
+    std::sort(dimensions.begin(), dimensions.end());
+    requireNear(dimensions[0], 20.0, 0.12, "rotated box smallest dimension");
+    requireNear(dimensions[1], 30.0, 0.12, "rotated box middle dimension");
+    requireNear(dimensions[2], 50.0, 0.12, "rotated box largest dimension");
+
+    modeling::ModelingCore core;
+    const modeling::ModelPatchResult committed =
+        reconstruction::commitBoxCandidate(candidate, core, 0);
+    require(committed.success, committed.error);
+    requireNear(volumeOf(core.bodyShape()), 30000.0, 250.0,
+                "rotated noisy reconstructed CAD volume");
+
+    const std::filesystem::path stepPath =
+        outputDirectory / "rotated_noisy_box.step";
+    require(modeling::exportStep(core.bodyShape(), stepPath, &error), error);
+}
+
 }  // namespace
 
 int main() {
     try {
         testSyntheticBoxToCad(RECONSTRUCTION_TEST_OUTPUT_DIR);
         testRecognitionRequiresKnownScale();
+        testRotatedNoisyBoxWithOutliers(RECONSTRUCTION_TEST_OUTPUT_DIR);
         std::cout << "Geometric reconstruction vertical-slice test passed.\n";
         return 0;
     } catch (const std::exception& exception) {

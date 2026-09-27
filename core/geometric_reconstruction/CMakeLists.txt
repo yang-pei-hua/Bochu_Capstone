@@ -17,7 +17,9 @@ endif()
 
 add_library(GeometricReconstruction
     src/AxisAlignedBoxRecognizer.cpp
+    src/BoxRecognizer.cpp
     src/ModelingAdapter.cpp
+    src/PlaneDetector.cpp
     src/PointStore.cpp
     src/SyntheticPointCloud.cpp
 )

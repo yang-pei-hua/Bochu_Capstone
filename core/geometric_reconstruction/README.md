@@ -8,8 +8,12 @@ parametric modeling core. It keeps three kinds of state separate:
 3. accepted semantic primitives committed to `ModelingCore` through an atomic
    `ModelPatch`.
 
-The first vertical slice intentionally recognizes one complete, axis-aligned,
-millimeter-scale box. It exists to validate the full contract:
+The baseline vertical slice recognizes one complete, axis-aligned,
+millimeter-scale box. The general path now adds deterministic plane RANSAC,
+covariance-based plane refinement, and parallel/perpendicular relation analysis
+to recover a fully oriented box from noisy observations with outliers.
+
+Both paths validate the same contract:
 
 ```text
 synthetic surface points
@@ -20,9 +24,13 @@ synthetic surface points
   -> STEP
 ```
 
-It does not infer an Extrude history. The next implementation step is to replace
-the limited recognizer with plane fitting plus relation analysis while keeping
-the candidate and evidence contracts stable.
+It does not infer an Extrude history. `AxisAlignedBoxRecognizer` remains as a
+small deterministic baseline; `reconstructBox()` is the current reconstruction
+entry point. Neither implementation depends on Qt, VTK, PCL, or client state.
+
+The next steps are partial-visibility handling, point-cloud component
+segmentation, and additional semantic primitives such as tetrahedra and
+cylinders.
 
 ## Build and test
 

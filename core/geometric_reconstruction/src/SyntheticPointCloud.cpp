@@ -1,6 +1,7 @@
 #include "reconstruction/SyntheticPointCloud.h"
 
 #include <cmath>
+#include <random>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -63,6 +64,13 @@ PointStore makeSyntheticBoxSurface(const SyntheticBoxRequest& request) {
         throw std::invalid_argument(
             "Synthetic box dimensions must be finite and positive");
     }
+    if (!std::isfinite(request.gaussianNoiseSigma) ||
+        request.gaussianNoiseSigma < 0.0 ||
+        !std::isfinite(request.outlierPaddingFraction) ||
+        request.outlierPaddingFraction < 0.0) {
+        throw std::invalid_argument(
+            "Synthetic noise and outlier padding must be finite and non-negative");
+    }
 
     const Vec3 xAxis = normalized(request.box.pose.xDirection);
     const Vec3 zAxis = normalized(request.box.pose.zDirection);
@@ -74,8 +82,10 @@ PointStore makeSyntheticBoxSurface(const SyntheticBoxRequest& request) {
     std::vector<PointSample> points;
     const std::size_t faceSamples =
         request.samplesPerEdge * request.samplesPerEdge;
-    points.reserve(6U * faceSamples);
+    points.reserve(6U * faceSamples + request.outlierCount);
     PointId nextId = 1;
+    std::mt19937 generator(request.randomSeed);
+    std::normal_distribution<double> noise(0.0, request.gaussianNoiseSigma);
 
     const auto addFace = [&](const Vec3& normal, auto makeLocalPoint) {
         for (std::size_t row = 0; row < request.samplesPerEdge; ++row) {
@@ -87,10 +97,15 @@ PointStore makeSyntheticBoxSurface(const SyntheticBoxRequest& request) {
                 const double u = static_cast<double>(column) /
                     static_cast<double>(request.samplesPerEdge - 1U);
                 const Vec3 local = makeLocalPoint(u, v);
+                Vec3 position = pointInFrame(
+                    request.box.pose, xAxis, yAxis, zAxis,
+                    local.x, local.y, local.z);
+                position.x += noise(generator);
+                position.y += noise(generator);
+                position.z += noise(generator);
                 points.push_back(PointSample{
                     nextId++,
-                    pointInFrame(request.box.pose, xAxis, yAxis, zAxis,
-                                 local.x, local.y, local.z),
+                    position,
                     normal,
                     1.0,
                 });
@@ -122,6 +137,26 @@ PointStore makeSyntheticBoxSurface(const SyntheticBoxRequest& request) {
                     v * request.box.sizeY,
                     request.box.sizeZ};
     });
+
+    const double paddingX = request.box.sizeX * request.outlierPaddingFraction;
+    const double paddingY = request.box.sizeY * request.outlierPaddingFraction;
+    const double paddingZ = request.box.sizeZ * request.outlierPaddingFraction;
+    std::uniform_real_distribution<double> outlierX(
+        -paddingX, request.box.sizeX + paddingX);
+    std::uniform_real_distribution<double> outlierY(
+        -paddingY, request.box.sizeY + paddingY);
+    std::uniform_real_distribution<double> outlierZ(
+        -paddingZ, request.box.sizeZ + paddingZ);
+    for (std::size_t index = 0; index < request.outlierCount; ++index) {
+        const Vec3 local{outlierX(generator), outlierY(generator), outlierZ(generator)};
+        points.push_back(PointSample{
+            nextId++,
+            pointInFrame(request.box.pose, xAxis, yAxis, zAxis,
+                         local.x, local.y, local.z),
+            std::nullopt,
+            0.25,
+        });
+    }
 
     return PointStore(std::move(points), LengthUnit::Millimeter);
 }
