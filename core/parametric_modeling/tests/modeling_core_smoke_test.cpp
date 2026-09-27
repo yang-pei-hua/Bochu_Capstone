@@ -386,6 +386,53 @@ void testSuppressionDependenciesCascadeAndClear() {
             "clear() should reset feature ID allocation");
 }
 
+void testDirectPrimitiveAndAtomicPatch(const std::filesystem::path& outputDirectory) {
+    ModelingCore core;
+    BoxPrimitiveParams box;
+    box.pose.origin = Vec3{10.0, 20.0, 30.0};
+    box.sizeX = 4.0;
+    box.sizeY = 5.0;
+    box.sizeZ = 6.0;
+
+    ModelPatch patch;
+    patch.expectedRevision = 0;
+    patch.commands.push_back(AddFeatureCommand{box});
+    const ModelPatchResult applied = core.apply(patch);
+    require(applied.success, applied.error);
+    require(applied.revision == 1U, "Successful patch must advance revision once");
+    require(core.features().size() == 1U,
+            "Primitive patch should commit one model-state node");
+    requireNear(volumeOf(core.bodyShape()), 120.0, 1.0e-6,
+                "Direct box primitive volume");
+
+    const Bounds bounds = boundsOf(core.bodyShape());
+    requireNear(bounds.xMin, 10.0, 1.0e-6, "primitive box minimum X");
+    requireNear(bounds.yMin, 20.0, 1.0e-6, "primitive box minimum Y");
+    requireNear(bounds.zMin, 30.0, 1.0e-6, "primitive box minimum Z");
+    requireNear(bounds.xMax, 14.0, 1.0e-6, "primitive box maximum X");
+    requireNear(bounds.yMax, 25.0, 1.0e-6, "primitive box maximum Y");
+    requireNear(bounds.zMax, 36.0, 1.0e-6, "primitive box maximum Z");
+    requireExport(core.bodyShape(), outputDirectory / "05_primitive_box.step");
+
+    ModelPatch invalid;
+    invalid.expectedRevision = core.revision();
+    invalid.commands.push_back(AddFeatureCommand{
+        ExtrudeFeatureParams{999999U, 5.0, false}});
+    const ModelPatchResult rejected = core.apply(invalid);
+    require(!rejected.success, "A patch with an unbuildable dependency must fail");
+    require(core.revision() == 1U, "Rejected patch must not advance revision");
+    require(core.features().size() == 1U,
+            "Rejected patch must restore the previous model state");
+    requireNear(volumeOf(core.bodyShape()), 120.0, 1.0e-6,
+                "Rejected patch must preserve derived geometry");
+
+    ModelPatch stale;
+    stale.expectedRevision = 0;
+    stale.commands.push_back(RemoveFeatureCommand{applied.affectedFeatures.front()});
+    require(!core.apply(stale).success,
+            "A patch based on a stale model revision must be rejected");
+}
+
 }  // namespace
 
 int main() {
@@ -402,6 +449,7 @@ int main() {
         testOffsetPlaneExtrudeOperationsAndReverseCut();
         testExplicitPlaneSketch();
         testSuppressionDependenciesCascadeAndClear();
+        testDirectPrimitiveAndAtomicPatch(outputDirectory);
         std::cout << "CadModelCore V0 smoke test passed. STEP output: "
                   << outputDirectory << '\n';
         return 0;

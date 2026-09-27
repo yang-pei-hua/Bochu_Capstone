@@ -34,6 +34,8 @@ coverage/
 /core/reconstruction/build/
 /core/parametric_modeling/build/
 /core/parametric_modeling/build-msvc/
+/core/geometric_reconstruction/build/
+/core/geometric_reconstruction/build-msvc/
 /deps/occt-8.0.1/
 /deps/vtk-9.7.0/
 /deps/colmap/

@@ -19,6 +19,7 @@ add_library(CadModelCore
     src/RebuildEngine.cpp
     src/SketchValidation.cpp
     src/StepExporter.cpp
+    src/occt/BoxBuilder.cpp
     src/occt/CutBuilder.cpp
     src/occt/ExtrudeBuilder.cpp
     src/occt/ShapeOps.cpp
@@ -76,4 +77,8 @@ if(CAD_MODEL_CORE_BUILD_TESTS)
     endif()
 
     add_test(NAME modeling_core_smoke_test COMMAND modeling_core_smoke_test)
+    set_tests_properties(modeling_core_smoke_test PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${OpenCASCADE_BINARY_DIR}"
+    )
 endif()

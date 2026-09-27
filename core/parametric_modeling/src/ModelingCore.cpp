@@ -1,10 +1,19 @@
 #include "modeling/ModelingCore.h"
 
 #include <type_traits>
+#include <utility>
 
 namespace modeling {
 
 ModelResult ModelingCore::execute(const ModelCommand& command) {
+    ModelResult result = executeOne(command);
+    if (result.success) {
+        ++revision_;
+    }
+    return result;
+}
+
+ModelResult ModelingCore::executeOne(const ModelCommand& command) {
     return std::visit(
         [this](const auto& concreteCommand) -> ModelResult {
             using Command = std::decay_t<decltype(concreteCommand)>;
@@ -50,6 +59,63 @@ ModelResult ModelingCore::execute(const ModelCommand& command) {
             }
         },
         command);
+}
+
+ModelPatchResult ModelingCore::apply(const ModelPatch& patch) {
+    if (patch.expectedRevision != kAnyModelRevision &&
+        patch.expectedRevision != revision_) {
+        return {
+            false,
+            revision_,
+            {},
+            "Model revision mismatch: expected " +
+                std::to_string(patch.expectedRevision) + ", current " +
+                std::to_string(revision_),
+        };
+    }
+
+    const PartDocument original = document_;
+    std::vector<FeatureId> affected;
+    affected.reserve(patch.commands.size());
+    for (const ModelCommand& command : patch.commands) {
+        const ModelResult result = executeOne(command);
+        if (!result.success) {
+            document_ = original;
+            return {false, revision_, {}, result.error};
+        }
+        affected.push_back(result.featureId);
+    }
+
+    if (patch.rebuild && !document_.rebuild()) {
+        const std::string error = document_.lastError();
+        document_ = original;
+        return {false, revision_, {}, error};
+    }
+
+    if (!patch.commands.empty()) {
+        ++revision_;
+    }
+    return {true, revision_, std::move(affected), {}};
+}
+
+bool ModelingCore::rebuild() {
+    return document_.rebuild();
+}
+
+ModelRevision ModelingCore::revision() const noexcept {
+    return revision_;
+}
+
+const std::vector<Feature>& ModelingCore::features() const noexcept {
+    return document_.features();
+}
+
+const TopoDS_Shape& ModelingCore::bodyShape() const noexcept {
+    return document_.bodyShape();
+}
+
+const std::string& ModelingCore::lastError() const noexcept {
+    return document_.lastError();
 }
 
 PartDocument& ModelingCore::document() noexcept {

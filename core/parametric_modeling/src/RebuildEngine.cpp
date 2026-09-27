@@ -33,6 +33,19 @@ struct ExtrudeBuildState {
 using DerivedFeatureState = std::variant<SketchBuildState, ExtrudeBuildState>;
 using DerivedStateMap = std::unordered_map<FeatureId, DerivedFeatureState>;
 
+void appendIndependentSolid(const TopoDS_Shape& solid, TopoDS_Shape& currentBody) {
+    if (currentBody.IsNull()) {
+        currentBody = solid;
+        return;
+    }
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    builder.Add(compound, currentBody);
+    builder.Add(compound, solid);
+    currentBody = compound;
+}
+
 bool resolvePlane(
     const SketchPlaneReference& reference,
     const DerivedStateMap& states,
@@ -143,16 +156,7 @@ bool applyExtrudeOperation(
     std::string& error) {
     try {
         if (params.operation == ExtrudeOperation::NewBody) {
-            if (currentBody.IsNull()) {
-                currentBody = tool;
-            } else {
-                BRep_Builder builder;
-                TopoDS_Compound compound;
-                builder.MakeCompound(compound);
-                builder.Add(compound, currentBody);
-                builder.Add(compound, tool);
-                currentBody = compound;
-            }
+            appendIndependentSolid(tool, currentBody);
             return true;
         }
         if (currentBody.IsNull()) {
@@ -314,6 +318,19 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
                 break;
             }
             currentBody = cutResult;
+            continue;
+        }
+        case FeatureType::BoxPrimitive: {
+            const auto* params = std::get_if<BoxPrimitiveParams>(&feature.params);
+            if (params == nullptr) {
+                error = "Feature parameter type does not match BoxPrimitive";
+                break;
+            }
+            TopoDS_Shape box;
+            if (!occt::buildBoxPrimitive(*params, box, error)) {
+                break;
+            }
+            appendIndependentSolid(box, currentBody);
             continue;
         }
         }

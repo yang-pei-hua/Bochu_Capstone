@@ -21,6 +21,10 @@ derived from that history by `PartDocument::rebuild()`.
   face when an upstream feature changes.
 - Feature suppression commands, dependency queries, safe/cascade removal, and
   document clearing.
+- Direct semantic `BoxPrimitiveParams`, so reconstruction can preserve a box as
+  a box instead of inventing a sketch/extrude history.
+- Revision-checked, atomic `ModelPatch` application for automated producers;
+  failed commands or rebuilds restore the previous document state.
 
 Stable naming of arbitrary boolean-result faces and versioned Feature Graph
 serialization are intentionally not part of this revision; both require a

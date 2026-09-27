@@ -20,6 +20,8 @@ QString featureTypeLabel(modeling::FeatureType type)
         return QStringLiteral("Extrude");
     case modeling::FeatureType::Cut:
         return QStringLiteral("Cut");
+    case modeling::FeatureType::BoxPrimitive:
+        return QStringLiteral("Box");
     }
     return QStringLiteral("Unknown");
 }

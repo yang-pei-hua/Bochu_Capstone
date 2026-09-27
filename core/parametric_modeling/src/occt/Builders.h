@@ -47,6 +47,11 @@ bool buildCut(
     TopoDS_Shape& output,
     std::string& error);
 
+bool buildBoxPrimitive(
+    const BoxPrimitiveParams& params,
+    TopoDS_Shape& output,
+    std::string& error);
+
 bool isValidShape(const TopoDS_Shape& shape, std::string& error);
 double shapeVolume(const TopoDS_Shape& shape);
 double throughAllDistance(const TopoDS_Shape& shape);

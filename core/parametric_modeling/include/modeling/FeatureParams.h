@@ -1,6 +1,7 @@
 #pragma once
 
 #include "modeling/FaceReference.h"
+#include "modeling/PrimitiveParams.h"
 #include "modeling/Sketch.h"
 
 #include <variant>
@@ -37,6 +38,7 @@ struct CutFeatureParams {
 using FeatureParams = std::variant<
     SketchFeatureParams,
     ExtrudeFeatureParams,
-    CutFeatureParams>;
+    CutFeatureParams,
+    BoxPrimitiveParams>;
 
 }  // namespace modeling

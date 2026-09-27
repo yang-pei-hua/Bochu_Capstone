@@ -3,6 +3,7 @@
 #include "RebuildEngine.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -19,6 +20,8 @@ std::string featurePrefix(FeatureType type) {
         return "Extrude";
     case FeatureType::Cut:
         return "Cut";
+    case FeatureType::BoxPrimitive:
+        return "Box";
     }
     return "Feature";
 }
@@ -53,8 +56,50 @@ bool validateSketchEntityIds(
 }
 
 bool validateFeatureParams(const FeatureParams& params, std::string& error) {
-    const auto* sketch = std::get_if<SketchFeatureParams>(&params);
-    return sketch == nullptr || validateSketchEntityIds(*sketch, error);
+    if (const auto* sketch = std::get_if<SketchFeatureParams>(&params)) {
+        return validateSketchEntityIds(*sketch, error);
+    }
+    const auto* box = std::get_if<BoxPrimitiveParams>(&params);
+    if (box == nullptr) {
+        return true;
+    }
+
+    const auto finite = [](const Vec3& value) {
+        return std::isfinite(value.x) && std::isfinite(value.y) &&
+            std::isfinite(value.z);
+    };
+    if (!finite(box->pose.origin) || !finite(box->pose.xDirection) ||
+        !finite(box->pose.zDirection) || !std::isfinite(box->sizeX) ||
+        !std::isfinite(box->sizeY) || !std::isfinite(box->sizeZ)) {
+        error = "Box primitive parameters must be finite";
+        return false;
+    }
+    if (box->sizeX <= 0.0 || box->sizeY <= 0.0 || box->sizeZ <= 0.0) {
+        error = "Box primitive dimensions must be positive";
+        return false;
+    }
+
+    const double xLengthSquared =
+        box->pose.xDirection.x * box->pose.xDirection.x +
+        box->pose.xDirection.y * box->pose.xDirection.y +
+        box->pose.xDirection.z * box->pose.xDirection.z;
+    const double zLengthSquared =
+        box->pose.zDirection.x * box->pose.zDirection.x +
+        box->pose.zDirection.y * box->pose.zDirection.y +
+        box->pose.zDirection.z * box->pose.zDirection.z;
+    const double dot =
+        box->pose.xDirection.x * box->pose.zDirection.x +
+        box->pose.xDirection.y * box->pose.zDirection.y +
+        box->pose.xDirection.z * box->pose.zDirection.z;
+    constexpr double kDegenerate = 1.0e-24;
+    constexpr double kOrthogonalTolerance = 1.0e-9;
+    if (xLengthSquared <= kDegenerate || zLengthSquared <= kDegenerate ||
+        std::abs(dot) > kOrthogonalTolerance *
+            std::sqrt(xLengthSquared * zLengthSquared)) {
+        error = "Box primitive axes must be non-degenerate and orthogonal";
+        return false;
+    }
+    return true;
 }
 
 bool dependsOn(const Feature& feature, FeatureId upstreamId) {
