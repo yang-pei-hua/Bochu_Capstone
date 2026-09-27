@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <limits>
 #include <sstream>
+#include <unordered_set>
 
 namespace modeling {
 namespace {
@@ -33,9 +35,49 @@ std::string makeFeatureName(
     return stream.str();
 }
 
+bool validateSketchEntityIds(
+    const SketchFeatureParams& params,
+    std::string& error) {
+    std::unordered_set<SketchEntityId> ids;
+    for (const SketchEntity& entity : params.entities) {
+        if (entity.id == kInvalidSketchEntityId) {
+            error = "Sketch entity IDs must be non-zero";
+            return false;
+        }
+        if (!ids.insert(entity.id).second) {
+            error = "Duplicate sketch entity ID " + std::to_string(entity.id);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool validateFeatureParams(const FeatureParams& params, std::string& error) {
+    const auto* sketch = std::get_if<SketchFeatureParams>(&params);
+    return sketch == nullptr || validateSketchEntityIds(*sketch, error);
+}
+
+bool dependsOn(const Feature& feature, FeatureId upstreamId) {
+    if (const auto* sketch = std::get_if<SketchFeatureParams>(&feature.params)) {
+        const auto* face = std::get_if<FaceReference>(&sketch->plane);
+        return face != nullptr && face->ownerFeature == upstreamId;
+    }
+    if (const auto* extrude = std::get_if<ExtrudeFeatureParams>(&feature.params)) {
+        return extrude->sketchId == upstreamId;
+    }
+    const auto* cut = std::get_if<CutFeatureParams>(&feature.params);
+    return cut != nullptr && cut->sketchId == upstreamId;
+}
+
 }  // namespace
 
 FeatureId PartDocument::addFeature(const FeatureParams& params) {
+    std::string validationError;
+    if (!validateFeatureParams(params, validationError)) {
+        lastError_ = validationError;
+        return kInvalidFeatureId;
+    }
+
     const FeatureType type = featureTypeOf(params);
     const FeatureId id = nextFeatureId_++;
     features_.push_back(Feature{
@@ -63,6 +105,11 @@ bool PartDocument::editFeature(FeatureId id, const FeatureParams& params) {
         lastError_ = "Feature type cannot be changed by editFeature";
         return false;
     }
+    std::string validationError;
+    if (!validateFeatureParams(params, validationError)) {
+        lastError_ = validationError;
+        return false;
+    }
 
     iterator->params = params;
     iterator->valid = true;
@@ -71,7 +118,7 @@ bool PartDocument::editFeature(FeatureId id, const FeatureParams& params) {
     return true;
 }
 
-bool PartDocument::removeFeature(FeatureId id) {
+bool PartDocument::removeFeature(FeatureId id, bool cascade) {
     const auto iterator = std::find_if(
         features_.begin(), features_.end(),
         [id](const Feature& feature) { return feature.id == id; });
@@ -80,7 +127,34 @@ bool PartDocument::removeFeature(FeatureId id) {
         return false;
     }
 
-    features_.erase(iterator);
+    const std::vector<FeatureId> directDependents = dependentsOf(id);
+    if (!cascade && !directDependents.empty()) {
+        lastError_ = "Feature " + std::to_string(id) + " has " +
+            std::to_string(directDependents.size()) + " dependent feature(s)";
+        return false;
+    }
+
+    std::unordered_set<FeatureId> removals{id};
+    if (cascade) {
+        std::vector<FeatureId> pending{id};
+        while (!pending.empty()) {
+            const FeatureId upstream = pending.back();
+            pending.pop_back();
+            for (const FeatureId dependent : dependentsOf(upstream)) {
+                if (removals.insert(dependent).second) {
+                    pending.push_back(dependent);
+                }
+            }
+        }
+    }
+
+    features_.erase(
+        std::remove_if(
+            features_.begin(), features_.end(),
+            [&removals](const Feature& feature) {
+                return removals.find(feature.id) != removals.end();
+            }),
+        features_.end());
     lastError_.clear();
     return true;
 }
@@ -100,6 +174,118 @@ bool PartDocument::setFeatureSuppressed(FeatureId id, bool suppressed) {
     return true;
 }
 
+SketchEntityId PartDocument::addSketchEntity(
+    FeatureId sketchId,
+    const SketchEntity& requestedEntity) {
+    Feature* feature = findFeatureMutable(sketchId);
+    if (feature == nullptr || feature->type != FeatureType::Sketch) {
+        lastError_ = "Sketch feature " + std::to_string(sketchId) + " was not found";
+        return kInvalidSketchEntityId;
+    }
+    auto* params = std::get_if<SketchFeatureParams>(&feature->params);
+    if (params == nullptr) {
+        lastError_ = "Feature parameter type does not match Sketch";
+        return kInvalidSketchEntityId;
+    }
+
+    SketchEntity entity = requestedEntity;
+    if (entity.id == kInvalidSketchEntityId) {
+        SketchEntityId maximum = 0;
+        for (const SketchEntity& existing : params->entities) {
+            maximum = std::max(maximum, existing.id);
+        }
+        if (maximum == std::numeric_limits<SketchEntityId>::max()) {
+            lastError_ = "Sketch entity ID space is exhausted";
+            return kInvalidSketchEntityId;
+        }
+        entity.id = maximum + 1;
+    } else {
+        const auto duplicate = std::find_if(
+            params->entities.begin(), params->entities.end(),
+            [&entity](const SketchEntity& existing) { return existing.id == entity.id; });
+        if (duplicate != params->entities.end()) {
+            lastError_ = "Duplicate sketch entity ID " + std::to_string(entity.id);
+            return kInvalidSketchEntityId;
+        }
+    }
+
+    params->entities.push_back(entity);
+    feature->valid = true;
+    feature->errorText.clear();
+    lastError_.clear();
+    return entity.id;
+}
+
+bool PartDocument::editSketchEntity(
+    FeatureId sketchId,
+    SketchEntityId entityId,
+    const SketchGeometry& geometry) {
+    Feature* feature = findFeatureMutable(sketchId);
+    if (feature == nullptr || feature->type != FeatureType::Sketch) {
+        lastError_ = "Sketch feature " + std::to_string(sketchId) + " was not found";
+        return false;
+    }
+    auto* params = std::get_if<SketchFeatureParams>(&feature->params);
+    if (params == nullptr) {
+        lastError_ = "Feature parameter type does not match Sketch";
+        return false;
+    }
+    const auto iterator = std::find_if(
+        params->entities.begin(), params->entities.end(),
+        [entityId](const SketchEntity& entity) { return entity.id == entityId; });
+    if (iterator == params->entities.end()) {
+        lastError_ = "Sketch entity " + std::to_string(entityId) + " was not found";
+        return false;
+    }
+    iterator->geometry = geometry;
+    feature->valid = true;
+    feature->errorText.clear();
+    lastError_.clear();
+    return true;
+}
+
+bool PartDocument::removeSketchEntity(FeatureId sketchId, SketchEntityId entityId) {
+    Feature* feature = findFeatureMutable(sketchId);
+    if (feature == nullptr || feature->type != FeatureType::Sketch) {
+        lastError_ = "Sketch feature " + std::to_string(sketchId) + " was not found";
+        return false;
+    }
+    auto* params = std::get_if<SketchFeatureParams>(&feature->params);
+    if (params == nullptr) {
+        lastError_ = "Feature parameter type does not match Sketch";
+        return false;
+    }
+    const auto iterator = std::find_if(
+        params->entities.begin(), params->entities.end(),
+        [entityId](const SketchEntity& entity) { return entity.id == entityId; });
+    if (iterator == params->entities.end()) {
+        lastError_ = "Sketch entity " + std::to_string(entityId) + " was not found";
+        return false;
+    }
+    params->entities.erase(iterator);
+    feature->valid = true;
+    feature->errorText.clear();
+    lastError_.clear();
+    return true;
+}
+
+std::vector<FeatureId> PartDocument::dependentsOf(FeatureId id) const {
+    std::vector<FeatureId> result;
+    for (const Feature& feature : features_) {
+        if (dependsOn(feature, id)) {
+            result.push_back(feature.id);
+        }
+    }
+    return result;
+}
+
+void PartDocument::clear() {
+    features_.clear();
+    bodyShape_.Nullify();
+    nextFeatureId_ = 1;
+    lastError_.clear();
+}
+
 bool PartDocument::rebuild() {
     return RebuildEngine{}.rebuild(*this);
 }
@@ -117,6 +303,13 @@ const std::string& PartDocument::lastError() const noexcept {
 }
 
 const Feature* PartDocument::findFeature(FeatureId id) const noexcept {
+    const auto iterator = std::find_if(
+        features_.begin(), features_.end(),
+        [id](const Feature& feature) { return feature.id == id; });
+    return iterator == features_.end() ? nullptr : &*iterator;
+}
+
+Feature* PartDocument::findFeatureMutable(FeatureId id) noexcept {
     const auto iterator = std::find_if(
         features_.begin(), features_.end(),
         [id](const Feature& feature) { return feature.id == id; });

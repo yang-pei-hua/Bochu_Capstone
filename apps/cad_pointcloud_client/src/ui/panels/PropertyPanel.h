@@ -14,6 +14,7 @@ class QPushButton;
 class QTabWidget;
 class ReconstructPanel;
 class RenderPanel;
+class SketchEntityPanel;
 
 class PropertyPanel final : public QWidget
 {
@@ -26,11 +27,14 @@ public:
     RenderPanel* renderPanel() const;
     CapturePanel* capturePanel() const;
     ReconstructPanel* reconstructPanel() const;
+    SketchEntityPanel* sketchEntityPanel() const;
 
     void showCapturePanel(bool visible);
     bool isCapturePanelVisible() const;
     void showReconstructPanel(bool visible);
     bool isReconstructPanelVisible() const;
+    void showSketchEntityPanel(bool visible);
+    bool isSketchEntityPanelVisible() const;
 
 public slots:
     void showObjectProperties();
@@ -57,6 +61,7 @@ private:
     RenderPanel* m_renderPanel = nullptr;
     CapturePanel* m_capturePanel = nullptr;
     ReconstructPanel* m_reconstructPanel = nullptr;
+    SketchEntityPanel* m_sketchEntityPanel = nullptr;
 
     std::array<QDoubleSpinBox*, 3> m_position{};
     std::array<QDoubleSpinBox*, 3> m_rotation{};

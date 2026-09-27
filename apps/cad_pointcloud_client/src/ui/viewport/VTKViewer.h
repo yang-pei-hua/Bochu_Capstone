@@ -2,7 +2,11 @@
 
 #include "core/CameraController.h"
 #include "rendering/BodyActor.h"
+#include "rendering/DatumPlaneActor.h"
 #include "rendering/PointCloudActor.h"
+#include "rendering/SketchActor.h"
+#include "ui/viewport/SketchInteractorStyle.h"
+#include "ui/viewport/ViewportTool.h"
 
 #include <QColor>
 #include <QSize>
@@ -10,6 +14,8 @@
 #include <QVTKOpenGLNativeWidget.h>
 
 #include <vtkSmartPointer.h>
+
+#include <optional>
 
 class TopoDS_Shape;
 class vtkAxesActor;
@@ -42,12 +48,64 @@ public:
     bool hasBody() const noexcept;
     void renderNow();
 
+    // Mirrors the sketch that is currently open in the feature graph, on the
+    // plane the core will build it on. The viewer only consumes the sketch and
+    // its derived frame; it never interprets either.
+    void setSketch(const modeling::SketchFeatureParams& params,
+                   const sketchapp::PlaneFrame& frame);
+    void clearSketch();
+    bool hasSketch() const noexcept;
+
     // Loads a PLY point cloud from disk. It coexists with the body actor.
     bool loadPointCloud(const QString& plyPath, QString& error);
     void clearPointCloud();
     bool hasPointCloud() const noexcept;
     int pointCloudPointCount() const noexcept;
     void resetCameraToPointCloud();
+
+    // --- In-viewport modeling interaction ---
+    //
+    // The viewer never decides what a click means: the left button becomes
+    // either a body-face pick or a point on the active sketch plane, and both
+    // are reported as signals. The tool state machine lives in the window.
+    void setViewportTool(ViewportTool tool);
+    ViewportTool viewportTool() const noexcept;
+
+    // While sketch interaction is on, a left click resolves against the sketch
+    // instead of the body.
+    void setSketchInteractionEnabled(bool enabled);
+    bool sketchInteractionEnabled() const noexcept;
+
+    // Plane that drawing tools project a click onto while a sketch is open.
+    void setSketchPlane(const sketchapp::PlaneFrame& frame);
+    void clearSketchPlane();
+
+    // Turns the camera onto the sketch plane: it looks straight down the plane
+    // normal in an orthographic projection, with the plane's own Y axis pointing
+    // up, so a sketch reads as a flat 2D drawing. The window restores the 3D view
+    // it saved before the sketch on exit.
+    void alignToSketchPlane(const sketchapp::PlaneFrame& frame);
+
+    // Whether the open sketch already owns a vertex at the given sketch position.
+    // A drawing tool uses it to tell a click that landed on existing geometry from
+    // one that has to become a new point entity.
+    bool hasSketchVertexAt(const modeling::Point2D& point, double tolerance) const;
+
+    // Translucent overlay on a picked body face; pass a negative index to clear.
+    void highlightFace(int faceId);
+    void clearFaceHighlight();
+
+    // The three datum planes are the sketch-plane picking targets of the model
+    // mode, so they are shown whenever no sketch is being edited and hidden as
+    // soon as drawing starts on them.
+    void setDatumPlanesVisible(bool visible);
+    void highlightDatumPlane(modeling::DatumPlane plane);
+    void clearDatumPlaneHighlight();
+
+    // Rubber band: after the first click of a two-click tool the viewer follows
+    // the cursor and previews the geometry the tool would create.
+    void setSketchDraftAnchor(const modeling::Point2D& anchor);
+    void clearSketchDraft();
 
 public slots:
     void resetCamera();
@@ -70,17 +128,59 @@ public slots:
 signals:
     void cameraChanged(const CameraParameters& parameters);
 
+    // Body face under the cursor, with its exact plane when that face is
+    // planar. Only emitted while sketch interaction is off.
+    void facePicked(int faceId, bool planar, const sketchapp::PlaneFrame& plane);
+    void emptyPicked();
+
+    // One of the three datum planes was clicked in the viewport.
+    void datumPlanePicked(modeling::DatumPlane plane);
+
+    // Sketch hit under the cursor (Select tool), and a point on the sketch
+    // plane (drawing tools).
+    void sketchEntityPicked(modeling::SketchEntityId entityId);
+    void sketchSelectionCleared();
+    void sketchPointRequested(modeling::Point2D point);
+    void sketchCancelled();
+
 private:
     static void onCameraModified(vtkObject* caller, unsigned long eventId,
                                  void* clientData, void* callData);
     void createOrientationAxes();
 
+    void onLeftButtonPressed(int x, int y);
+    void onMouseMoved(int x, int y);
+    void onCancelRequested();
+
+    bool sketchPointAt(int x, int y, modeling::Point2D& point);
+    // Projection of a display position onto the sketch plane, snapped onto an
+    // existing vertex when one is within a few pixels. A snapped point is that
+    // vertex's exact coordinates, so the caller can recognise it as existing.
+    bool snapSketchPointAt(int x, int y, modeling::Point2D& point);
+    bool pickBodyFaceAt(int x, int y, int& faceId, sketchapp::PlaneFrame& plane,
+                        bool& planar);
+    bool pickDatumPlaneAt(int x, int y, modeling::DatumPlane& plane);
+    bool pickSketchEntityAt(int x, int y, modeling::SketchEntityId& entityId);
+
+    // Bounds of everything the user actually modeled, which is what the camera
+    // is fitted to. False when the scene has no such geometry yet.
+    bool sceneBounds(double bounds[6]);
+
     vtkSmartPointer<vtkGenericOpenGLRenderWindow> m_renderWindow;
     vtkSmartPointer<vtkRenderer> m_renderer;
+    vtkSmartPointer<SketchInteractorStyle> m_interactorStyle;
     BodyActor m_bodyActor;
     PointCloudActor m_pointCloudActor;
+    SketchActor m_sketchActor;
+    DatumPlaneActor m_datumPlanes;
     vtkSmartPointer<vtkAxesActor> m_axesActor;
     vtkSmartPointer<vtkOrientationMarkerWidget> m_orientationWidget;
     vtkSmartPointer<vtkCallbackCommand> m_cameraCallback;
     unsigned long m_cameraObserverTag = 0;
+
+    ViewportTool m_tool = ViewportTool::Select;
+    bool m_sketchInteraction = false;
+    bool m_hasSketchPlane = false;
+    sketchapp::PlaneFrame m_sketchPlane;
+    std::optional<modeling::Point2D> m_draftAnchor;
 };

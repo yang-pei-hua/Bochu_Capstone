@@ -6,6 +6,11 @@
 
 namespace modeling {
 
+struct Point2D {
+    double x = 0.0;
+    double y = 0.0;
+};
+
 struct Line2D {
     double x1 = 0.0;
     double y1 = 0.0;
@@ -27,12 +32,13 @@ struct Circle2D {
 };
 
 enum class SketchEntityType {
+    Point,
     Line,
     Rectangle,
     Circle,
 };
 
-using SketchGeometry = std::variant<Line2D, Rectangle2D, Circle2D>;
+using SketchGeometry = std::variant<Point2D, Line2D, Rectangle2D, Circle2D>;
 
 struct SketchEntity {
     SketchEntityId id = kInvalidSketchEntityId;
@@ -40,6 +46,9 @@ struct SketchEntity {
 };
 
 inline SketchEntityType sketchEntityType(const SketchEntity& entity) {
+    if (std::holds_alternative<Point2D>(entity.geometry)) {
+        return SketchEntityType::Point;
+    }
     if (std::holds_alternative<Line2D>(entity.geometry)) {
         return SketchEntityType::Line;
     }

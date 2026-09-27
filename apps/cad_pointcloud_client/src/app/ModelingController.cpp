@@ -11,91 +11,138 @@ const TopoDS_Shape& nullShape()
     return shape;
 }
 
-modeling::SketchFeatureParams baseSketchParams(const DemoModelParameters& parameters)
-{
-    modeling::SketchFeatureParams params;
-    params.plane = modeling::datumPlane(modeling::DatumPlane::XY);
-    params.entities = {
-        {demo::kBaseRectangleId,
-         modeling::Rectangle2D{0.0, 0.0, parameters.width, parameters.height}},
-    };
-    return params;
-}
-
-// The hole sketch is attached to the semantic EndFace of the extrusion, so the
-// core re-resolves it whenever the extrusion height changes.
-modeling::SketchFeatureParams holeSketchParams(const DemoModelParameters& parameters,
-                                               modeling::FeatureId extrudeId)
-{
-    modeling::SketchFeatureParams params;
-    params.plane = modeling::featureFace(extrudeId, modeling::FaceRole::EndFace);
-    params.entities = {
-        {demo::kHoleCircleId,
-         modeling::Circle2D{parameters.holeCenterX, parameters.holeCenterY,
-                            parameters.holeRadius}},
-    };
-    return params;
-}
-
 }  // namespace
 
 ModelingController::ModelingController(QObject* parent)
     : QObject(parent)
+    , m_core(std::make_unique<modeling::ModelingCore>())
 {
 }
 
-bool ModelingController::createDemoModel(const DemoModelParameters& parameters)
+bool ModelingController::addSketch(const modeling::SketchFeatureParams& params,
+                                   modeling::FeatureId& createdId)
 {
-    // A new document replaces the previous one entirely, so the whole feature
-    // history is rebuilt from scratch by the core.
-    m_core = std::make_unique<modeling::ModelingCore>();
-    m_ids = demo::DemoModelIds{};
-    m_lastError.clear();
-
-    const bool created =
-        addFeatureCommand(baseSketchParams(parameters), m_ids.baseSketch)
-        && addFeatureCommand(modeling::ExtrudeFeatureParams{m_ids.baseSketch,
-                                                            parameters.extrusionDepth,
-                                                            false},
-                             m_ids.extrude)
-        && addFeatureCommand(holeSketchParams(parameters, m_ids.extrude), m_ids.holeSketch)
-        && addFeatureCommand(modeling::CutFeatureParams{m_ids.holeSketch,
-                                                        parameters.cutDepth,
-                                                        false},
-                             m_ids.cut);
-
-    if (!created) {
-        m_ids = demo::DemoModelIds{};
+    if (!addFeatureCommand(params, createdId)) {
         emit modelError(m_lastError);
         return false;
     }
     return rebuildAndPublish();
 }
 
-bool ModelingController::updateDemoModel(const DemoModelParameters& parameters)
+bool ModelingController::editSketch(modeling::FeatureId sketchId,
+                                    const modeling::SketchFeatureParams& params)
 {
-    if (!m_core || !m_ids.isComplete()) {
-        return createDemoModel(parameters);
-    }
-
-    const bool updated =
-        execute(modeling::EditFeatureCommand{m_ids.baseSketch, baseSketchParams(parameters)})
-        && execute(modeling::EditFeatureCommand{
-               m_ids.extrude,
-               modeling::ExtrudeFeatureParams{m_ids.baseSketch,
-                                              parameters.extrusionDepth,
-                                              false}})
-        && execute(modeling::EditFeatureCommand{
-               m_ids.holeSketch, holeSketchParams(parameters, m_ids.extrude)})
-        && execute(modeling::EditFeatureCommand{
-               m_ids.cut,
-               modeling::CutFeatureParams{m_ids.holeSketch, parameters.cutDepth, false}});
-
-    if (!updated) {
+    if (!execute(modeling::EditFeatureCommand{sketchId, params})) {
         emit modelError(m_lastError);
         return false;
     }
     return rebuildAndPublish();
+}
+
+bool ModelingController::addSketchEntity(modeling::FeatureId sketchId,
+                                        const modeling::SketchGeometry& geometry,
+                                        modeling::SketchEntityId& createdEntityId)
+{
+    modeling::SketchEntity entity;
+    entity.geometry = geometry;
+    if (!execute(modeling::AddSketchEntityCommand{sketchId, entity}, nullptr,
+                 &createdEntityId)) {
+        emit modelError(m_lastError);
+        return false;
+    }
+    return rebuildAndPublish();
+}
+
+bool ModelingController::editSketchEntity(modeling::FeatureId sketchId,
+                                          modeling::SketchEntityId entityId,
+                                          const modeling::SketchGeometry& geometry)
+{
+    if (!execute(modeling::EditSketchEntityCommand{sketchId, entityId, geometry})) {
+        emit modelError(m_lastError);
+        return false;
+    }
+    return rebuildAndPublish();
+}
+
+bool ModelingController::removeSketchEntity(modeling::FeatureId sketchId,
+                                            modeling::SketchEntityId entityId)
+{
+    if (!execute(modeling::RemoveSketchEntityCommand{sketchId, entityId})) {
+        emit modelError(m_lastError);
+        return false;
+    }
+    return rebuildAndPublish();
+}
+
+bool ModelingController::extrude(modeling::FeatureId sketchId, double depth, bool reverse,
+                                 modeling::ExtrudeOperation operation,
+                                 modeling::FeatureId& createdId)
+{
+    modeling::ExtrudeFeatureParams params;
+    params.sketchId = sketchId;
+    params.depth = depth;
+    params.reverse = reverse;
+    params.operation = operation;
+    if (!addFeatureCommand(params, createdId)) {
+        emit modelError(m_lastError);
+        return false;
+    }
+    return rebuildAndPublish();
+}
+
+bool ModelingController::cut(modeling::FeatureId sketchId, double depth, bool throughAll,
+                             bool reverse, modeling::FeatureId& createdId)
+{
+    modeling::CutFeatureParams params;
+    params.sketchId = sketchId;
+    params.depth = depth;
+    params.throughAll = throughAll;
+    params.reverse = reverse;
+    if (!addFeatureCommand(params, createdId)) {
+        emit modelError(m_lastError);
+        return false;
+    }
+    return rebuildAndPublish();
+}
+
+bool ModelingController::removeFeature(modeling::FeatureId id, bool cascade)
+{
+    if (!execute(modeling::RemoveFeatureCommand{id, cascade})) {
+        emit modelError(m_lastError);
+        return false;
+    }
+    return rebuildAndPublish();
+}
+
+std::vector<modeling::FeatureId> ModelingController::dependentsOf(
+    modeling::FeatureId id) const
+{
+    return m_core ? m_core->document().dependentsOf(id)
+                  : std::vector<modeling::FeatureId>{};
+}
+
+const modeling::SketchFeatureParams* ModelingController::sketchParams(
+    modeling::FeatureId sketchId) const
+{
+    if (!m_core) {
+        return nullptr;
+    }
+    const modeling::Feature* feature = m_core->document().findFeature(sketchId);
+    if (feature == nullptr) {
+        return nullptr;
+    }
+    return std::get_if<modeling::SketchFeatureParams>(&feature->params);
+}
+
+modeling::FeatureId ModelingController::latestExtrudeId() const noexcept
+{
+    modeling::FeatureId latest = modeling::kInvalidFeatureId;
+    for (const modeling::Feature& feature : features()) {
+        if (feature.type == modeling::FeatureType::Extrude && !feature.suppressed) {
+            latest = feature.id;
+        }
+    }
+    return latest;
 }
 
 const TopoDS_Shape& ModelingController::bodyShape() const
@@ -121,7 +168,8 @@ bool ModelingController::addFeatureCommand(const modeling::FeatureParams& params
 }
 
 bool ModelingController::execute(const modeling::ModelCommand& command,
-                                 modeling::FeatureId* createdId)
+                                 modeling::FeatureId* createdId,
+                                 modeling::SketchEntityId* createdEntityId)
 {
     const modeling::ModelResult result = m_core->execute(command);
     if (!result.success) {
@@ -130,6 +178,9 @@ bool ModelingController::execute(const modeling::ModelCommand& command,
     }
     if (createdId != nullptr) {
         *createdId = result.featureId;
+    }
+    if (createdEntityId != nullptr) {
+        *createdEntityId = result.sketchEntityId;
     }
     return true;
 }

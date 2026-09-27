@@ -1,14 +1,17 @@
 #include "rendering/BodyActor.h"
 
-#include "rendering/OcctShapeTessellator.h"
-
 #include <vtkActor.h>
+#include <vtkCellArray.h>
+#include <vtkCellData.h>
+#include <vtkDataArray.h>
 #include <vtkFeatureEdges.h>
+#include <vtkNew.h>
 #include <vtkPolyData.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkProperty.h>
 
 #include <algorithm>
+#include <cstddef>
 
 BodyActor::BodyActor()
 {
@@ -39,21 +42,34 @@ BodyActor::BodyActor()
     m_edgeActor->GetProperty()->SetColor(0.06, 0.07, 0.09);
     m_edgeActor->GetProperty()->SetLineWidth(1.5);
     m_edgeActor->SetVisibility(0);
+
+    m_highlightMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+    m_highlightMapper->ScalarVisibilityOff();
+    m_highlightMapper->SetResolveCoincidentTopologyToPolygonOffset();
+    m_highlightMapper->SetRelativeCoincidentTopologyPolygonOffsetParameters(-2.0, -2.0);
+
+    m_highlightActor = vtkSmartPointer<vtkActor>::New();
+    m_highlightActor->SetMapper(m_highlightMapper);
+    m_highlightActor->GetProperty()->SetColor(1.0, 0.65, 0.10);
+    m_highlightActor->GetProperty()->SetOpacity(0.55);
+    m_highlightActor->GetProperty()->SetInterpolationToFlat();
+    m_highlightActor->SetVisibility(0);
 }
 
 void BodyActor::setShape(const TopoDS_Shape& shape)
 {
-    vtkSmartPointer<vtkPolyData> mesh = OcctShapeTessellator::tessellate(shape);
-    m_hasShape = mesh->GetNumberOfPoints() > 0 && mesh->GetNumberOfPolys() > 0;
+    m_tessellation = OcctShapeTessellator::tessellate(shape);
+    m_hasShape = !m_tessellation.empty();
 
     // Only the mapper input is refreshed so the camera stays where the user
     // left it; the tessellator returns a brand new data object every time.
-    m_surfaceMapper->SetInputData(mesh);
-    m_featureEdges->SetInputData(mesh);
+    m_surfaceMapper->SetInputData(m_tessellation.mesh);
+    m_featureEdges->SetInputData(m_tessellation.mesh);
     m_featureEdges->Update();
     m_surfaceMapper->Update();
 
     m_surfaceActor->SetVisibility(m_visible && m_hasShape ? 1 : 0);
+    clearHighlight();
     updateEdgeVisibility();
 }
 
@@ -71,6 +87,8 @@ void BodyActor::setVisible(bool visible)
 {
     m_visible = visible;
     m_surfaceActor->SetVisibility(m_visible && m_hasShape ? 1 : 0);
+    m_highlightActor->SetVisibility(
+        m_visible && m_hasShape && m_highlightedFace >= 0 ? 1 : 0);
     updateEdgeVisibility();
 }
 
@@ -111,7 +129,7 @@ void BodyActor::setTransform(double px, double py, double pz,
                              double rx, double ry, double rz,
                              double sx, double sy, double sz)
 {
-    vtkActor* actors[] = {m_surfaceActor, m_edgeActor};
+    vtkActor* actors[] = {m_surfaceActor, m_edgeActor, m_highlightActor};
     for (vtkActor* actor : actors) {
         actor->SetPosition(px, py, pz);
         actor->SetOrientation(rx, ry, rz);
@@ -127,6 +145,70 @@ vtkActor* BodyActor::surfaceActor() const noexcept
 vtkActor* BodyActor::edgeActor() const noexcept
 {
     return m_edgeActor;
+}
+
+int BodyActor::faceCount() const noexcept
+{
+    return static_cast<int>(m_tessellation.faces.size());
+}
+
+const BodyFaceInfo* BodyActor::faceInfo(int faceIndex) const noexcept
+{
+    if (faceIndex < 0 || faceIndex >= faceCount()) {
+        return nullptr;
+    }
+    return &m_tessellation.faces[static_cast<std::size_t>(faceIndex)];
+}
+
+int BodyActor::faceIdOfCell(vtkIdType cellId) const noexcept
+{
+    if (m_tessellation.mesh == nullptr || cellId < 0) {
+        return -1;
+    }
+    vtkDataArray* ids = m_tessellation.mesh->GetCellData()->GetArray("FaceIds");
+    if (ids == nullptr || cellId >= ids->GetNumberOfTuples()) {
+        return -1;
+    }
+    return static_cast<int>(ids->GetComponent(cellId, 0));
+}
+
+void BodyActor::highlightFace(int faceIndex)
+{
+    const BodyFaceInfo* info = faceInfo(faceIndex);
+    if (info == nullptr || info->cellCount <= 0) {
+        clearHighlight();
+        return;
+    }
+
+    vtkPolyData* source = m_tessellation.mesh;
+    vtkNew<vtkCellArray> selection;
+    const vtkIdType lastCell = info->firstCell + info->cellCount;
+    for (vtkIdType cell = info->firstCell; cell < lastCell; ++cell) {
+        vtkIdType pointCount = 0;
+        const vtkIdType* pointIds = nullptr;
+        source->GetCellPoints(cell, pointCount, pointIds);
+        selection->InsertNextCell(pointCount, pointIds);
+    }
+
+    vtkNew<vtkPolyData> overlay;
+    overlay->SetPoints(source->GetPoints());
+    overlay->SetPolys(selection);
+    m_highlightMapper->SetInputData(overlay);
+
+    m_highlightedFace = faceIndex;
+    m_highlightActor->SetVisibility(m_visible && m_hasShape ? 1 : 0);
+}
+
+void BodyActor::clearHighlight()
+{
+    m_highlightedFace = -1;
+    m_highlightMapper->SetInputData(vtkSmartPointer<vtkPolyData>::New());
+    m_highlightActor->SetVisibility(0);
+}
+
+vtkActor* BodyActor::highlightActor() const noexcept
+{
+    return m_highlightActor;
 }
 
 void BodyActor::updateEdgeVisibility()

@@ -1,4 +1,5 @@
 #include "occt/Builders.h"
+#include "occt/OcctError.h"
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
@@ -33,7 +34,11 @@ bool buildCut(
             ? throughAllDistance(body)
             : params.depth;
         gp_Vec cutVector(profileFrame.normal);
-        cutVector.Reverse();
+        // Preserve the V0 default (opposite the sketch normal) while allowing
+        // callers to explicitly cut on the other side of the sketch plane.
+        if (!params.reverse) {
+            cutVector.Reverse();
+        }
         cutVector.Multiply(distance);
 
         BRepPrimAPI_MakePrism prism(profile, cutVector, false, true);
@@ -66,7 +71,8 @@ bool buildCut(
         }
         return true;
     } catch (const Standard_Failure& failure) {
-        error = std::string("OpenCASCADE cut failure: ") + failure.what();
+        error = std::string("OpenCASCADE cut failure: ") +
+            failureMessage(failure);
         return false;
     }
 }

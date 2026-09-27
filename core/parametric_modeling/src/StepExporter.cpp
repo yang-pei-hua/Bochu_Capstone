@@ -1,5 +1,7 @@
 #include "modeling/StepExporter.h"
 
+#include "occt/OcctError.h"
+
 #include <IFSelect_ReturnStatus.hxx>
 #include <Interface_Static.hxx>
 #include <STEPControl_StepModelType.hxx>
@@ -51,7 +53,7 @@ bool exportStep(
         return true;
     } catch (const Standard_Failure& failure) {
         return fail(std::string("OpenCASCADE STEP export failure: ") +
-            failure.what());
+            occt::failureMessage(failure));
     }
 }
 

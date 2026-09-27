@@ -11,6 +11,7 @@ struct ModelResult {
     bool success = false;
     FeatureId featureId = kInvalidFeatureId;
     std::string error;
+    SketchEntityId sketchEntityId = kInvalidSketchEntityId;
 };
 
 class ModelingCore {

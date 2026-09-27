@@ -1,4 +1,5 @@
 #include "occt/Builders.h"
+#include "occt/OcctError.h"
 
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <Precision.hxx>
@@ -48,7 +49,8 @@ bool buildExtrude(
             profileFrame, extrusionDirection, params.depth);
         return true;
     } catch (const Standard_Failure& failure) {
-        error = std::string("OpenCASCADE extrude failure: ") + failure.what();
+        error = std::string("OpenCASCADE extrude failure: ") +
+            failureMessage(failure);
         return false;
     }
 }

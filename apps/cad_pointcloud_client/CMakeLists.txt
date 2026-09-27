@@ -49,7 +49,6 @@ qt_add_executable(CadPointCloudClient WIN32
     src/main.cpp
     src/app/MainWindow.h
     src/app/MainWindow.cpp
-    src/app/DemoModelIds.h
     src/app/ModelingController.h
     src/app/ModelingController.cpp
     src/app/CaptureController.h
@@ -64,6 +63,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/core/CameraController.cpp
     src/core/OrbitCamera.h
     src/core/OrbitCamera.cpp
+    src/core/SketchFrame.h
+    src/core/SketchFrame.cpp
     src/io/ModelLoader.h
     src/io/PlyReader.h
     src/io/PlyReader.cpp
@@ -71,10 +72,17 @@ qt_add_executable(CadPointCloudClient WIN32
     src/io/CameraInfoBuilder.cpp
     src/rendering/BodyActor.h
     src/rendering/BodyActor.cpp
+    src/rendering/DatumPlaneActor.h
+    src/rendering/DatumPlaneActor.cpp
     src/rendering/PointCloudActor.h
     src/rendering/PointCloudActor.cpp
+    src/rendering/SketchActor.h
+    src/rendering/SketchActor.cpp
     src/rendering/OcctShapeTessellator.h
     src/rendering/OcctShapeTessellator.cpp
+    src/ui/viewport/ViewportTool.h
+    src/ui/viewport/SketchInteractorStyle.h
+    src/ui/viewport/SketchInteractorStyle.cpp
     src/ui/viewport/VTKViewer.h
     src/ui/viewport/VTKViewer.cpp
     src/ui/panels/ModelingPanel.h
@@ -91,6 +99,12 @@ qt_add_executable(CadPointCloudClient WIN32
     src/ui/panels/ReconstructPanel.cpp
     src/ui/panels/RenderPanel.h
     src/ui/panels/RenderPanel.cpp
+    src/ui/panels/SketchPanel.h
+    src/ui/panels/SketchPanel.cpp
+    src/ui/panels/SketchEntityPanel.h
+    src/ui/panels/SketchEntityPanel.cpp
+    src/ui/panels/SketchToolPalette.h
+    src/ui/panels/SketchToolPalette.cpp
 )
 
 target_include_directories(CadPointCloudClient PRIVATE src)

@@ -1,7 +1,6 @@
 #include "ui/panels/ModelingPanel.h"
 
-#include <QDoubleSpinBox>
-#include <QGridLayout>
+#include <QAbstractItemView>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -34,28 +33,6 @@ ModelingPanel::ModelingPanel(QWidget* parent)
     outer->setContentsMargins(8, 8, 8, 8);
     outer->setSpacing(8);
 
-    auto* group = new QGroupBox(tr("Demo Model"), this);
-    auto* grid = new QGridLayout(group);
-    grid->setColumnStretch(1, 1);
-
-    m_width = addParameter(grid, 0, tr("Rectangle Width"), 50.0, 0.0, 1000.0);
-    m_height = addParameter(grid, 1, tr("Rectangle Height"), 30.0, 0.0, 1000.0);
-    m_extrusionDepth = addParameter(grid, 2, tr("Extrude Depth"), 30.0, 0.0, 1000.0);
-    m_holeCenterX = addParameter(grid, 3, tr("Hole Center X"), 25.0, -1000.0, 1000.0);
-    m_holeCenterY = addParameter(grid, 4, tr("Hole Center Y"), 15.0, -1000.0, 1000.0);
-    m_holeRadius = addParameter(grid, 5, tr("Hole Radius"), 5.0, 0.0, 1000.0);
-    m_cutDepth = addParameter(grid, 6, tr("Cut Depth"), 10.0, 0.0, 1000.0);
-    outer->addWidget(group);
-
-    auto* buttons = new QHBoxLayout();
-    auto* generateButton = new QPushButton(tr("Generate Model"), this);
-    auto* applyButton = new QPushButton(tr("Apply Parameters"), this);
-    auto* fitViewButton = new QPushButton(tr("Fit View"), this);
-    buttons->addWidget(generateButton);
-    buttons->addWidget(applyButton);
-    buttons->addWidget(fitViewButton);
-    outer->addLayout(buttons);
-
     m_status = new QLabel(tr("Ready"), this);
     m_status->setObjectName(QStringLiteral("modelingStatus"));
     m_status->setWordWrap(true);
@@ -77,30 +54,23 @@ ModelingPanel::ModelingPanel(QWidget* parent)
     m_features->setMinimumHeight(120);
     m_features->header()->setSectionResizeMode(4, QHeaderView::Stretch);
     featureLayout->addWidget(m_features);
+
+    auto* featureButtons = new QHBoxLayout();
+    auto* deleteFeatureButton = new QPushButton(tr("Delete Feature"), featureGroup);
+    deleteFeatureButton->setObjectName(QStringLiteral("deleteFeatureButton"));
+    featureButtons->addWidget(deleteFeatureButton);
+    featureButtons->addStretch();
+    featureLayout->addLayout(featureButtons);
     outer->addWidget(featureGroup);
 
     outer->addStretch();
 
-    connect(generateButton, &QPushButton::clicked, this, [this] {
-        emit generateRequested(parameters());
+    connect(deleteFeatureButton, &QPushButton::clicked, this, [this] {
+        const modeling::FeatureId id = selectedFeatureId();
+        if (id != modeling::kInvalidFeatureId) {
+            emit deleteFeatureRequested(id);
+        }
     });
-    connect(applyButton, &QPushButton::clicked, this, [this] {
-        emit applyRequested(parameters());
-    });
-    connect(fitViewButton, &QPushButton::clicked, this, &ModelingPanel::fitViewRequested);
-}
-
-DemoModelParameters ModelingPanel::parameters() const
-{
-    DemoModelParameters result;
-    result.width = m_width->value();
-    result.height = m_height->value();
-    result.extrusionDepth = m_extrusionDepth->value();
-    result.holeCenterX = m_holeCenterX->value();
-    result.holeCenterY = m_holeCenterY->value();
-    result.holeRadius = m_holeRadius->value();
-    result.cutDepth = m_cutDepth->value();
-    return result;
 }
 
 void ModelingPanel::setStatusText(const QString& text)
@@ -110,6 +80,9 @@ void ModelingPanel::setStatusText(const QString& text)
 
 void ModelingPanel::setFeatures(const std::vector<modeling::Feature>& features)
 {
+    // Repopulating the list must not look like the user cleared the selection, so
+    // it is remembered and restored by feature id.
+    const modeling::FeatureId previous = selectedFeatureId();
     m_features->clear();
     for (const modeling::Feature& feature : features) {
         auto* item = new QTreeWidgetItem(m_features);
@@ -118,6 +91,9 @@ void ModelingPanel::setFeatures(const std::vector<modeling::Feature>& features)
         item->setText(2, featureTypeLabel(feature.type));
         item->setText(3, feature.valid ? tr("yes") : tr("no"));
         item->setText(4, QString::fromStdString(feature.errorText));
+        if (feature.id == previous) {
+            item->setSelected(true);
+        }
     }
     m_features->resizeColumnToContents(0);
     m_features->resizeColumnToContents(1);
@@ -125,16 +101,13 @@ void ModelingPanel::setFeatures(const std::vector<modeling::Feature>& features)
     m_features->resizeColumnToContents(3);
 }
 
-QDoubleSpinBox* ModelingPanel::addParameter(QGridLayout* layout, int row,
-                                            const QString& label, double value,
-                                            double minimum, double maximum)
+modeling::FeatureId ModelingPanel::selectedFeatureId() const noexcept
 {
-    auto* spin = new QDoubleSpinBox(this);
-    spin->setRange(minimum, maximum);
-    spin->setDecimals(2);
-    spin->setSingleStep(1.0);
-    spin->setValue(value);
-    layout->addWidget(new QLabel(label, this), row, 0);
-    layout->addWidget(spin, row, 1);
-    return spin;
+    const QList<QTreeWidgetItem*> selected = m_features->selectedItems();
+    if (selected.isEmpty()) {
+        return modeling::kInvalidFeatureId;
+    }
+    bool ok = false;
+    const qulonglong id = selected.first()->text(0).toULongLong(&ok);
+    return ok ? static_cast<modeling::FeatureId>(id) : modeling::kInvalidFeatureId;
 }

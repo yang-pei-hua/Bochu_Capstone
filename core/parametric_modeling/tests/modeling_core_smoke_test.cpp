@@ -1,4 +1,5 @@
 #include "modeling/ModelingCore.h"
+#include "modeling/SketchValidation.h"
 #include "modeling/StepExporter.h"
 
 #include <BRepBndLib.hxx>
@@ -199,6 +200,192 @@ void testLineProfileAndDatumPlanes() {
                 "XZ rectangle volume");
 }
 
+void testOpenSketchAndEntityCommands() {
+    ModelingCore core;
+    SketchFeatureParams duplicateIds;
+    duplicateIds.entities = {
+        {1, Point2D{0.0, 0.0}},
+        {1, Point2D{1.0, 1.0}},
+    };
+    require(!core.execute(AddFeatureCommand{duplicateIds}).success,
+            "Adding a sketch with duplicate entity IDs must fail");
+
+    SketchFeatureParams openSketch;
+    const ModelResult added = core.execute(AddFeatureCommand{openSketch});
+    require(added.success, added.error);
+
+    const ModelResult point = core.execute(AddSketchEntityCommand{
+        added.featureId, SketchEntity{kInvalidSketchEntityId, Point2D{2.0, 3.0}}});
+    require(point.success, point.error);
+    require(point.sketchEntityId == 1U, "Core should allocate the first sketch entity ID");
+    require(core.document().rebuild(),
+            "A point-only/open sketch must not block document rebuild");
+    require(core.document().bodyShape().IsNull(),
+            "An open sketch must not create a body");
+
+    std::string validationError;
+    const Feature* sketchFeature = core.document().findFeature(added.featureId);
+    require(sketchFeature != nullptr, "Added sketch should be queryable");
+    const auto& params = std::get<SketchFeatureParams>(sketchFeature->params);
+    require(!validateSketch(params, validationError),
+            "Point-only sketch must not be accepted as a profile");
+
+    const ModelResult duplicate = core.execute(AddSketchEntityCommand{
+        added.featureId, SketchEntity{point.sketchEntityId, Circle2D{0.0, 0.0, 1.0}}});
+    require(!duplicate.success, "Duplicate sketch entity ID must be rejected");
+
+    const ModelResult edited = core.execute(EditSketchEntityCommand{
+        added.featureId, point.sketchEntityId, Point2D{4.0, 5.0}});
+    require(edited.success, edited.error);
+    const ModelResult removed = core.execute(RemoveSketchEntityCommand{
+        added.featureId, point.sketchEntityId});
+    require(removed.success, removed.error);
+}
+
+void testUnorderedLinesAndReferencePoints() {
+    PartDocument document;
+    SketchFeatureParams sketch;
+    sketch.entities = {
+        {1, Point2D{2.0, 2.0}},
+        {2, Line2D{0.0, 0.0, 4.0, 0.0}},
+        {3, Line2D{0.0, 5.0, 4.0, 5.0}},
+        {4, Line2D{0.0, 5.0, 0.0, 0.0}},
+        {5, Line2D{4.0, 0.0, 4.0, 5.0}},
+    };
+    std::string validationError;
+    require(validateSketch(sketch, validationError), validationError);
+    const FeatureId sketchId = document.addFeature(sketch);
+    document.addFeature(ExtrudeFeatureParams{sketchId, 3.0, false});
+    require(document.rebuild(), document.lastError());
+    requireNear(volumeOf(document.bodyShape()), 60.0, 1.0e-6,
+                "Unordered line profile volume");
+}
+
+void testMultiLoopProfile() {
+    PartDocument document;
+    SketchFeatureParams sketch;
+    sketch.entities = {
+        {1, Rectangle2D{0.0, 0.0, 10.0, 10.0}},
+        {2, Circle2D{5.0, 5.0, 2.0}},
+        {3, Point2D{5.0, 5.0}},
+    };
+    std::string validationError;
+    require(validateSketch(sketch, validationError), validationError);
+    const FeatureId sketchId = document.addFeature(sketch);
+    document.addFeature(ExtrudeFeatureParams{sketchId, 4.0, false});
+    require(document.rebuild(), document.lastError());
+    const double expected = (100.0 - std::acos(-1.0) * 4.0) * 4.0;
+    requireNear(volumeOf(document.bodyShape()), expected, 1.0e-4,
+                "Multi-loop profile volume");
+}
+
+void testOffsetPlaneExtrudeOperationsAndReverseCut() {
+    PartDocument document;
+    const FeatureId baseSketchId = document.addFeature(
+        SketchFeatureParams{datumPlane(DatumPlane::XY),
+                            {{1, Rectangle2D{0.0, 0.0, 10.0, 10.0}}}});
+    document.addFeature(ExtrudeFeatureParams{baseSketchId, 10.0, false});
+
+    const FeatureId bossSketchId = document.addFeature(
+        SketchFeatureParams{offsetDatumPlane(DatumPlane::XY, 10.0),
+                            {{1, Rectangle2D{2.0, 2.0, 6.0, 6.0}}}});
+    document.addFeature(ExtrudeFeatureParams{
+        bossSketchId, 5.0, false, ExtrudeOperation::Join});
+
+    const FeatureId secondBodySketchId = document.addFeature(
+        SketchFeatureParams{datumPlane(DatumPlane::XY),
+                            {{1, Rectangle2D{20.0, 0.0, 2.0, 2.0}}}});
+    document.addFeature(ExtrudeFeatureParams{
+        secondBodySketchId, 3.0, false, ExtrudeOperation::NewBody});
+    require(document.rebuild(), document.lastError());
+    requireNear(volumeOf(document.bodyShape()), 1192.0, 1.0e-4,
+                "Joined and multi-body extrusion volume");
+
+    PartDocument cutDocument;
+    const FeatureId cutBaseSketch = cutDocument.addFeature(
+        SketchFeatureParams{datumPlane(DatumPlane::XY),
+                            {{1, Rectangle2D{0.0, 0.0, 10.0, 10.0}}}});
+    cutDocument.addFeature(ExtrudeFeatureParams{cutBaseSketch, 10.0, false});
+    const FeatureId cutterSketch = cutDocument.addFeature(
+        SketchFeatureParams{datumPlane(DatumPlane::XY),
+                            {{1, Rectangle2D{2.0, 2.0, 2.0, 2.0}}}});
+    cutDocument.addFeature(CutFeatureParams{cutterSketch, 5.0, false, true});
+    require(cutDocument.rebuild(), cutDocument.lastError());
+    requireNear(volumeOf(cutDocument.bodyShape()), 980.0, 1.0e-4,
+                "Reverse cut volume");
+}
+
+void testExplicitPlaneSketch() {
+    // A sketch on an arbitrary world plane: normal +X, local +U along world +Y
+    // and local +V along world +Z. No datum, offset or face reference can
+    // express that, so this exercises the explicit plane variant end to end.
+    PartDocument document;
+    const FeatureId sketchId = document.addFeature(
+        SketchFeatureParams{explicitPlane(Vec3{0.0, 0.0, 0.0},
+                                          Vec3{1.0, 0.0, 0.0},
+                                          Vec3{0.0, 2.0, 0.0}),
+                            {{1, Rectangle2D{0.0, 0.0, 4.0, 5.0}}}});
+    document.addFeature(ExtrudeFeatureParams{sketchId, 3.0, false});
+    require(document.rebuild(), document.lastError());
+    requireNear(volumeOf(document.bodyShape()), 60.0, 1.0e-6,
+                "Explicit plane extrude volume");
+
+    const Bounds bounds = boundsOf(document.bodyShape());
+    requireNear(bounds.xMin, 0.0, 1.0e-6, "explicit plane minimum X");
+    requireNear(bounds.xMax, 3.0, 1.0e-6, "explicit plane maximum X");
+    requireNear(bounds.yMin, 0.0, 1.0e-6, "explicit plane minimum Y");
+    requireNear(bounds.yMax, 4.0, 1.0e-6, "explicit plane maximum Y");
+    requireNear(bounds.zMin, 0.0, 1.0e-6, "explicit plane minimum Z");
+    requireNear(bounds.zMax, 5.0, 1.0e-6, "explicit plane maximum Z");
+
+    // A degenerate plane must be reported instead of building silently.
+    PartDocument badDocument;
+    const FeatureId badSketch = badDocument.addFeature(
+        SketchFeatureParams{explicitPlane(Vec3{0.0, 0.0, 0.0},
+                                          Vec3{0.0, 0.0, 0.0},
+                                          Vec3{0.0, 1.0, 0.0}),
+                            {{1, Rectangle2D{0.0, 0.0, 1.0, 1.0}}}});
+    badDocument.addFeature(ExtrudeFeatureParams{badSketch, 1.0, false});
+    require(!badDocument.rebuild(),
+            "A degenerate explicit sketch plane must fail the rebuild");
+}
+
+void testSuppressionDependenciesCascadeAndClear() {
+    ModelingCore core;
+    const ModelResult sketch = core.execute(AddFeatureCommand{rectangleSketch()});
+    const ModelResult extrude = core.execute(AddFeatureCommand{
+        ExtrudeFeatureParams{sketch.featureId, 10.0, false}});
+    require(sketch.success && extrude.success, "Test feature creation failed");
+
+    const ModelResult suppress = core.execute(
+        SetFeatureSuppressedCommand{extrude.featureId, true});
+    require(suppress.success, suppress.error);
+    require(core.document().rebuild(), core.document().lastError());
+    require(core.document().bodyShape().IsNull(), "Suppressed extrusion must not build");
+    require(core.execute(SetFeatureSuppressedCommand{extrude.featureId, false}).success,
+            "Extrusion should be restorable");
+    require(core.document().rebuild(), core.document().lastError());
+
+    const std::vector<FeatureId> dependents = core.document().dependentsOf(sketch.featureId);
+    require(dependents.size() == 1U && dependents.front() == extrude.featureId,
+            "Dependency query should report the consuming extrusion");
+    const ModelResult rejected = core.execute(RemoveFeatureCommand{sketch.featureId, false});
+    require(!rejected.success, "Removing a referenced feature must require cascade");
+    require(core.document().features().size() == 2U,
+            "Rejected removal must leave history unchanged");
+    const ModelResult cascaded = core.execute(RemoveFeatureCommand{sketch.featureId, true});
+    require(cascaded.success, cascaded.error);
+    require(core.document().features().empty(),
+            "Cascade removal should remove transitive dependents");
+
+    core.document().addFeature(rectangleSketch());
+    core.document().clear();
+    require(core.document().features().empty() && core.document().bodyShape().IsNull(),
+            "clear() should reset feature history and derived body");
+    require(core.document().addFeature(rectangleSketch()) == 1U,
+            "clear() should reset feature ID allocation");
+}
+
 }  // namespace
 
 int main() {
@@ -209,6 +396,12 @@ int main() {
         testReferenceFailureKeepsLastSuccessfulBody();
         testCommandApi();
         testLineProfileAndDatumPlanes();
+        testOpenSketchAndEntityCommands();
+        testUnorderedLinesAndReferencePoints();
+        testMultiLoopProfile();
+        testOffsetPlaneExtrudeOperationsAndReverseCut();
+        testExplicitPlaneSketch();
+        testSuppressionDependenciesCascadeAndClear();
         std::cout << "CadModelCore V0 smoke test passed. STEP output: "
                   << outputDirectory << '\n';
         return 0;

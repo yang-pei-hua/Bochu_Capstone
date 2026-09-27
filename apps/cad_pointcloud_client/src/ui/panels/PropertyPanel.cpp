@@ -4,6 +4,7 @@
 #include "ui/panels/CapturePanel.h"
 #include "ui/panels/ReconstructPanel.h"
 #include "ui/panels/RenderPanel.h"
+#include "ui/panels/SketchEntityPanel.h"
 
 #include <QCheckBox>
 #include <QColorDialog>
@@ -51,6 +52,7 @@ PropertyPanel::PropertyPanel(QWidget* parent)
     , m_renderPanel(new RenderPanel(this))
     , m_capturePanel(new CapturePanel(this))
     , m_reconstructPanel(new ReconstructPanel(this))
+    , m_sketchEntityPanel(new SketchEntityPanel(this))
 {
     m_objectTab = createObjectTab();
     m_tabs->addTab(m_objectTab, tr("Object"));
@@ -82,6 +84,11 @@ CapturePanel* PropertyPanel::capturePanel() const
 ReconstructPanel* PropertyPanel::reconstructPanel() const
 {
     return m_reconstructPanel;
+}
+
+SketchEntityPanel* PropertyPanel::sketchEntityPanel() const
+{
+    return m_sketchEntityPanel;
 }
 
 void PropertyPanel::showCapturePanel(bool visible)
@@ -121,6 +128,26 @@ void PropertyPanel::showReconstructPanel(bool visible)
 bool PropertyPanel::isReconstructPanelVisible() const
 {
     return m_tabs->indexOf(m_reconstructPanel) >= 0;
+}
+
+void PropertyPanel::showSketchEntityPanel(bool visible)
+{
+    const int index = m_tabs->indexOf(m_sketchEntityPanel);
+    if (visible) {
+        if (index < 0) {
+            // Like Capture and Reconstruct, the sketch editor is a tool page: it
+            // is detached rather than destroyed so the fields keep their state.
+            m_tabs->addTab(m_sketchEntityPanel, tr("Sketch"));
+        }
+        m_tabs->setCurrentWidget(m_sketchEntityPanel);
+    } else if (index >= 0) {
+        m_tabs->removeTab(index);
+    }
+}
+
+bool PropertyPanel::isSketchEntityPanelVisible() const
+{
+    return m_tabs->indexOf(m_sketchEntityPanel) >= 0;
 }
 
 void PropertyPanel::showObjectProperties()

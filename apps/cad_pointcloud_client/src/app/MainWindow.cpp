@@ -12,7 +12,12 @@
 #include "ui/panels/ReconstructPanel.h"
 #include "ui/panels/RenderPanel.h"
 #include "ui/panels/ScenePanel.h"
+#include "ui/panels/SketchEntityPanel.h"
+#include "ui/panels/SketchPanel.h"
+#include "ui/panels/SketchToolPalette.h"
 #include "ui/viewport/VTKViewer.h"
+
+#include <modeling/SketchValidation.h>
 
 #include <QAction>
 #include <QApplication>
@@ -21,6 +26,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QKeySequence>
 #include <QMenu>
@@ -28,9 +34,14 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QStatusBar>
+#include <QStringList>
 #include <QStyle>
 #include <QToolBar>
 #include <QToolButton>
+
+#include <algorithm>
+#include <cmath>
+#include <string>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -59,7 +70,9 @@ MainWindow::MainWindow(QWidget* parent)
     logInfo(tr("Application started"));
     logInfo(tr("VTK renderer initialized"));
 
-    generateDemoModel(m_modelingPanel->parameters());
+    // An empty document has no body to fit, so the camera is framed on the datum
+    // planes that are what the user picks a sketch plane from.
+    m_viewer->resetCamera();
 }
 
 void MainWindow::createModelingController()
@@ -136,28 +149,9 @@ void MainWindow::onReconstructionFinished(const QString& pointCloudPath, int poi
     }
 }
 
-void MainWindow::generateDemoModel(const DemoModelParameters& parameters)
-{
-    // A brand new document has no meaningful previous view, so fit the camera
-    // once; later edits keep the camera untouched.
-    m_fitViewOnNextRebuild = true;
-
-    if (m_modelingController->createDemoModel(parameters)) {
-        logInfo(tr("Demo model generated: %1 features")
-                    .arg(m_modelingController->features().size()));
-    } else {
-        logError(tr("Demo model generation failed: %1")
-                     .arg(m_modelingController->lastError()));
-    }
-}
-
 void MainWindow::onModelRebuilt()
 {
     m_viewer->setBodyShape(m_modelingController->bodyShape());
-    if (m_fitViewOnNextRebuild) {
-        m_fitViewOnNextRebuild = false;
-        m_viewer->resetCamera();
-    }
     m_viewer->renderNow();
 
     m_modelingPanel->setFeatures(m_modelingController->features());
@@ -167,6 +161,54 @@ void MainWindow::onModelRebuilt()
         error.isEmpty()
             ? tr("Rebuild succeeded | %1 features").arg(m_modelingController->features().size())
             : error);
+
+    // The feature graph is the only sketch the client has, so whatever the core
+    // now holds is what both the in-viewport preview and the panel show.
+    pushSketchState();
+    updateSketchEntryState();
+}
+
+void MainWindow::pushSketchState()
+{
+    if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
+        return;
+    }
+
+    const modeling::SketchFeatureParams* params =
+        m_modelingController->sketchParams(m_sketchFeatureId);
+    if (params == nullptr) {
+        // The sketch was deleted (directly or by a cascade), so the workspace
+        // closes with it instead of describing a feature that no longer exists.
+        m_sketchFeatureId = modeling::kInvalidFeatureId;
+        m_hasSketchFrame = false;
+        m_viewer->clearSketch();
+        m_sketchPanel->clearSketch();
+        m_propertyPanel->sketchEntityPanel()->setEntity(nullptr);
+        m_propertyPanel->showSketchEntityPanel(false);
+        if (m_sketchMode) {
+            exitSketchMode();
+        }
+        return;
+    }
+
+    sketchapp::PlaneFrame frame;
+    if (!sketchapp::resolveSketchFrame(m_modelingController->features(), params->plane,
+                                       frame)) {
+        frame = sketchapp::datumPlaneFrame(modeling::DatumPlane::XY);
+    }
+    m_sketchFrame = frame;
+    m_hasSketchFrame = true;
+    m_sketchPanel->setSketch(*params, frame);
+    m_viewer->setSketch(*params, frame);
+    if (m_sketchMode) {
+        // A sketch on a face follows the body when an upstream feature changes, so
+        // the plane the tools project onto is refreshed from the rebuilt frame.
+        m_viewer->setSketchPlane(frame);
+    }
+    // The property editor keeps describing the selected entity, whose values the
+    // core may have just re-validated.
+    m_propertyPanel->sketchEntityPanel()->setEntity(
+        m_sketchPanel->findEntity(m_sketchPanel->selectedEntityId()));
 }
 
 void MainWindow::onModelError(const QString& message)
@@ -176,9 +218,476 @@ void MainWindow::onModelError(const QString& message)
     // only in the console; the previous body stays on screen untouched.
     m_modelingPanel->setFeatures(m_modelingController->features());
     m_modelingPanel->setStatusText(message);
-    m_statusLabel->setText(tr("Ready | Model: Demo | Camera: %1")
+    m_statusLabel->setText(tr("Ready | Model: None | Camera: %1")
                                .arg(m_viewer->cameraParameters().parallelProjection
                                         ? tr("Orthographic") : tr("Perspective")));
+}
+
+void MainWindow::clearPendingSelection()
+{
+    m_pendingSketchPlane.reset();
+    m_pendingFaceId = -1;
+    m_viewer->clearFaceHighlight();
+    m_viewer->clearDatumPlaneHighlight();
+    updateSketchEntryState();
+}
+
+void MainWindow::updateSketchEntryState()
+{
+    // "New Sketch" is inert until a plane has been picked, which is what makes
+    // the entry point meaningful on an empty scene and on a modeled body alike.
+    m_newSketchAction->setEnabled(m_pendingSketchPlane.has_value() && !m_sketchMode);
+}
+
+void MainWindow::onDatumPlaneSelected(modeling::DatumPlane plane)
+{
+    if (m_sketchMode) {
+        return;
+    }
+    m_pendingSketchPlane = modeling::datumPlane(plane);
+    m_pendingFaceId = -1;
+    m_viewer->clearFaceHighlight();
+    m_viewer->highlightDatumPlane(plane);
+    updateSketchEntryState();
+    const QString label = sketchapp::planeLabel(*m_pendingSketchPlane);
+    statusBar()->showMessage(tr("Sketch plane: %1 - press New Sketch to draw on it").arg(label),
+                             4000);
+    logInfo(tr("Sketch plane %1 selected").arg(label));
+}
+
+void MainWindow::onFacePicked(int faceId, bool planar, const sketchapp::PlaneFrame& plane)
+{
+    if (m_sketchMode) {
+        return;
+    }
+    if (!planar) {
+        // Only planar faces can host a sketch: a cylindrical face has no plane to
+        // lay a profile out on, so the pick is refused with an explanation rather
+        // than silently ignored.
+        clearPendingSelection();
+        statusBar()->showMessage(tr("Face %1 is curved and cannot host a sketch").arg(faceId),
+                                 4000);
+        logWarning(tr("Face %1 is curved and cannot host a sketch; pick a planar face.")
+                       .arg(faceId));
+        return;
+    }
+
+    // The face is captured as an explicit world-space plane, so the sketch works
+    // on this face whatever its orientation is - not only on XY/YZ/XZ.
+    m_pendingSketchPlane = sketchapp::plane3dOf(plane);
+    m_pendingFaceId = faceId;
+    m_viewer->clearDatumPlaneHighlight();
+    m_viewer->highlightFace(faceId);
+    updateSketchEntryState();
+    statusBar()->showMessage(
+        tr("Face %1 (planar) selected - press New Sketch to draw on it").arg(faceId), 4000);
+    logInfo(tr("Face %1 selected as sketch plane").arg(faceId));
+}
+
+void MainWindow::onEmptyPicked()
+{
+    if (m_sketchMode) {
+        return;
+    }
+    clearPendingSelection();
+}
+
+void MainWindow::onNewSketchRequested()
+{
+    if (!m_pendingSketchPlane.has_value()) {
+        logWarning(tr("Select a planar face or a datum plane before starting a sketch."));
+        return;
+    }
+    const modeling::SketchPlaneReference plane = *m_pendingSketchPlane;
+    clearPendingSelection();
+    beginSketch(plane);
+}
+
+void MainWindow::beginSketch(const modeling::SketchPlaneReference& plane)
+{
+    // The document starts empty and only sketching fills it, so a new sketch is
+    // simply appended to the feature graph the previous ones built.
+    //
+    // The sketch enters the feature graph right away, so an unfinished one is
+    // persisted and editable instead of living only on the client (core request
+    // F3 makes an open profile a normal, non-fatal state).
+    modeling::SketchFeatureParams params;
+    params.plane = plane;
+    modeling::FeatureId createdId = modeling::kInvalidFeatureId;
+    if (!m_modelingController->addSketch(params, createdId)) {
+        const QString message = m_modelingController->lastError();
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+
+    // The rebuild this command triggered ran before the id was known, so the new
+    // sketch is pushed here; from now on onModelRebuilt() keeps it in sync.
+    m_sketchFeatureId = createdId;
+    pushSketchState();
+    enterSketchMode();
+    logInfo(tr("Sketch started (feature %1) on %2")
+                .arg(createdId)
+                .arg(sketchapp::planeLabel(plane)));
+}
+
+void MainWindow::enterSketchMode()
+{
+    m_sketchMode = true;
+    m_hasDraftAnchor = false;
+    m_toolPalette->setActiveTool(ViewportTool::Select);
+    m_toolPalette->setVisible(true);
+    m_viewer->setDatumPlanesVisible(false);
+    m_viewer->setSketchInteractionEnabled(true);
+    m_viewer->setViewportTool(ViewportTool::Select);
+    if (m_hasSketchFrame) {
+        m_viewer->setSketchPlane(m_sketchFrame);
+        // A sketch is drawn flat, so the view turns onto its plane in an
+        // orthographic projection; the 3D view it replaced is restored on exit.
+        m_cameraBeforeSketch = m_viewer->cameraParameters();
+        m_hasCameraBeforeSketch = true;
+        m_viewer->alignToSketchPlane(m_sketchFrame);
+    }
+    updateSketchEntryState();
+    updateSketchHint();
+}
+
+void MainWindow::exitSketchMode()
+{
+    m_sketchMode = false;
+    m_hasDraftAnchor = false;
+    m_viewer->clearSketchDraft();
+    m_viewer->setSketchInteractionEnabled(false);
+    m_viewer->clearSketchPlane();
+    // The flat sketch view is left behind and the 3D camera the user came from
+    // (with its projection mode) is put back.
+    if (m_hasCameraBeforeSketch) {
+        m_viewer->applyCamera(m_cameraBeforeSketch);
+        m_hasCameraBeforeSketch = false;
+    }
+    // The drawing tools and the reference planes swap back: the model mode picks
+    // its next sketch plane on the datum planes.
+    m_toolPalette->setVisible(false);
+    m_viewer->clearDatumPlaneHighlight();
+    m_viewer->setDatumPlanesVisible(true);
+    updateSketchEntryState();
+    m_viewer->renderNow();
+    logInfo(tr("Sketch closed; the drawing tools are hidden until a sketch is started again"));
+}
+
+void MainWindow::onExitSketch()
+{
+    if (!m_sketchMode) {
+        return;
+    }
+    exitSketchMode();
+}
+
+void MainWindow::onViewportToolChanged(ViewportTool tool)
+{
+    m_viewer->setViewportTool(tool);
+    m_hasDraftAnchor = false;
+    m_viewer->clearSketchDraft();
+    m_viewer->renderNow();
+
+    if (!m_sketchMode) {
+        return;
+    }
+    updateSketchHint();
+}
+
+void MainWindow::updateSketchHint()
+{
+    if (!m_sketchMode) {
+        return;
+    }
+    switch (m_viewer->viewportTool()) {
+    case ViewportTool::Select:
+        m_toolPalette->setSelectionText(tr("Select: click a sketch entity"));
+        break;
+    case ViewportTool::Point:
+        m_toolPalette->setSelectionText(tr("Point: click the sketch plane"));
+        break;
+    case ViewportTool::Line:
+        m_toolPalette->setSelectionText(m_hasDraftAnchor ? tr("Line: click the end point")
+                                                         : tr("Line: click the start point"));
+        break;
+    case ViewportTool::Rectangle:
+        m_toolPalette->setSelectionText(m_hasDraftAnchor
+                                            ? tr("Rectangle: click the opposite corner")
+                                            : tr("Rectangle: click one corner"));
+        break;
+    case ViewportTool::Circle:
+        m_toolPalette->setSelectionText(m_hasDraftAnchor
+                                            ? tr("Circle: click a point on the radius")
+                                            : tr("Circle: click the center"));
+        break;
+    }
+}
+
+void MainWindow::ensureSketchPoint(const modeling::Point2D& point)
+{
+    // The viewer snaps a click onto an existing vertex, so a point that is not
+    // already there came from a free click and has to become a point entity
+    // before the line that uses it. A snapped point is a vertex's exact
+    // coordinates, so a sub-micron tolerance is all this needs.
+    constexpr double kExistingVertexTolerance = 1.0e-6;
+    if (m_viewer->hasSketchVertexAt(point, kExistingVertexTolerance)) {
+        return;
+    }
+    onSketchEntityAdded(modeling::Point2D{point.x, point.y});
+}
+
+void MainWindow::onSketchPointRequested(const modeling::Point2D& point)
+{
+    if (!m_sketchMode || m_sketchFeatureId == modeling::kInvalidFeatureId) {
+        return;
+    }
+
+    const ViewportTool tool = m_viewer->viewportTool();
+    if (tool == ViewportTool::Point) {
+        onSketchEntityAdded(modeling::Point2D{point.x, point.y});
+        return;
+    }
+
+    if (!m_hasDraftAnchor) {
+        // The first click only anchors the operation; the viewer rubber-bands from
+        // it until the second click completes the shape. A line anchors on a real
+        // point, so a click that missed existing geometry becomes one.
+        if (tool == ViewportTool::Line) {
+            ensureSketchPoint(point);
+        }
+        m_draftAnchor = point;
+        m_hasDraftAnchor = true;
+        m_viewer->setSketchDraftAnchor(point);
+        updateSketchHint();
+        return;
+    }
+
+    const modeling::Point2D anchor = m_draftAnchor;
+    m_hasDraftAnchor = false;
+    m_viewer->clearSketchDraft();
+
+    switch (tool) {
+    case ViewportTool::Line:
+        ensureSketchPoint(point);
+        onSketchEntityAdded(modeling::Line2D{anchor.x, anchor.y, point.x, point.y});
+        // SolidWorks keeps drawing from the last point, so the chain continues
+        // until the tool is cancelled or changed.
+        m_draftAnchor = point;
+        m_hasDraftAnchor = true;
+        m_viewer->setSketchDraftAnchor(point);
+        break;
+    case ViewportTool::Rectangle:
+        onSketchEntityAdded(modeling::Rectangle2D{
+            std::min(anchor.x, point.x), std::min(anchor.y, point.y),
+            std::abs(point.x - anchor.x), std::abs(point.y - anchor.y)});
+        break;
+    case ViewportTool::Circle: {
+        const double radius = std::hypot(point.x - anchor.x, point.y - anchor.y);
+        onSketchEntityAdded(modeling::Circle2D{anchor.x, anchor.y, radius});
+        break;
+    }
+    default:
+        break;
+    }
+    updateSketchHint();
+    m_viewer->renderNow();
+}
+
+void MainWindow::onSketchEntityPicked(modeling::SketchEntityId entityId)
+{
+    // The entity list is the one place a selection is kept, so the viewport pick
+    // is expressed by selecting the matching row.
+    m_sketchPanel->selectEntity(entityId);
+}
+
+void MainWindow::onSketchSelectionCleared()
+{
+    m_sketchPanel->selectEntity(modeling::kInvalidSketchEntityId);
+}
+
+void MainWindow::onSketchCancelled()
+{
+    m_hasDraftAnchor = false;
+    m_viewer->clearSketchDraft();
+    m_viewer->renderNow();
+    if (m_sketchMode) {
+        updateSketchHint();
+    }
+}
+
+void MainWindow::onSketchEntityAdded(const modeling::SketchGeometry& geometry)
+{
+    if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
+        m_sketchPanel->setStatusText(tr("Start a new sketch before drawing"));
+        return;
+    }
+
+    // The core allocates the entity id and validates the geometry, so the entity
+    // only reaches the canvas once the command has been accepted.
+    modeling::SketchEntityId createdId = modeling::kInvalidSketchEntityId;
+    if (!m_modelingController->addSketchEntity(m_sketchFeatureId, geometry, createdId)) {
+        const QString message = m_modelingController->lastError();
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+    logInfo(tr("Sketch entity %1 added").arg(createdId));
+}
+
+void MainWindow::onSketchEntityRemoved(modeling::SketchEntityId entityId)
+{
+    if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
+        return;
+    }
+    if (!m_modelingController->removeSketchEntity(m_sketchFeatureId, entityId)) {
+        const QString message = m_modelingController->lastError();
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+    logInfo(tr("Sketch entity %1 deleted").arg(entityId));
+}
+
+void MainWindow::onSketchEntitySelected(modeling::SketchEntityId entityId)
+{
+    const modeling::SketchEntity* entity = m_sketchPanel->findEntity(entityId);
+    m_propertyPanel->sketchEntityPanel()->setEntity(entity);
+    m_propertyPanel->showSketchEntityPanel(entity != nullptr);
+}
+
+void MainWindow::onSketchEntitySelectionCleared()
+{
+    m_propertyPanel->sketchEntityPanel()->setEntity(nullptr);
+    m_propertyPanel->showSketchEntityPanel(false);
+}
+
+void MainWindow::onSketchEntityEdited()
+{
+    if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
+        return;
+    }
+    const modeling::SketchEntityId entityId = m_sketchPanel->selectedEntityId();
+    if (entityId == modeling::kInvalidSketchEntityId) {
+        return;
+    }
+    if (!m_modelingController->editSketchEntity(
+            m_sketchFeatureId, entityId,
+            m_propertyPanel->sketchEntityPanel()->geometry())) {
+        const QString message = m_modelingController->lastError();
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+    logInfo(tr("Sketch entity %1 updated").arg(entityId));
+}
+
+void MainWindow::extrudeSketch(double depth, bool reverse, modeling::ExtrudeOperation operation)
+{
+    if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
+        const QString message = tr("Start a sketch before extruding.");
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+
+    // An unfinished sketch is a normal editing state, so the core's own verdict -
+    // not the button - decides whether an extrude can be issued, and its error is
+    // what the user is shown.
+    const modeling::SketchFeatureParams* params =
+        m_modelingController->sketchParams(m_sketchFeatureId);
+    std::string error;
+    if (params == nullptr || !modeling::validateSketch(*params, error)) {
+        const QString message = params == nullptr
+            ? tr("The sketch is no longer part of the document.")
+            : QString::fromStdString(error);
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+
+    modeling::FeatureId extrudeId = modeling::kInvalidFeatureId;
+    if (!m_modelingController->extrude(m_sketchFeatureId, depth, reverse, operation,
+                                       extrudeId)) {
+        const QString message = m_modelingController->lastError();
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+
+    logInfo(tr("Sketch extruded: feature %1, depth %2 mm").arg(extrudeId).arg(depth));
+    m_sketchPanel->setStatusText(tr("Extruded %1 mm (feature %2); its end face is now "
+                                    "available as a sketch plane").arg(depth).arg(extrudeId));
+}
+
+void MainWindow::cutSketch(double depth, bool throughAll, bool reverse)
+{
+    if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
+        const QString message = tr("Start a sketch before cutting.");
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+
+    const modeling::SketchFeatureParams* params =
+        m_modelingController->sketchParams(m_sketchFeatureId);
+    std::string error;
+    if (params == nullptr || !modeling::validateSketch(*params, error)) {
+        const QString message = params == nullptr
+            ? tr("The sketch is no longer part of the document.")
+            : QString::fromStdString(error);
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+
+    // A cut on a datum plane still removes material wherever the sketch crosses
+    // the body, so the core decides the outcome and its error is surfaced here.
+    modeling::FeatureId cutId = modeling::kInvalidFeatureId;
+    if (!m_modelingController->cut(m_sketchFeatureId, depth, throughAll, reverse, cutId)) {
+        const QString message = m_modelingController->lastError();
+        logError(message);
+        m_sketchPanel->setStatusText(message);
+        return;
+    }
+
+    logInfo(tr("Sketch cut: feature %1").arg(cutId));
+    m_sketchPanel->setStatusText(tr("Cut applied (feature %1)").arg(cutId));
+}
+
+void MainWindow::deleteFeature(modeling::FeatureId featureId)
+{
+    // Deleting a sketch that an extrusion still references would leave a document
+    // that cannot rebuild, so the dependents are named before the user confirms
+    // and the removal then cascades (core request: cascade delete).
+    const std::vector<modeling::FeatureId> dependents =
+        m_modelingController->dependentsOf(featureId);
+
+    QString message = tr("Delete feature %1?").arg(featureId);
+    if (!dependents.empty()) {
+        QStringList ids;
+        for (const modeling::FeatureId id : dependents) {
+            ids << QString::number(id);
+        }
+        message = tr("Feature %1 is used by feature(s) %2.\n\nDeleting it deletes them too.")
+                      .arg(featureId)
+                      .arg(ids.join(QStringLiteral(", ")));
+    }
+
+    if (QMessageBox::question(this, tr("Delete Feature"), message,
+                              QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+        != QMessageBox::Yes) {
+        return;
+    }
+
+    if (!m_modelingController->removeFeature(featureId, true)) {
+        const QString error = m_modelingController->lastError();
+        logError(error);
+        m_modelingPanel->setStatusText(error);
+        return;
+    }
+    logInfo(tr("Feature %1 deleted").arg(featureId));
 }
 
 void MainWindow::logInfo(const QString& message)
@@ -208,6 +717,13 @@ void MainWindow::createActions()
     // pipeline, so it sits right next to Open Model in the toolbar.
     m_captureAction = new QAction(tr("Capture Image"), this);
     m_captureAction->setToolTip(tr("Save the current viewport as a PNG"));
+    // Starting a sketch is the entry point of manual modeling, and the plane it
+    // will use is picked by clicking a datum plane or a planar face in the
+    // viewport, so the action stays inert until such a selection exists.
+    m_newSketchAction = new QAction(tr("New Sketch"), this);
+    m_newSketchAction->setToolTip(
+        tr("Create a sketch on the selected datum plane or planar face"));
+    m_newSketchAction->setEnabled(false);
     m_closeAction = new QAction(tr("Close Model"), this);
     m_saveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Save"), this);
     m_saveAction->setShortcut(QKeySequence::Save);
@@ -267,6 +783,14 @@ void MainWindow::createToolBar()
     // by capturing images, then the stages reserved for later versions.
     toolBar->addAction(m_openAction);
     toolBar->addSeparator();
+    // The toolbar button is created explicitly so it keeps a stable object name
+    // for the UI automation checks, which a QAction alone does not provide.
+    auto* newSketchButton = new QToolButton(toolBar);
+    newSketchButton->setObjectName(QStringLiteral("newSketchButton"));
+    newSketchButton->setDefaultAction(m_newSketchAction);
+    newSketchButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    toolBar->addWidget(newSketchButton);
+    toolBar->addSeparator();
     toolBar->addAction(m_captureAction);
     toolBar->addAction(m_reconstructToolAction);
 
@@ -284,7 +808,22 @@ void MainWindow::createToolBar()
 void MainWindow::createCentralArea()
 {
     m_viewer = new VTKViewer(this);
-    setCentralWidget(m_viewer);
+    m_toolPalette = new SketchToolPalette(this);
+
+    // The tool strip sits against the left edge of the viewport rather than
+    // floating over it: the VTK surface is a native window, so an overlay widget
+    // would be painted behind it. It only carries the sketch tools, so it stays
+    // hidden until a sketch is open - the model mode picks its plane on the
+    // datum planes drawn in the viewport itself.
+    m_toolPalette->setVisible(false);
+
+    auto* central = new QWidget(this);
+    auto* layout = new QHBoxLayout(central);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    layout->addWidget(m_toolPalette);
+    layout->addWidget(m_viewer, 1);
+    setCentralWidget(central);
 }
 
 void MainWindow::createDockPanels()
@@ -327,11 +866,24 @@ void MainWindow::createDockPanels()
     modelingDock->setMinimumWidth(250);
     addDockWidget(Qt::LeftDockWidgetArea, modelingDock);
     splitDockWidget(sceneDock, modelingDock, Qt::Vertical);
+
+    // The sketch panel shares the bottom row with the console: the entity list and
+    // the extrude/cut parameters need a wide slot, and the right-hand column is
+    // already taken by Properties at full height. The sketch itself is drawn in
+    // the 3D viewport, not here.
+    m_sketchPanel = new SketchPanel(this);
+    auto* sketchDock = new QDockWidget(tr("Sketch"), this);
+    sketchDock->setObjectName(QStringLiteral("sketchDock"));
+    sketchDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
+    sketchDock->setWidget(m_sketchPanel);
+    sketchDock->setMinimumWidth(360);
+    addDockWidget(Qt::BottomDockWidgetArea, sketchDock);
+    splitDockWidget(consoleDock, sketchDock, Qt::Horizontal);
 }
 
 void MainWindow::createStatusBar()
 {
-    m_statusLabel = new QLabel(tr("Ready | Model: Demo | Camera: Perspective"), this);
+    m_statusLabel = new QLabel(tr("Ready | Model: None | Camera: Perspective"), this);
     statusBar()->addWidget(m_statusLabel, 1);
 }
 
@@ -372,20 +924,36 @@ void MainWindow::connectUi()
         m_viewer->setStandardView(CameraController::StandardView::Bottom);
         logInfo(tr("Bottom view selected"));
     });
-    connect(m_modelingPanel, &ModelingPanel::generateRequested,
-            this, &MainWindow::generateDemoModel);
-    connect(m_modelingPanel, &ModelingPanel::applyRequested, this, [this](const DemoModelParameters& parameters) {
-        if (m_modelingController->updateDemoModel(parameters)) {
-            logInfo(tr("Parameters applied: %1 features")
-                        .arg(m_modelingController->features().size()));
-        } else {
-            logError(tr("Parameter update failed: %1")
-                         .arg(m_modelingController->lastError()));
-        }
-    });
-    connect(m_modelingPanel, &ModelingPanel::fitViewRequested, this, [this]() {
-        m_viewer->resetCamera();
-    });
+    connect(m_sketchPanel, &SketchPanel::entityRemoveRequested,
+            this, &MainWindow::onSketchEntityRemoved);
+    connect(m_sketchPanel, &SketchPanel::extrudeRequested, this, &MainWindow::extrudeSketch);
+    connect(m_sketchPanel, &SketchPanel::cutRequested, this, &MainWindow::cutSketch);
+    connect(m_sketchPanel, &SketchPanel::entitySelected, this, &MainWindow::onSketchEntitySelected);
+    connect(m_sketchPanel, &SketchPanel::entitySelectionCleared,
+            this, &MainWindow::onSketchEntitySelectionCleared);
+    connect(m_propertyPanel->sketchEntityPanel(), &SketchEntityPanel::entityEdited,
+            this, &MainWindow::onSketchEntityEdited);
+    connect(m_modelingPanel, &ModelingPanel::deleteFeatureRequested,
+            this, &MainWindow::deleteFeature);
+
+    // Viewport sketch workflow: a click picks the sketch plane and the toolbar
+    // action turns that selection into a sketch.
+    connect(m_newSketchAction, &QAction::triggered, this, &MainWindow::onNewSketchRequested);
+    connect(m_toolPalette, &SketchToolPalette::toolChanged,
+            this, &MainWindow::onViewportToolChanged);
+    connect(m_toolPalette, &SketchToolPalette::exitSketchRequested,
+            this, &MainWindow::onExitSketch);
+
+    connect(m_viewer, &VTKViewer::facePicked, this, &MainWindow::onFacePicked);
+    connect(m_viewer, &VTKViewer::datumPlanePicked, this, &MainWindow::onDatumPlaneSelected);
+    connect(m_viewer, &VTKViewer::emptyPicked, this, &MainWindow::onEmptyPicked);
+    connect(m_viewer, &VTKViewer::sketchPointRequested,
+            this, &MainWindow::onSketchPointRequested);
+    connect(m_viewer, &VTKViewer::sketchEntityPicked,
+            this, &MainWindow::onSketchEntityPicked);
+    connect(m_viewer, &VTKViewer::sketchSelectionCleared,
+            this, &MainWindow::onSketchSelectionCleared);
+    connect(m_viewer, &VTKViewer::sketchCancelled, this, &MainWindow::onSketchCancelled);
 
     connect(m_scenePanel, &ScenePanel::nodeSelected, this, [this](SceneNodeType type) {
         if (type == SceneNodeType::Model) {
@@ -641,7 +1209,7 @@ void MainWindow::updateCameraStatus(bool parallelProjection)
 {
     const QString current = m_statusLabel->text();
     const int cameraSeparator = current.lastIndexOf(QStringLiteral(" | Camera:"));
-    const QString prefix = cameraSeparator >= 0 ? current.left(cameraSeparator) : tr("Ready | Model: Demo");
+    const QString prefix = cameraSeparator >= 0 ? current.left(cameraSeparator) : tr("Ready | Model: None");
     m_statusLabel->setText(prefix + QStringLiteral(" | Camera: ")
                            + (parallelProjection ? tr("Orthographic") : tr("Perspective")));
 }

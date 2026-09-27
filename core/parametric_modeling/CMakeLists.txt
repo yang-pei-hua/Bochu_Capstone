@@ -17,6 +17,7 @@ add_library(CadModelCore
     src/ModelingCore.cpp
     src/PartDocument.cpp
     src/RebuildEngine.cpp
+    src/SketchValidation.cpp
     src/StepExporter.cpp
     src/occt/CutBuilder.cpp
     src/occt/ExtrudeBuilder.cpp
