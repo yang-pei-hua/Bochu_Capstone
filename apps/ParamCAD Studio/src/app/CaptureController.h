@@ -19,11 +19,14 @@ struct CaptureShot
     double azimuthDeg = 0.0;
     double elevationDeg = 0.0;
     double distance = 0.0;
+    // Kept with the shot so manifest.json can be a self-contained aggregate
+    // camera-pose file. Per-shot sidecars remain a backwards-compatible copy.
+    CameraParameters camera;
 };
 
 // One elevation ring of an orbit: how many azimuth steps are taken and the
-// height they are taken from. A group usually holds one ring, but a second one
-// below the horizon lets the same group also see the under-side of the model.
+// height they are taken from. The default spherical plan uses five 12-shot
+// rings and two one-shot pole rings.
 struct OrbitRing
 {
     int count = 0;

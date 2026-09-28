@@ -2,7 +2,6 @@
 
 #include "core/OrbitCamera.h"
 
-#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -12,7 +11,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QSpinBox>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -37,19 +35,6 @@ CapturePanel::CapturePanel(QWidget* parent)
     auto* outputForm = new QFormLayout(outputGroup);
     outputForm->addRow(tr("Base Directory"), directoryRow);
 
-    m_count = new QSpinBox(this);
-    m_count->setObjectName(QStringLiteral("captureCount"));
-    m_count->setRange(1, 360);
-    m_count->setValue(8);
-
-    m_elevation = new QDoubleSpinBox(this);
-    m_elevation->setObjectName(QStringLiteral("captureElevation"));
-    m_elevation->setRange(-OrbitCamera::kMaxElevation, OrbitCamera::kMaxElevation);
-    m_elevation->setDecimals(1);
-    m_elevation->setSingleStep(5.0);
-    m_elevation->setSuffix(QStringLiteral("°"));
-    m_elevation->setValue(30.0);
-
     m_distance = new QDoubleSpinBox(this);
     m_distance->setObjectName(QStringLiteral("captureDistance"));
     m_distance->setRange(0.001, 100000.0);
@@ -57,34 +42,22 @@ CapturePanel::CapturePanel(QWidget* parent)
     m_distance->setSingleStep(1.0);
     m_distance->setValue(OrbitParameters{}.distance);
 
-    // The upper ring alone never sees the under-side of a model, so a second
-    // ring mirrored below the horizon is offered for the same group. It stays
-    // off by default: doubling the shots is a choice, not the normal run.
-    m_includeLower = new QCheckBox(tr("Also capture underside"), this);
-    m_includeLower->setObjectName(QStringLiteral("captureIncludeLower"));
-
-    m_lowerElevation = new QDoubleSpinBox(this);
-    m_lowerElevation->setObjectName(QStringLiteral("captureLowerElevation"));
-    m_lowerElevation->setRange(-OrbitCamera::kMaxElevation, 0.0);
-    m_lowerElevation->setDecimals(1);
-    m_lowerElevation->setSingleStep(5.0);
-    m_lowerElevation->setSuffix(QStringLiteral("°"));
-    m_lowerElevation->setValue(-30.0);
-    m_lowerElevation->setEnabled(false);
-
-    auto* orbitGroup = new QGroupBox(tr("Orbit"), this);
+    auto* orbitGroup = new QGroupBox(tr("Spherical Capture"), this);
     auto* orbitForm = new QFormLayout(orbitGroup);
-    orbitForm->addRow(tr("Count"), m_count);
-    orbitForm->addRow(tr("Elevation"), m_elevation);
     orbitForm->addRow(tr("Distance"), m_distance);
-    orbitForm->addRow(QString(), m_includeLower);
-    orbitForm->addRow(tr("Lower Elevation"), m_lowerElevation);
+    auto* gridSummary = new QLabel(
+        tr("62 views: longitude every 30° at latitudes -60°, -30°, 0°, "
+           "+30°, +60°, plus one top and one bottom view. Every camera "
+           "looks at the model centroid."),
+        this);
+    gridSummary->setWordWrap(true);
+    orbitForm->addRow(gridSummary);
 
     m_photoButton = new QPushButton(tr("Capture Photo"), this);
     m_photoButton->setObjectName(QStringLiteral("capturePhotoButton"));
     m_photoButton->setProperty("primary", true);
 
-    m_orbitButton = new QPushButton(tr("Capture Orbit"), this);
+    m_orbitButton = new QPushButton(tr("Capture 62 Views"), this);
     m_orbitButton->setObjectName(QStringLiteral("captureOrbitButton"));
 
     // The render panel resizes the viewport image to the configured output size
@@ -131,11 +104,8 @@ CapturePanel::CapturePanel(QWidget* parent)
 
     connect(m_browseButton, &QPushButton::clicked, this, &CapturePanel::browseForDirectory);
     connect(m_photoButton, &QPushButton::clicked, this, &CapturePanel::capturePhotoRequested);
-    connect(m_includeLower, &QCheckBox::toggled,
-            m_lowerElevation, &QWidget::setEnabled);
     connect(m_orbitButton, &QPushButton::clicked, this, [this] {
-        emit captureOrbitRequested(m_count->value(), m_elevation->value(), m_distance->value(),
-                                   m_includeLower->isChecked(), m_lowerElevation->value());
+        emit captureOrbitRequested(m_distance->value());
     });
 }
 
@@ -185,11 +155,7 @@ void CapturePanel::setBusy(bool busy)
     m_photoButton->setEnabled(!busy);
     m_orbitButton->setEnabled(!busy);
     m_browseButton->setEnabled(!busy);
-    m_count->setEnabled(!busy);
-    m_elevation->setEnabled(!busy);
     m_distance->setEnabled(!busy);
-    m_includeLower->setEnabled(!busy);
-    m_lowerElevation->setEnabled(!busy && m_includeLower->isChecked());
 }
 
 void CapturePanel::browseForDirectory()

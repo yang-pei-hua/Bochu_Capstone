@@ -15,7 +15,8 @@
 
 namespace
 {
-constexpr int kSchemaVersion = 1;
+constexpr int kSidecarSchemaVersion = 1;
+constexpr int kManifestSchemaVersion = 2;
 
 QJsonArray toJsonArray(const double values[3])
 {
@@ -149,6 +150,7 @@ bool CaptureController::captureSingle(int width, int height)
     shot.azimuthDeg = orbit.azimuthDeg;
     shot.elevationDeg = orbit.elevationDeg;
     shot.distance = orbit.distance;
+    shot.camera = camera;
 
     if (!m_viewer->captureImage(directory + QLatin1Char('/') + shot.imageName, width, height)) {
         m_lastError = tr("Failed to write %1").arg(shot.imageName);
@@ -236,6 +238,7 @@ bool CaptureController::captureOrbit(const std::vector<OrbitRing>& rings, double
             shot.distance = distance;
 
             const CameraParameters camera = m_viewer->cameraParameters();
+            shot.camera = camera;
             if (!m_viewer->captureImage(directory + QLatin1Char('/') + shot.imageName,
                                         width, height)
                 || !writeSidecar(directory, shot, camera, width, height)) {
@@ -261,8 +264,8 @@ bool CaptureController::captureOrbit(const std::vector<OrbitRing>& rings, double
 
     m_viewer->applyCamera(original);
 
-    // The legacy "orbit" block keeps describing the first ring, which is what a
-    // single-ring run has always written; the rings array carries the rest.
+    // The legacy "orbit" block keeps describing the first ring; the rings array
+    // carries the complete spherical sampling plan including the poles.
     const double firstElevation = rings.empty() ? 0.0 : rings.front().elevationDeg;
     const OrbitParameters manifestOrbit{distance, 0.0, firstElevation};
     const bool manifestWritten = writeManifest(directory, groupName, QStringLiteral("orbit"),
@@ -291,7 +294,7 @@ bool CaptureController::writeSidecar(const QString& directory, const CaptureShot
 {
     QJsonObject root;
     root.insert(QStringLiteral("schema"), QStringLiteral("cadpc.capture.sidecar"));
-    root.insert(QStringLiteral("version"), kSchemaVersion);
+    root.insert(QStringLiteral("version"), kSidecarSchemaVersion);
     root.insert(QStringLiteral("image"), shot.imageName);
     root.insert(QStringLiteral("sidecar"), sidecarNameFor(shot.imageName));
     root.insert(QStringLiteral("group"), shot.groupName);
@@ -338,20 +341,20 @@ bool CaptureController::writeManifest(const QString& directory, const QString& g
         entry.insert(QStringLiteral("sidecar"), sidecarNameFor(shot.imageName));
         entry.insert(QStringLiteral("azimuthDeg"), shot.azimuthDeg);
         entry.insert(QStringLiteral("elevationDeg"), shot.elevationDeg);
+        entry.insert(QStringLiteral("camera"), cameraToJson(shot, shot.camera));
         shots.append(entry);
     }
 
     QJsonObject root;
     root.insert(QStringLiteral("schema"), QStringLiteral("cadpc.capture.manifest"));
-    root.insert(QStringLiteral("version"), kSchemaVersion);
+    root.insert(QStringLiteral("version"), kManifestSchemaVersion);
     root.insert(QStringLiteral("group"), groupName);
     root.insert(QStringLiteral("createdAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
     root.insert(QStringLiteral("mode"), mode);
 
     if (hasOrbit) {
-        // The orbit block describes the first ring alone, so a run without the
-        // under-side keeps the exact shape it has always had; the rings array
-        // below is what distinguishes a two-ring group.
+        // The legacy orbit block describes the first ring alone. The rings array
+        // below is the authoritative description of a multi-latitude plan.
         const int firstCount = rings.empty() ? static_cast<int>(groupShots.size())
                                              : rings.front().count;
         QJsonObject orbitObject;
@@ -388,6 +391,14 @@ bool CaptureController::writeManifest(const QString& directory, const QString& g
     output.insert(QStringLiteral("width"), width);
     output.insert(QStringLiteral("height"), height);
     root.insert(QStringLiteral("output"), output);
+
+    const QSize source = m_viewer == nullptr ? QSize() : m_viewer->captureSourceSize();
+    if (source.isValid()) {
+        QJsonObject render;
+        render.insert(QStringLiteral("width"), source.width());
+        render.insert(QStringLiteral("height"), source.height());
+        root.insert(QStringLiteral("render"), render);
+    }
 
     QString error;
     const QString path = directory + QStringLiteral("/manifest.json");

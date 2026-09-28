@@ -178,6 +178,28 @@ vtk_module_autoinit(
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(orbit_camera_test
+        tests/orbit_camera_test.cpp
+        src/core/OrbitCamera.cpp
+    )
+    target_include_directories(orbit_camera_test PRIVATE src)
+    if(MSVC)
+        target_compile_options(orbit_camera_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME orbit_camera_test COMMAND orbit_camera_test)
+
+    add_executable(camera_info_builder_test
+        tests/camera_info_builder_test.cpp
+        src/core/OrbitCamera.cpp
+        src/io/CameraInfoBuilder.cpp
+    )
+    target_include_directories(camera_info_builder_test PRIVATE src)
+    target_link_libraries(camera_info_builder_test PRIVATE Qt6::Core)
+    if(MSVC)
+        target_compile_options(camera_info_builder_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME camera_info_builder_test COMMAND camera_info_builder_test)
+
     add_executable(point_cloud_io_test
         tests/point_cloud_io_test.cpp
         src/io/PlyReader.cpp

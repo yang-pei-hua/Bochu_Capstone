@@ -8,7 +8,7 @@
 // session never scatters files outside the project.
 //
 // Layout:
-//   outputs/captures/<yyyyMMdd_HHmmss>/         shot_NNN.png + sidecars + manifest
+//   outputs/captures/<yyyyMMdd_HHmmss>/         PNGs + aggregate manifest + sidecars
 //   outputs/reconstructions/<yyyyMMdd_HHmmss>/  cloud.ply + camera_info.json + workspace
 //   outputs/screenshots/<yyyyMMdd_HHmmss>.png   single-frame viewport capture
 namespace ProjectPaths {

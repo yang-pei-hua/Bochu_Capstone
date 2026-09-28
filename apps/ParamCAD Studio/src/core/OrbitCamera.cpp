@@ -70,16 +70,34 @@ CameraParameters OrbitCamera::toCamera(const OrbitParameters& orbit,
         result.target[2] = 0.0;
     }
 
-    result.position[0] = result.target[0] + distance * cosElevation * cosAzimuth;
-    result.position[1] = result.target[1] + distance * cosElevation * sinAzimuth;
-    result.position[2] = result.target[2] + distance * sinElevation;
+    const bool atPole = std::abs(cosElevation) < 1.0e-12;
+    if (atPole) {
+        // All azimuths describe the same point at a pole. Pin X/Y exactly to the
+        // target so the aggregate camera file contains one canonical pose.
+        result.position[0] = result.target[0];
+        result.position[1] = result.target[1];
+        result.position[2] = result.target[2] + std::copysign(distance, sinElevation);
+    } else {
+        result.position[0] = result.target[0] + distance * cosElevation * cosAzimuth;
+        result.position[1] = result.target[1] + distance * cosElevation * sinAzimuth;
+        result.position[2] = result.target[2] + distance * sinElevation;
+    }
 
-    // An up vector that rotates with the orbit keeps the horizon level, and it is
-    // never degenerate because the elevation is clamped away from the poles.
     if (lookAtOrigin) {
-        result.up[0] = -sinElevation * cosAzimuth;
-        result.up[1] = -sinElevation * sinAzimuth;
-        result.up[2] = cosElevation;
+        if (atPole) {
+            // Keep +X pointing right in both pole images. This mirrors the
+            // standard Top/Bottom camera convention and stays perpendicular to
+            // the viewing direction.
+            result.up[0] = 0.0;
+            result.up[1] = sinElevation > 0.0 ? 1.0 : -1.0;
+            result.up[2] = 0.0;
+        } else {
+            // The spherical derivative keeps the horizon level away from the
+            // poles.
+            result.up[0] = -sinElevation * cosAzimuth;
+            result.up[1] = -sinElevation * sinAzimuth;
+            result.up[2] = cosElevation;
+        }
     }
 
     return result;

@@ -16,8 +16,8 @@ struct CameraInfoBuildResult
     QString skipReason; // set when built is false
 };
 
-// Converts capture sidecars (camera centre, look-at target, up vector, vertical
-// field of view) into the CameraInfo JSON that core/reconstruction consumes.
+// Converts aggregate manifest v2 camera records (preferred) or legacy capture
+// sidecars (fallback) into the CameraInfo JSON that core/reconstruction consumes.
 //
 // COLMAP camera axes are +X right, +Y down, +Z forward, so the rotation stored
 // as camera_to_world maps the camera basis onto the world basis.

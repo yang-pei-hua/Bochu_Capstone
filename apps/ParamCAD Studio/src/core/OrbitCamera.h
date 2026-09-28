@@ -15,11 +15,10 @@ struct OrbitParameters
 class OrbitCamera
 {
 public:
-    // Elevation stops just short of the poles. At exactly +/-90 degrees the up
-    // vector degenerates and CameraController::apply() cannot derive a stable
-    // orientation, so the limit is enforced both here and by the input widgets.
-    // The Top/Bottom standard views still provide true pole views.
-    static constexpr double kMaxElevation = 89.9;
+    // Exact pole views are supported. toCamera() assigns them an explicit
+    // horizontal up vector instead of using the spherical derivative, which
+    // degenerates at +/-90 degrees.
+    static constexpr double kMaxElevation = 90.0;
 
     static OrbitParameters fromCamera(const CameraParameters& parameters);
     static CameraParameters toCamera(const OrbitParameters& orbit,

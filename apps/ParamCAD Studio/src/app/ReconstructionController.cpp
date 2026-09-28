@@ -27,27 +27,27 @@ struct StageInfo
 StageInfo stageFor(const QString& command, bool dense)
 {
     if (command == QLatin1String("feature_extractor")) {
-        return {1, "特征提取"};
+        return {1, "Feature extraction"};
     }
     if (command == QLatin1String("exhaustive_matcher") || command == QLatin1String("sequential_matcher")) {
-        return {2, "特征匹配"};
+        return {2, "Feature matching"};
     }
     if (command == QLatin1String("mapper") || command == QLatin1String("point_triangulator")) {
-        return {3, "稀疏重建"};
+        return {3, "Sparse reconstruction"};
     }
     if (command == QLatin1String("image_undistorter")) {
-        return {4, "图像去畸变"};
+        return {4, "Image undistortion"};
     }
     if (command == QLatin1String("patch_match_stereo")) {
-        return {5, "稠密深度图"};
+        return {5, "Dense depth maps"};
     }
     if (command == QLatin1String("stereo_fusion")) {
-        return {6, "稠密点云融合"};
+        return {6, "Dense cloud fusion"};
     }
     if (command == QLatin1String("model_converter")) {
         // The sparse pipeline writes the cloud directly; the dense one is done
         // by stereo_fusion afterwards.
-        return {dense ? 6 : 4, "导出 PLY"};
+        return {dense ? 6 : 4, "Export PLY"};
     }
     return {0, ""};
 }

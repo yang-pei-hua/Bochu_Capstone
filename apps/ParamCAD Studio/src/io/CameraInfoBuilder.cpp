@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <map>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -144,14 +145,12 @@ struct SidecarPose
     int outputHeight = 0;
     int renderWidth = 0;
     int renderHeight = 0;
+    QString projection;
 };
 
-bool parseSidecar(const QJsonObject& root, const QString& expectedImage, SidecarPose& pose)
+bool parseCameraRecord(const QJsonObject& camera, const QJsonObject& output,
+                       const QJsonObject& render, SidecarPose& pose)
 {
-    if (root.value(QStringLiteral("image")).toString() != expectedImage) {
-        return false;
-    }
-    const QJsonObject camera = root.value(QStringLiteral("camera")).toObject();
     if (!readVec3(camera.value(QStringLiteral("position")), pose.position)
         || !readVec3(camera.value(QStringLiteral("target")), pose.target)
         || !readVec3(camera.value(QStringLiteral("up")), pose.up)) {
@@ -162,8 +161,8 @@ bool parseSidecar(const QJsonObject& root, const QString& expectedImage, Sidecar
         return false;
     }
     pose.fieldOfViewDeg = fieldOfView.toDouble();
+    pose.projection = camera.value(QStringLiteral("projection")).toString();
 
-    const QJsonObject output = root.value(QStringLiteral("output")).toObject();
     if (!readPositiveInt(output.value(QStringLiteral("width")), pose.outputWidth)
         || !readPositiveInt(output.value(QStringLiteral("height")), pose.outputHeight)) {
         return false;
@@ -175,12 +174,71 @@ bool parseSidecar(const QJsonObject& root, const QString& expectedImage, Sidecar
     pose.renderHeight = pose.outputHeight;
     int renderWidth = 0;
     int renderHeight = 0;
-    const QJsonObject render = root.value(QStringLiteral("render")).toObject();
     if (readPositiveInt(render.value(QStringLiteral("width")), renderWidth)
         && readPositiveInt(render.value(QStringLiteral("height")), renderHeight)) {
         pose.renderWidth = renderWidth;
         pose.renderHeight = renderHeight;
     }
+    return true;
+}
+
+bool parseSidecar(const QJsonObject& root, const QString& expectedImage, SidecarPose& pose)
+{
+    if (root.value(QStringLiteral("image")).toString() != expectedImage) {
+        return false;
+    }
+    return parseCameraRecord(root.value(QStringLiteral("camera")).toObject(),
+                             root.value(QStringLiteral("output")).toObject(),
+                             root.value(QStringLiteral("render")).toObject(), pose);
+}
+
+// Manifest v2 duplicates the complete camera record for every shot. It is the
+// preferred reconstruction input because a capture folder can be moved or
+// copied with one authoritative metadata file; v1 manifests fall back to the
+// legacy per-image sidecars.
+bool readAggregateManifest(const QDir& directory, const QStringList& imageNames,
+                           std::map<QString, SidecarPose>& poses)
+{
+    QFile file(directory.filePath(QStringLiteral("manifest.json")));
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    QJsonParseError parseError{};
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return false;
+    }
+    const QJsonObject root = document.object();
+    if (root.value(QStringLiteral("schema")).toString()
+            != QStringLiteral("cadpc.capture.manifest")
+        || root.value(QStringLiteral("version")).toInt() < 2) {
+        return false;
+    }
+
+    const QJsonObject output = root.value(QStringLiteral("output")).toObject();
+    const QJsonObject render = root.value(QStringLiteral("render")).toObject();
+    const QJsonArray shots = root.value(QStringLiteral("shots")).toArray();
+    std::map<QString, SidecarPose> parsed;
+    for (const QJsonValue& value : shots) {
+        if (!value.isObject()) {
+            return false;
+        }
+        const QJsonObject shot = value.toObject();
+        const QString name = shot.value(QStringLiteral("image")).toString();
+        if (name.isEmpty() || !imageNames.contains(name) || parsed.count(name) != 0) {
+            return false;
+        }
+        SidecarPose pose;
+        if (!parseCameraRecord(shot.value(QStringLiteral("camera")).toObject(),
+                               output, render, pose)) {
+            return false;
+        }
+        parsed.emplace(name, pose);
+    }
+    if (parsed.size() != static_cast<std::size_t>(imageNames.size())) {
+        return false;
+    }
+    poses = std::move(parsed);
     return true;
 }
 
@@ -349,7 +407,7 @@ CameraInfoBuildResult CameraInfoBuilder::build(const QString& imageDirectory,
     result.cameraMode = QStringLiteral("estimated");
 
     if (names.size() < 2) {
-        result.skipReason = QStringLiteral("图片数量不足");
+        result.skipReason = QStringLiteral("not enough images");
         return result;
     }
 
@@ -359,25 +417,39 @@ CameraInfoBuildResult CameraInfoBuilder::build(const QString& imageDirectory,
     int missing = 0;
     int unusable = 0;
     int orthographic = 0;
+    std::map<QString, SidecarPose> aggregatePoses;
+    const bool hasAggregateManifest =
+        readAggregateManifest(directory, names, aggregatePoses);
 
     for (const QString& name : names) {
-        QFile file(directory.filePath(QFileInfo(name).completeBaseName() + QStringLiteral(".json")));
-        if (!file.open(QIODevice::ReadOnly)) {
+        SidecarPose pose;
+        bool poseRead = false;
+        if (hasAggregateManifest) {
+            const auto found = aggregatePoses.find(name);
+            if (found != aggregatePoses.end()) {
+                pose = found->second;
+                poseRead = true;
+            }
+        } else {
+            QFile file(directory.filePath(
+                QFileInfo(name).completeBaseName() + QStringLiteral(".json")));
+            if (file.open(QIODevice::ReadOnly)) {
+                QJsonParseError parseError{};
+                const QJsonDocument document =
+                    QJsonDocument::fromJson(file.readAll(), &parseError);
+                poseRead = parseError.error == QJsonParseError::NoError
+                           && document.isObject()
+                           && parseSidecar(document.object(), name, pose);
+            }
+        }
+        if (!poseRead) {
             ++missing;
             continue;
         }
-        QJsonParseError parseError{};
-        const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-        if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-            ++missing;
-            continue;
-        }
-        const QJsonObject root = document.object();
-        const QString projection =
-            root.value(QStringLiteral("camera")).toObject().value(QStringLiteral("projection")).toString();
-        if (projection.compare(QStringLiteral("perspective"), Qt::CaseInsensitive) != 0) {
+        if (pose.projection.compare(QStringLiteral("perspective"),
+                                    Qt::CaseInsensitive) != 0) {
             // An orthographic shot has no pinhole equivalent.
-            if (projection.isEmpty()) {
+            if (pose.projection.isEmpty()) {
                 ++missing;
             } else {
                 ++orthographic;
@@ -385,9 +457,8 @@ CameraInfoBuildResult CameraInfoBuilder::build(const QString& imageDirectory,
             continue;
         }
 
-        SidecarPose pose;
         PreparedImage image;
-        if (!parseSidecar(root, name, pose) || !prepareImage(name, pose, image)) {
+        if (!prepareImage(name, pose, image)) {
             ++unusable;
             continue;
         }
@@ -395,15 +466,15 @@ CameraInfoBuildResult CameraInfoBuilder::build(const QString& imageDirectory,
     }
 
     if (missing + unusable == names.size()) {
-        result.skipReason = QStringLiteral("目录内没有拍摄元数据(sidecar)");
+        result.skipReason = QStringLiteral("no capture metadata in the directory (manifest or sidecar)");
         return result;
     }
     if (missing + unusable > 0) {
-        result.skipReason = QStringLiteral("部分图片缺少拍摄元数据");
+        result.skipReason = QStringLiteral("some images have no capture metadata");
         return result;
     }
     if (orthographic > 0) {
-        result.skipReason = QStringLiteral("含正交投影(orthographic)照片");
+        result.skipReason = QStringLiteral("one or more photos are orthographic");
         return result;
     }
 

@@ -4,6 +4,7 @@
 #include "app/ProjectPaths.h"
 #include "app/ReconstructionController.h"
 #include "core/CameraController.h"
+#include "io/CameraInfoBuilder.h"
 #include "io/ModelLoader.h"
 #include "io/PointCloudAdapter.h"
 #include "io/StepModelLoader.h"
@@ -28,11 +29,17 @@
 #include <QDateTime>
 #include <QDockWidget>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QKeySequence>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -47,6 +54,16 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+
+namespace {
+
+std::vector<OrbitRing> sphericalCaptureRings()
+{
+    return {{12, -60.0}, {12, -30.0}, {12, 0.0}, {12, 30.0},
+            {12, 60.0},  {1, 90.0},   {1, -90.0}};
+}
+
+} // namespace
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -78,6 +95,131 @@ MainWindow::MainWindow(QWidget* parent)
     // An empty document has no body to fit, so the camera is framed on the datum
     // planes that are what the user picks a sketch plane from.
     m_viewer->resetCamera();
+}
+
+bool MainWindow::runPerformanceCapture(const QString& modelPath,
+                                       const QString& outputDirectory,
+                                       const QString& texturePath,
+                                       QString& errorMessage)
+{
+    errorMessage.clear();
+    QDir output(outputDirectory);
+    if (!output.exists() && !QDir().mkpath(output.absolutePath())) {
+        errorMessage = tr("Cannot create validation directory %1").arg(output.absolutePath());
+        return false;
+    }
+    if (output.exists(QStringLiteral("images"))) {
+        errorMessage = tr("Validation image directory already exists: %1")
+                           .arg(output.filePath(QStringLiteral("images")));
+        return false;
+    }
+
+    QElapsedTimer totalTimer;
+    QElapsedTimer stageTimer;
+    totalTimer.start();
+    stageTimer.start();
+
+    StepModelLoader loader;
+    LoadedModel loaded;
+    if (!loader.load(modelPath, loaded, errorMessage)) {
+        return false;
+    }
+    const qint64 loadMilliseconds = stageTimer.elapsed();
+
+    m_loadedModel = loaded;
+    m_viewer->setObjectVisible(true);
+    m_viewer->setBodyShape(m_loadedModel.shape);
+    m_viewer->resetCamera();
+    if (!texturePath.isEmpty()) {
+        if (!m_viewer->loadBodyTexture(texturePath, errorMessage)) {
+            return false;
+        }
+        // A per-face projection gives every side enough stable visual detail for
+        // feature matching, including thin and curved mechanical components.
+        m_viewer->setTextureProjection(4);
+    }
+    m_viewer->renderNow();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    const double distance = m_captureController->currentDistance();
+    const std::vector<OrbitRing> rings = sphericalCaptureRings();
+    m_captureController->setBaseDirectory(output.absolutePath());
+    stageTimer.restart();
+    if (!m_captureController->captureOrbit(rings, distance, 1920, 1080)) {
+        errorMessage = m_captureController->lastError();
+        return false;
+    }
+    const qint64 captureMilliseconds = stageTimer.elapsed();
+
+    const std::vector<CaptureShot>& shots = m_captureController->shots();
+    if (shots.empty()) {
+        errorMessage = tr("Performance capture produced no images");
+        return false;
+    }
+    const QString groupName = shots.back().groupName;
+    if (!output.rename(groupName, QStringLiteral("images"))) {
+        errorMessage = tr("Cannot rename capture group %1 to images").arg(groupName);
+        return false;
+    }
+
+    QString cameraInfoError;
+    const QString imagesPath = output.filePath(QStringLiteral("images"));
+    const QString cameraInfoPath = output.filePath(QStringLiteral("camera_info.json"));
+    const CameraInfoBuildResult cameraInfo =
+        CameraInfoBuilder::build(imagesPath, cameraInfoPath, cameraInfoError);
+    if (!cameraInfoError.isEmpty() || !cameraInfo.built) {
+        errorMessage = !cameraInfoError.isEmpty()
+                           ? cameraInfoError
+                           : tr("Could not build camera metadata: %1")
+                                 .arg(cameraInfo.skipReason);
+        return false;
+    }
+
+    QJsonObject topology;
+    topology.insert(QStringLiteral("solids"), loaded.solidCount);
+    topology.insert(QStringLiteral("faces"), loaded.faceCount);
+    topology.insert(QStringLiteral("edges"), loaded.edgeCount);
+    topology.insert(QStringLiteral("vertices"), loaded.vertexCount);
+
+    QJsonArray ringReport;
+    for (const OrbitRing& ring : rings) {
+        QJsonObject item;
+        item.insert(QStringLiteral("count"), ring.count);
+        item.insert(QStringLiteral("elevationDeg"), ring.elevationDeg);
+        ringReport.append(item);
+    }
+
+    QJsonObject timing;
+    timing.insert(QStringLiteral("stepLoadMs"), loadMilliseconds);
+    timing.insert(QStringLiteral("captureMs"), captureMilliseconds);
+    timing.insert(QStringLiteral("totalMs"), totalTimer.elapsed());
+
+    QJsonObject report;
+    report.insert(QStringLiteral("schema"), QStringLiteral("paramcad.performance-capture"));
+    report.insert(QStringLiteral("version"), 1);
+    report.insert(QStringLiteral("createdAt"),
+                  QDateTime::currentDateTime().toString(Qt::ISODate));
+    report.insert(QStringLiteral("model"), QFileInfo(modelPath).absoluteFilePath());
+    report.insert(QStringLiteral("texture"),
+                  texturePath.isEmpty() ? QJsonValue(QJsonValue::Null)
+                                        : QJsonValue(QFileInfo(texturePath).absoluteFilePath()));
+    report.insert(QStringLiteral("topology"), topology);
+    report.insert(QStringLiteral("imageCount"), cameraInfo.totalImages);
+    report.insert(QStringLiteral("posedImageCount"), cameraInfo.posedImages);
+    report.insert(QStringLiteral("width"), 1920);
+    report.insert(QStringLiteral("height"), 1080);
+    report.insert(QStringLiteral("cameraDistance"), distance);
+    report.insert(QStringLiteral("rings"), ringReport);
+    report.insert(QStringLiteral("timing"), timing);
+
+    QFile reportFile(output.filePath(QStringLiteral("capture_report.json")));
+    if (!reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)
+        || reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented)) < 0) {
+        errorMessage = tr("Cannot write capture performance report: %1")
+                           .arg(reportFile.fileName());
+        return false;
+    }
+    return true;
 }
 
 void MainWindow::createModelingController()
@@ -798,7 +940,7 @@ void MainWindow::createActions()
     m_captureToolAction->setCheckable(true);
     m_captureToolAction->setToolTip(tr("Show the capture panel in Properties"));
 
-    m_reconstructToolAction = new QAction(tr("点云重建"), this);
+    m_reconstructToolAction = new QAction(tr("Reconstruct Point Cloud"), this);
     m_reconstructToolAction->setCheckable(true);
     m_reconstructToolAction->setToolTip(tr("Reconstruct a point cloud from multi-view images"));
 }
@@ -854,7 +996,7 @@ void MainWindow::createToolBar()
     toolBar->addAction(m_captureAction);
     toolBar->addAction(m_reconstructToolAction);
 
-    const QStringList reservedStages{tr("几何拟合"), tr("AI 修改")};
+    const QStringList reservedStages{tr("Geometry Fitting"), tr("AI Edit")};
     for (const QString& stage : reservedStages) {
         auto* button = new QToolButton(toolBar);
         button->setText(stage);
@@ -1468,16 +1610,11 @@ void MainWindow::capturePhoto()
     }
 }
 
-void MainWindow::captureOrbit(int count, double elevationDeg, double distance,
-                              bool includeLower, double lowerElevationDeg)
+void MainWindow::captureOrbit(double distance)
 {
-    // Both rings share the requested count and distance; only the height they
-    // are shot from differs, so one group covers the sides and the under-side.
-    std::vector<OrbitRing> rings;
-    rings.push_back({count, elevationDeg});
-    if (includeLower) {
-        rings.push_back({count, lowerElevationDeg});
-    }
+    // Five latitude rings at 30-degree longitude steps cover the body, while
+    // one canonical pose at each pole avoids twelve duplicate images there.
+    const std::vector<OrbitRing> rings = sphericalCaptureRings();
 
     const RenderPanel* renderPanel = m_propertyPanel->renderPanel();
     const std::size_t before = m_captureController->shots().size();
@@ -1485,9 +1622,8 @@ void MainWindow::captureOrbit(int count, double elevationDeg, double distance,
                                           renderPanel->outputWidth(),
                                           renderPanel->outputHeight())) {
         const std::size_t captured = m_captureController->shots().size() - before;
-        logInfo(tr("Orbit capture finished: %1 photos at %2 degrees elevation")
-                    .arg(captured)
-                    .arg(elevationDeg, 0, 'f', 1));
+        logInfo(tr("Spherical capture finished: %1 photos on a 30-degree grid")
+                    .arg(captured));
     }
 }
 

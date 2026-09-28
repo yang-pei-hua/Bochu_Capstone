@@ -116,11 +116,14 @@ Pinned URLs and SHA-256 values live in
     unchanged
 - `ModelLoader` extension point for the formats still to come
 
-Each captured photo gets a `shot_NNN.json` sidecar next to it. Besides the
-camera pose it records `render {width, height}` - the render-window size the
-output image was stretched from. Reconstruction uses it to derive separate
-horizontal and vertical focal lengths; sidecars without it fall back to square
-pixels.
+`manifest.json` version 2 is the authoritative aggregate camera file. Every
+`shots[]` entry contains the image name plus complete position, target, up
+vector, longitude/latitude, distance, field of view, and projection. The root
+`render {width, height}` records the render-window size the output images were
+stretched from, which lets reconstruction derive separate horizontal and
+vertical focal lengths. Per-image `shot_NNN.json` sidecars are still written for
+backwards compatibility. Reconstruction prefers manifest v2 and falls back to
+the sidecars for older capture folders.
 
 ## Outputs
 
@@ -139,6 +142,29 @@ root is found by walking up from the executable until
 `reconstruction/repoRoot` overrides it. Both panels still allow the folder to be
 changed, and if the root cannot be located the fallback is `outputs/` beside the
 executable - never the user's Pictures folder.
+
+## Performance-validation capture
+
+The Capture panel's one-click sweep and the deterministic batch entry point use
+the same 62-view spherical plan: 12 longitudes at each of -60, -30, 0, +30, and
++60 degrees latitude, followed by one exact top and one exact bottom view. Every
+camera looks at the centred model origin. The batch entry point imports one STEP
+file, optionally projects a feature-rich texture, and writes `images/`,
+`camera_info.json`, and `capture_report.json` directly below the given case
+directory:
+
+```powershell
+& ".\build\msvc-debug\Release\ParamCAD Studio.exe" `
+  --performance-capture ".\part.step" `
+  --output ".\outputs\part-validation" `
+  --texture ".\texture.png"
+```
+
+The case directory may already contain an `input/` folder, but `images/` must
+not exist. This prevents an old capture from being silently overwritten. Pass
+the generated `images/` and `camera_info.json` to `reconstruct.py`, and keep its
+output and workspace in the same case directory to avoid scattering artifacts
+across the interactive `captures/` and `reconstructions/` roots.
 
 ## Deferred work
 

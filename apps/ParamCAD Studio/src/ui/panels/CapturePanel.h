@@ -6,17 +6,14 @@
 
 #include <vector>
 
-class QCheckBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
-class QSpinBox;
 class QTreeWidget;
 
-// Capture page: where shots go, how many orbit steps to take, and what has been
-// captured so far. It only collects values and forwards them - the controller
-// owns the camera and the files.
+// Capture page: where shots go, the fixed-radius 62-view spherical sweep, and
+// what has been captured so far. The controller owns the camera and the files.
 class CapturePanel final : public QWidget
 {
     Q_OBJECT
@@ -38,10 +35,9 @@ public:
 signals:
     void baseDirectoryChanged(const QString& directory);
     void capturePhotoRequested();
-    // A second ring under the model can be added to the same group, which is what
-    // makes an orbit cover the underside as well as the sides.
-    void captureOrbitRequested(int count, double elevationDeg, double distance,
-                               bool includeLower, double lowerElevationDeg);
+    // Fixed 30-degree longitude/latitude grid: five 12-shot rings plus the two
+    // poles, always looking at the centred model origin (62 images total).
+    void captureOrbitRequested(double distance);
 
 private:
     void browseForDirectory();
@@ -50,11 +46,7 @@ private:
     QString m_baseDirectory;
     QLineEdit* m_directoryLabel = nullptr;
     QPushButton* m_browseButton = nullptr;
-    QSpinBox* m_count = nullptr;
-    QDoubleSpinBox* m_elevation = nullptr;
     QDoubleSpinBox* m_distance = nullptr;
-    QCheckBox* m_includeLower = nullptr;
-    QDoubleSpinBox* m_lowerElevation = nullptr;
     QPushButton* m_photoButton = nullptr;
     QPushButton* m_orbitButton = nullptr;
     QTreeWidget* m_shots = nullptr;

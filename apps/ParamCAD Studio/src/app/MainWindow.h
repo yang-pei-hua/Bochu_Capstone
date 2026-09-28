@@ -32,6 +32,16 @@ class MainWindow final : public QMainWindow
 public:
     explicit MainWindow(QWidget* parent = nullptr);
 
+    // Runs the deterministic render half of the performance-validation flow.
+    // The caller owns the case directory; this method writes images/, camera
+    // metadata and capture_report.json directly below it so one validation case
+    // remains self-contained instead of leaking into the interactive capture
+    // and reconstruction roots.
+    bool runPerformanceCapture(const QString& modelPath,
+                               const QString& outputDirectory,
+                               const QString& texturePath,
+                               QString& errorMessage);
+
 public slots:
     void logInfo(const QString& message);
     void logWarning(const QString& message);
@@ -106,8 +116,7 @@ private:
     void saveProject();
     void captureImage();
     void capturePhoto();
-    void captureOrbit(int count, double elevationDeg, double distance,
-                      bool includeLower, double lowerElevationDeg);
+    void captureOrbit(double distance);
     // Re-seeds the orbit distance from the live camera so an orbit reframes the
     // model exactly the way the last camera reset did.
     void syncCaptureDistance();
