@@ -58,7 +58,13 @@ inline Vec3 canonicalDirection(Vec3 value) {
     return component < 0.0 ? scale(value, -1.0) : value;
 }
 
-inline Vec3 smallestEigenvector(std::array<std::array<double, 3>, 3> matrix) {
+struct SymmetricEigenResult {
+    std::array<double, 3> values{};
+    std::array<Vec3, 3> vectors{};
+};
+
+inline SymmetricEigenResult symmetricEigenDecomposition(
+    std::array<std::array<double, 3>, 3> matrix) {
     std::array<std::array<double, 3>, 3> vectors{{
         {{1.0, 0.0, 0.0}},
         {{0.0, 1.0, 0.0}},
@@ -113,15 +119,24 @@ inline Vec3 smallestEigenvector(std::array<std::array<double, 3>, 3> matrix) {
         }
     }
 
-    int smallest = 0;
-    if (matrix[1][1] < matrix[smallest][smallest]) {
-        smallest = 1;
+    std::array<int, 3> order{{0, 1, 2}};
+    std::sort(order.begin(), order.end(), [&matrix](int left, int right) {
+        return matrix[left][left] < matrix[right][right];
+    });
+
+    SymmetricEigenResult result;
+    for (std::size_t index = 0; index < order.size(); ++index) {
+        const int source = order[index];
+        result.values[index] = std::max(0.0, matrix[source][source]);
+        result.vectors[index] = canonicalDirection(
+            {vectors[0][source], vectors[1][source], vectors[2][source]});
     }
-    if (matrix[2][2] < matrix[smallest][smallest]) {
-        smallest = 2;
-    }
-    return canonicalDirection(
-        {vectors[0][smallest], vectors[1][smallest], vectors[2][smallest]});
+    return result;
+}
+
+inline Vec3 smallestEigenvector(
+    const std::array<std::array<double, 3>, 3>& matrix) {
+    return symmetricEigenDecomposition(matrix).vectors[0];
 }
 
 }  // namespace reconstruction::math3

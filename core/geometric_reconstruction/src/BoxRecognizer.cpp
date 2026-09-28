@@ -1,6 +1,7 @@
 #include "reconstruction/BoxRecognizer.h"
 
 #include "Math3.h"
+#include "reconstruction/PrimitiveDetector.h"
 
 #include <algorithm>
 #include <array>
@@ -82,7 +83,8 @@ bool recognizeBoxFromPlanes(
     output = {};
     error.clear();
     if (planes.size() != 6U) {
-        error = "Box recognition currently requires exactly six plane candidates";
+        error = "Box recognition currently requires exactly six plane candidates; got " +
+            std::to_string(planes.size());
         return false;
     }
     if (!std::isfinite(options.angularToleranceRadians) ||
@@ -205,9 +207,24 @@ bool reconstructBox(
     const BoxRecognitionOptions& boxOptions,
     BoxCandidate& output,
     std::string& error) {
-    std::vector<PlaneEvidence> planes;
-    if (!detectPlanes(points, planeOptions, planes, error)) {
+    PrimitiveDetectionOptions detectionOptions;
+    detectionOptions.detectPlanes = true;
+    detectionOptions.detectCylinders = false;
+    detectionOptions.detectSpheres = false;
+    detectionOptions.detectCones = false;
+    detectionOptions.detectTori = false;
+    detectionOptions.plane = planeOptions;
+    PrimitiveDetectionResult proposals;
+    if (!detectPrimitiveEvidence(
+            points, detectionOptions, proposals, error)) {
         return false;
+    }
+    std::vector<PlaneEvidence> planes;
+    planes.reserve(proposals.evidence.size());
+    for (const PrimitiveEvidence& evidence : proposals.evidence) {
+        if (const auto* plane = std::get_if<PlaneEvidence>(&evidence)) {
+            planes.push_back(*plane);
+        }
     }
     return recognizeBoxFromPlanes(points, planes, boxOptions, output, error);
 }

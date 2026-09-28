@@ -32,6 +32,7 @@ coverage/
 
 # Native build and installed runtime artifacts
 /artifacts/
+/build/
 /core/reconstruction/build/
 /core/parametric_modeling/build/
 /core/parametric_modeling/build-msvc/

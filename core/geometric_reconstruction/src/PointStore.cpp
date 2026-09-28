@@ -15,6 +15,18 @@ bool finite(const modeling::Vec3& value) {
 
 }  // namespace
 
+std::optional<double> millimetersPerUnit(LengthUnit unit) noexcept {
+    switch (unit) {
+    case LengthUnit::Millimeter:
+        return 1.0;
+    case LengthUnit::Meter:
+        return 1000.0;
+    case LengthUnit::Arbitrary:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
 PointStore::PointStore(std::vector<PointSample> points, LengthUnit unit)
     : points_(std::move(points)), unit_(unit) {
     std::unordered_set<PointId> ids;
@@ -29,9 +41,12 @@ PointStore::PointStore(std::vector<PointSample> points, LengthUnit unit)
         if (!finite(point.position) ||
             (point.normal.has_value() && !finite(*point.normal)) ||
             !std::isfinite(point.confidence) || point.confidence < 0.0 ||
-            point.confidence > 1.0) {
+            point.confidence > 1.0 ||
+            (point.curvature.has_value() &&
+             (!std::isfinite(*point.curvature) || *point.curvature < 0.0))) {
             throw std::invalid_argument(
-                "PointStore observations must be finite with confidence in [0, 1]");
+                "PointStore observations must be finite with confidence in [0, 1] "
+                "and non-negative curvature");
         }
     }
 }

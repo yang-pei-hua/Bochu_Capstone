@@ -10,6 +10,9 @@
 struct PlyCloud
 {
     std::vector<std::array<float, 3>> positions;
+    // Empty when the PLY has no complete nx/ny/nz triplet. Like colors, this
+    // vector is either empty or exactly aligned with positions.
+    std::vector<std::array<float, 3>> normals;
     std::vector<std::array<unsigned char, 3>> colors;
 };
 

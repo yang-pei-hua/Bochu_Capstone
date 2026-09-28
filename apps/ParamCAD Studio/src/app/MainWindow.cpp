@@ -1203,14 +1203,53 @@ void MainWindow::reconstructCad()
         return;
     }
 
-    // The file carries no capture metadata, so the cloud's unit is unknown and
-    // is recorded as such; the tolerances below follow its size instead.
-    const reconstruction::PointStore points = PointCloudAdapter::toPointStore(
-        cloud, reconstruction::LengthUnit::Arbitrary);
+    reconstruction::LengthUnit sourceUnit =
+        PointCloudAdapter::lengthUnitFor(m_pointCloudPath);
+    if (sourceUnit == reconstruction::LengthUnit::Arbitrary) {
+        const QMessageBox::StandardButton choice = QMessageBox::warning(
+            this,
+            tr("Unknown point-cloud scale"),
+            tr("This point cloud has no metric scale metadata. Continuing will "
+               "interpret one source unit as one millimetre in the CAD model. "
+               "Continue with that explicit assumption?"),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (choice != QMessageBox::Yes) {
+            return;
+        }
+        logWarning(tr("Point-cloud scale is unknown; using the user-approved "
+                      "assumption 1 source unit = 1 mm"));
+        sourceUnit = reconstruction::LengthUnit::Millimeter;
+    }
+
+    const reconstruction::PointStore sourcePoints =
+        PointCloudAdapter::toPointStore(cloud, sourceUnit);
+    reconstruction::PointStore points({}, sourceUnit);
+    reconstruction::PointCloudPreprocessingReport preprocessingReport;
+    std::string preprocessingFailure;
+    if (!reconstruction::preprocessPointCloud(
+            sourcePoints,
+            PointCloudAdapter::preprocessingOptionsFor(cloud),
+            points,
+            preprocessingReport,
+            preprocessingFailure)) {
+        const QString message = tr("Point-cloud preprocessing failed: %1")
+                                    .arg(QString::fromStdString(preprocessingFailure));
+        logError(message);
+        QMessageBox::warning(this, tr("Reconstruct CAD"), message);
+        return;
+    }
+    logInfo(tr("Point-cloud preprocessing: %1 → %2 points, removed %3 voxel "
+               "duplicates and %4 outliers, estimated %5 normals")
+                .arg(preprocessingReport.inputPointCount)
+                .arg(preprocessingReport.outputPointCount)
+                .arg(preprocessingReport.removedByVoxel)
+                .arg(preprocessingReport.removedAsOutliers)
+                .arg(preprocessingReport.normalsEstimated));
 
     reconstruction::BoxCandidate candidate;
     std::string failure;
-    if (!reconstruction::reconstructBox(points, PointCloudAdapter::planeOptionsFor(cloud),
+    if (!reconstruction::reconstructBox(points, PointCloudAdapter::planeOptionsFor(points),
                                         reconstruction::BoxRecognitionOptions{}, candidate,
                                         failure)) {
         // No box in the cloud is an ordinary outcome for an arbitrary scan, not

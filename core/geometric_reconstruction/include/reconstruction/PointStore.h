@@ -14,14 +14,21 @@ inline constexpr PointId kInvalidPointId = 0;
 
 enum class LengthUnit {
     Millimeter,
+    Meter,
     Arbitrary,
 };
+
+// Returns the physical conversion when the unit is known. An arbitrary-unit
+// cloud deliberately has no implicit conversion to the millimetres used by the
+// modeling core.
+std::optional<double> millimetersPerUnit(LengthUnit unit) noexcept;
 
 struct PointSample {
     PointId id = kInvalidPointId;
     modeling::Vec3 position{};
     std::optional<modeling::Vec3> normal;
     double confidence = 1.0;
+    std::optional<double> curvature;
 };
 
 // Immutable source observations. Detection results reference PointId values;

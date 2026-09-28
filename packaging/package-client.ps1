@@ -5,6 +5,7 @@ param(
     [ValidateSet("cuda", "nocuda")]
     [string]$ColmapFlavor = "cuda",
     [string]$QtRoot = $env:QTDIR,
+    [string]$VcpkgRoot = $env:VCPKG_ROOT,
     [string]$Version = "0.1.0",
     [string]$OutputDirectory,
     [string]$BuildDirectory,
@@ -138,10 +139,15 @@ Assert-WorkspaceChild $projectRoot $stagingRoot
 if ([string]::IsNullOrWhiteSpace($QtRoot)) {
     throw "QtRoot is required. Pass -QtRoot <Qt MSVC x64 root> or set QTDIR."
 }
+if ([string]::IsNullOrWhiteSpace($VcpkgRoot)) {
+    throw "VcpkgRoot is required for CGAL. Pass -VcpkgRoot <vcpkg root> or set VCPKG_ROOT."
+}
 $QtRoot = [System.IO.Path]::GetFullPath($QtRoot)
+$VcpkgRoot = [System.IO.Path]::GetFullPath($VcpkgRoot)
 
 $requiredFiles = @(
     (Join-Path $QtRoot "lib\cmake\Qt6\Qt6Config.cmake"),
+    (Join-Path $VcpkgRoot "scripts\buildsystems\vcpkg.cmake"),
     (Join-Path $projectRoot "deps\vtk-9.7.0\lib\cmake\vtk-9.7\vtk-config.cmake"),
     (Join-Path $projectRoot "deps\occt-8.0.1\cmake\OpenCASCADEConfig.cmake")
 )
@@ -169,6 +175,7 @@ if (-not $SkipBuild) {
         "-B", $BuildDirectory,
         "-G", "Visual Studio 17 2022",
         "-A", "x64",
+        "-DCMAKE_TOOLCHAIN_FILE=$((Join-Path $VcpkgRoot 'scripts\buildsystems\vcpkg.cmake') -replace '\\', '/')",
         "-DCMAKE_PREFIX_PATH=$($QtRoot -replace '\\', '/')",
         "-DVTK_DIR=$((Join-Path $projectRoot 'deps\vtk-9.7.0\lib\cmake\vtk-9.7') -replace '\\', '/')",
         "-DOpenCASCADE_DIR=$((Join-Path $projectRoot 'deps\occt-8.0.1\cmake') -replace '\\', '/')"

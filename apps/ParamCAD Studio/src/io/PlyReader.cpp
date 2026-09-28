@@ -278,6 +278,9 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
     int xIndex = -1;
     int yIndex = -1;
     int zIndex = -1;
+    int normalXIndex = -1;
+    int normalYIndex = -1;
+    int normalZIndex = -1;
     int redIndex = -1;
     int greenIndex = -1;
     int blueIndex = -1;
@@ -292,6 +295,12 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
             yIndex = slot;
         } else if (property.name == QLatin1String("z")) {
             zIndex = slot;
+        } else if (property.name == QLatin1String("nx")) {
+            normalXIndex = slot;
+        } else if (property.name == QLatin1String("ny")) {
+            normalYIndex = slot;
+        } else if (property.name == QLatin1String("nz")) {
+            normalZIndex = slot;
         } else if (property.name == QLatin1String("red") || property.name == QLatin1String("r")) {
             redIndex = slot;
         } else if (property.name == QLatin1String("green") || property.name == QLatin1String("g")) {
@@ -308,11 +317,17 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
     // Colors are all-or-nothing: a partial set would desynchronise the two
     // arrays, and a cloud without colors still renders fine.
     const bool hasColor = redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0;
+    const bool hasNormal =
+        normalXIndex >= 0 && normalYIndex >= 0 && normalZIndex >= 0;
 
     const quint64 count = element.count;
     cloud.positions.clear();
+    cloud.normals.clear();
     cloud.colors.clear();
     cloud.positions.reserve(static_cast<std::size_t>(count));
+    if (hasNormal) {
+        cloud.normals.reserve(static_cast<std::size_t>(count));
+    }
     if (hasColor) {
         cloud.colors.reserve(static_cast<std::size_t>(count));
     }
@@ -348,6 +363,24 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
             cloud.positions.push_back({static_cast<float>(values[0]),
                                        static_cast<float>(values[1]),
                                        static_cast<float>(values[2])});
+
+            if (hasNormal) {
+                double components[3] = {0.0, 0.0, 0.0};
+                const int normalIndices[3] = {
+                    normalXIndex, normalYIndex, normalZIndex};
+                for (int axis = 0; axis < 3; ++axis) {
+                    bool ok = false;
+                    components[axis] = tokens.at(normalIndices[axis]).toDouble(&ok);
+                    if (!ok) {
+                        error = QStringLiteral("PLY vertex %1 has a non-numeric normal")
+                                    .arg(index);
+                        return false;
+                    }
+                }
+                cloud.normals.push_back({static_cast<float>(components[0]),
+                                         static_cast<float>(components[1]),
+                                         static_cast<float>(components[2])});
+            }
 
             if (hasColor) {
                 double channels[3] = {0.0, 0.0, 0.0};
@@ -389,6 +422,9 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
+    double normalX = 0.0;
+    double normalY = 0.0;
+    double normalZ = 0.0;
     double red = 0.0;
     double green = 0.0;
     double blue = 0.0;
@@ -401,6 +437,18 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
             return false;
         }
         cloud.positions.push_back({static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
+
+        if (hasNormal) {
+            if (!decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(normalXIndex)), properties.at(static_cast<std::size_t>(normalXIndex)).scalar, littleEndian, normalX)
+                || !decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(normalYIndex)), properties.at(static_cast<std::size_t>(normalYIndex)).scalar, littleEndian, normalY)
+                || !decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(normalZIndex)), properties.at(static_cast<std::size_t>(normalZIndex)).scalar, littleEndian, normalZ)) {
+                error = QStringLiteral("PLY vertex %1 has an unsupported normal type").arg(index);
+                return false;
+            }
+            cloud.normals.push_back({static_cast<float>(normalX),
+                                     static_cast<float>(normalY),
+                                     static_cast<float>(normalZ)});
+        }
 
         if (hasColor) {
             if (!decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(redIndex)), properties.at(static_cast<std::size_t>(redIndex)).scalar, littleEndian, red)
@@ -491,6 +539,7 @@ bool skipElement(QFile& file, const Element& element, Format format, QString& er
 bool PlyReader::read(const QString& path, PlyCloud& cloud, QString& error)
 {
     cloud.positions.clear();
+    cloud.normals.clear();
     cloud.colors.clear();
     error.clear();
 
@@ -526,6 +575,7 @@ bool PlyReader::read(const QString& path, PlyCloud& cloud, QString& error)
         if (&element == vertexElement) {
             if (!readVertices(file, element, format, cloud, error)) {
                 cloud.positions.clear();
+                cloud.normals.clear();
                 cloud.colors.clear();
                 return false;
             }
@@ -533,6 +583,7 @@ bool PlyReader::read(const QString& path, PlyCloud& cloud, QString& error)
         }
         if (!skipElement(file, element, format, error)) {
             cloud.positions.clear();
+            cloud.normals.clear();
             cloud.colors.clear();
             return false;
         }

@@ -3,9 +3,9 @@
 Windows desktop application built with C++17, Qt 6 Widgets, CMake, MSVC 2022 x64,
 VTK, and OpenCASCADE. The viewport renders the body produced by the parametric
 modeling core (`core/parametric_modeling`), so sketches, extrudes, and cuts are
-created through the core's command API and displayed as a tessellated solid. The
-reconstruction, fitting, AI, and real model-loading algorithms are intentionally
-outside this milestone.
+created through the core's command API and displayed as a tessellated solid.
+Point-cloud preprocessing and CGAL Efficient RANSAC live in
+`core/geometric_reconstruction` and expose only project-owned evidence types.
 
 ## Requirements
 
@@ -16,6 +16,7 @@ outside this milestone.
   compiler and Qt version, including `GUISupportQt`)
 - The repository-local OpenCASCADE 8.0.1 MSVC x64 SDK at
   `../../deps/occt-8.0.1`
+- vcpkg with `cgal:x64-windows` and `eigen3:x64-windows` installed
 
 Qt and VTK must use the same architecture and compatible MSVC runtimes. A
 MinGW Qt package cannot be linked into the MSVC build.
@@ -27,6 +28,7 @@ the ignored local VTK SDK, so only the Qt package root must be supplied:
 
 ```powershell
 cmake --preset msvc-debug `
+  -DCMAKE_TOOLCHAIN_FILE="D:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake" `
   -DCMAKE_PREFIX_PATH="D:/Qt/6.11.2/msvc2022_64"
 cmake --build --preset msvc-release
 ```
@@ -64,6 +66,7 @@ packages from the same staging logic:
 ```powershell
 & .\packaging\package-client.ps1 `
   -QtRoot "D:\Qt\6.11.2\msvc2022_64" `
+  -VcpkgRoot "D:\dev\vcpkg" `
   -Variant All `
   -Clean
 ```
@@ -101,6 +104,8 @@ Pinned URLs and SHA-256 values live in
 - Reconstruct page (Tools → 点云重建) that runs
   `core/reconstruction/reconstruct.py` on a folder of multi-view images and
   loads the resulting PLY into the viewport, coexisting with the CAD body
+- Scale-aware point-cloud preprocessing and CGAL detection of planes,
+  cylinders, spheres, cones, and tori
 - Menus, toolbar, pipeline placeholder navigation, dark theme, and status bar
 - Abstract `ModelLoader` extension point for future STEP/OBJ/PLY loaders
 
@@ -135,6 +140,5 @@ executable - never the user's Pictures folder.
 - Undo/redo and a persistent feature tree with in-place editing
 - STEP export from the client
 - Real STEP/OBJ/PLY parsing and persistent project save/load
-- Point-cloud post-processing (downsampling, meshing) and CAD alignment
-- Geometric fitting and AI editing
+- Point-cloud meshing, CAD alignment, and AI editing
 - Production scene graph, selection, task progress, FPS, and mesh stats

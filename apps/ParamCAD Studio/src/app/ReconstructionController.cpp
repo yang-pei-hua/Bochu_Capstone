@@ -190,7 +190,8 @@ bool ReconstructionController::buildArguments(const ReconstructRequest& request,
     }
     cameraModeHint = cameraInfo.cameraMode;
     if (cameraInfo.built) {
-        arguments << QStringLiteral("--camera-info") << cameraInfoPath;
+        arguments << QStringLiteral("--camera-info") << cameraInfoPath
+                  << QStringLiteral("--input-unit") << QStringLiteral("mm");
         return true;
     }
 

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.24)
 
 project(CadPointCloudClient VERSION 0.1.0 LANGUAGES CXX)
 
+option(CAD_CLIENT_BUILD_TESTS "Build ParamCAD Studio I/O tests" OFF)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -163,3 +165,21 @@ vtk_module_autoinit(
     TARGETS CadPointCloudClient
     MODULES ${VTK_LIBRARIES}
 )
+
+if(CAD_CLIENT_BUILD_TESTS)
+    include(CTest)
+    add_executable(point_cloud_io_test
+        tests/point_cloud_io_test.cpp
+        src/io/PlyReader.cpp
+        src/io/PointCloudAdapter.cpp
+    )
+    target_include_directories(point_cloud_io_test PRIVATE src)
+    target_link_libraries(point_cloud_io_test PRIVATE
+        Qt6::Core
+        GeometricReconstruction::GeometricReconstruction
+    )
+    if(MSVC)
+        target_compile_options(point_cloud_io_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME point_cloud_io_test COMMAND point_cloud_io_test)
+endif()

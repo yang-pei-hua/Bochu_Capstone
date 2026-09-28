@@ -1,7 +1,7 @@
 #pragma once
 
+#include "reconstruction/PrimitiveDetector.h"
 #include "reconstruction/ReconstructionCandidate.h"
-#include "reconstruction/PlaneDetector.h"
 
 #include <string>
 #include <vector>

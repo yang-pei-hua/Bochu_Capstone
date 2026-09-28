@@ -2,10 +2,16 @@ cmake_minimum_required(VERSION 3.24)
 
 project(GeometricReconstruction VERSION 0.1.0 LANGUAGES CXX)
 
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
 option(GEOMETRIC_RECONSTRUCTION_BUILD_TESTS
     "Build geometric reconstruction tests" ON)
 
 find_package(OpenCASCADE REQUIRED)
+find_package(CGAL CONFIG REQUIRED)
+find_package(Eigen3 CONFIG REQUIRED)
 
 if(NOT TARGET CadModelCore::CadModelCore)
     set(CAD_MODEL_CORE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -18,9 +24,11 @@ endif()
 add_library(GeometricReconstruction
     src/AxisAlignedBoxRecognizer.cpp
     src/BoxRecognizer.cpp
+    src/CgalEfficientRansacDetector.cpp
     src/ModelingAdapter.cpp
-    src/PlaneDetector.cpp
+    src/PointCloudPreprocessor.cpp
     src/PointStore.cpp
+    src/PrimitiveDetector.cpp
     src/SyntheticPointCloud.cpp
 )
 add_library(GeometricReconstruction::GeometricReconstruction ALIAS
@@ -33,6 +41,9 @@ target_include_directories(GeometricReconstruction PUBLIC
 )
 target_link_libraries(GeometricReconstruction PUBLIC
     CadModelCore::CadModelCore
+    PRIVATE
+    CGAL::CGAL
+    Eigen3::Eigen
 )
 
 if(MSVC)
