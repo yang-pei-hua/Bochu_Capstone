@@ -52,6 +52,8 @@ public:
     // author of the same feature graph, so it enters through the core's atomic
     // patch boundary rather than through the sketch commands.
     bool commitReconstructedBox(const reconstruction::BoxCandidate& candidate);
+    bool commitReconstructedBoxWithThroughHoles(
+        const reconstruction::BoxWithThroughHolesCandidate& candidate);
 
     // Deleting a feature that other features consume has to cascade, otherwise
     // the document can no longer rebuild. dependentsOf() is what the UI shows

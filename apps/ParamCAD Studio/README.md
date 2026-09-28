@@ -107,7 +107,14 @@ Pinned URLs and SHA-256 values live in
 - Scale-aware point-cloud preprocessing and CGAL detection of planes,
   cylinders, spheres, cones, and tori
 - Menus, toolbar, pipeline placeholder navigation, dark theme, and status bar
-- Abstract `ModelLoader` extension point for future STEP/OBJ/PLY loaders
+- STEP/STP model import (File → Open Model) driven by `StepModelLoader`, which
+  keeps the OpenCASCADE B-Rep alongside the mesh the viewport draws
+  - a loaded part is translated so its centre of mass sits on the origin - the
+    volume centre, or the bounding-box centre for a shape that encloses no
+    volume - because the viewport orbits and frames around the origin. The
+    placement the file was exported with is not kept; sizes and distances are
+    unchanged
+- `ModelLoader` extension point for the formats still to come
 
 Each captured photo gets a `shot_NNN.json` sidecar next to it. Besides the
 camera pose it records `render {width, height}` - the render-window size the
@@ -139,6 +146,6 @@ executable - never the user's Pictures folder.
   mapping
 - Undo/redo and a persistent feature tree with in-place editing
 - STEP export from the client
-- Real STEP/OBJ/PLY parsing and persistent project save/load
+- Real OBJ/PLY mesh parsing and persistent project save/load
 - Point-cloud meshing, CAD alignment, and AI editing
 - Production scene graph, selection, task progress, FPS, and mesh stats

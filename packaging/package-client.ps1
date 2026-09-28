@@ -19,8 +19,20 @@ Set-StrictMode -Version 2.0
 
 function Invoke-Native([string]$Program, [string[]]$Arguments) {
     Write-Host "> $Program $($Arguments -join ' ')"
-    & $Program @Arguments 2>&1 | ForEach-Object { Write-Host $_ }
-    $exitCode = $LASTEXITCODE
+    # Windows PowerShell 5 wraps native stderr as ErrorRecord objects. With the
+    # script-wide Stop policy, harmless CMake warnings would otherwise abort the
+    # package before LASTEXITCODE can be checked.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Program @Arguments 2>&1 | ForEach-Object {
+            Write-Host ([string]$_)
+        }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     if ($exitCode -ne 0) {
         throw "$Program failed with exit code $exitCode"
     }
@@ -49,10 +61,59 @@ function Copy-DirectoryContents([string]$Source, [string]$Destination) {
     }
 }
 
+function Assert-ClientRuntime([string]$Directory) {
+    # CGAL is header-heavy, so its GMP dependency is not always reported by
+    # CMake's TARGET_RUNTIME_DLLS traversal through the static reconstruction
+    # library. Validate the loader-visible file explicitly before smoke tests
+    # or archives are created.
+    foreach ($file in @("gmp-10.dll")) {
+        $path = Join-Path $Directory $file
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Missing required GUI runtime dependency: $path"
+        }
+    }
+}
+
+function Invoke-GuiSmokeTest([string]$Executable, [string]$WorkingDirectory) {
+    Assert-ClientRuntime $WorkingDirectory
+
+    # Suppress Windows loader/crash dialogs so a missing DLL produces an exit
+    # code instead of leaving a modal process alive and fooling the timeout.
+    if (-not ("ParamCadPackaging.NativeMethods" -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+namespace ParamCadPackaging {
+    public static class NativeMethods {
+        [DllImport("kernel32.dll")]
+        public static extern uint SetErrorMode(uint mode);
+    }
+}
+"@
+    }
+    $previousErrorMode = [ParamCadPackaging.NativeMethods]::SetErrorMode(0x8003)
+    try {
+        $process = Start-Process `
+            -FilePath $Executable `
+            -WorkingDirectory $WorkingDirectory `
+            -WindowStyle Hidden `
+            -PassThru
+        if ($process.WaitForExit(3000)) {
+            throw "Packaged GUI exited unexpectedly during smoke test with code $($process.ExitCode)"
+        }
+        $process.Kill()
+        $process.WaitForExit()
+    }
+    finally {
+        [void][ParamCadPackaging.NativeMethods]::SetErrorMode($previousErrorMode)
+    }
+}
+
 function New-PackageStage([string]$Name, [bool]$IncludeDependencies) {
     $stage = Join-Path $stagingRoot $Name
     Reset-Directory $projectRoot $stage
     Copy-DirectoryContents $releaseDirectory $stage
+    Assert-ClientRuntime $stage
 
     Get-ChildItem -LiteralPath $stage -Filter "*.pdb" -File -Recurse | Remove-Item -Force
 
@@ -90,16 +151,7 @@ function New-PackageStage([string]$Name, [bool]$IncludeDependencies) {
 
     if (-not $SkipSmokeTest) {
         $executable = Join-Path $stage "ParamCAD Studio.exe"
-        $process = Start-Process -FilePath $executable -WorkingDirectory $stage -PassThru
-        if ($process.WaitForExit(3000)) {
-            if ($process.ExitCode -ne 0) {
-                throw "Packaged GUI exited during smoke test with code $($process.ExitCode)"
-            }
-        }
-        else {
-            $process.Kill()
-            $process.WaitForExit()
-        }
+        Invoke-GuiSmokeTest $executable $stage
     }
 
     $archive = Join-Path $OutputDirectory "$Name.zip"
@@ -189,6 +241,17 @@ $releaseExecutable = Join-Path $releaseDirectory "ParamCAD Studio.exe"
 if (-not (Test-Path -LiteralPath $releaseExecutable -PathType Leaf)) {
     throw "Release executable was not produced: $releaseExecutable"
 }
+# TARGET_RUNTIME_DLLS does not reliably see GMP through CGAL's static target.
+# Copy it from the same x64 vcpkg installation used to configure this build,
+# then validate again after every package stage is populated.
+$vcpkgRuntimeDirectory = Join-Path $VcpkgRoot "installed\x64-windows\bin"
+$gmpRuntime = Join-Path $vcpkgRuntimeDirectory "gmp-10.dll"
+if (-not (Test-Path -LiteralPath $gmpRuntime -PathType Leaf)) {
+    throw "Missing CGAL GMP runtime in vcpkg: $gmpRuntime"
+}
+Copy-Item -LiteralPath $gmpRuntime -Destination $releaseDirectory -Force
+Assert-ClientRuntime $releaseDirectory
+
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 

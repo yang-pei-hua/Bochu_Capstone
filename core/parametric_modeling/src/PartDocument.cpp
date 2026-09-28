@@ -22,6 +22,8 @@ std::string featurePrefix(FeatureType type) {
         return "Cut";
     case FeatureType::BoxPrimitive:
         return "Box";
+    case FeatureType::ThroughHolePrimitive:
+        return "ThroughHole";
     }
     return "Feature";
 }
@@ -59,15 +61,31 @@ bool validateFeatureParams(const FeatureParams& params, std::string& error) {
     if (const auto* sketch = std::get_if<SketchFeatureParams>(&params)) {
         return validateSketchEntityIds(*sketch, error);
     }
-    const auto* box = std::get_if<BoxPrimitiveParams>(&params);
-    if (box == nullptr) {
-        return true;
-    }
-
     const auto finite = [](const Vec3& value) {
         return std::isfinite(value.x) && std::isfinite(value.y) &&
             std::isfinite(value.z);
     };
+    if (const auto* hole = std::get_if<ThroughHolePrimitiveParams>(&params)) {
+        if (!finite(hole->axisPoint) || !finite(hole->axisDirection) ||
+            !std::isfinite(hole->radius)) {
+            error = "Through-hole parameters must be finite";
+            return false;
+        }
+        const double directionLengthSquared =
+            hole->axisDirection.x * hole->axisDirection.x +
+            hole->axisDirection.y * hole->axisDirection.y +
+            hole->axisDirection.z * hole->axisDirection.z;
+        if (directionLengthSquared <= 1.0e-24 || hole->radius <= 0.0) {
+            error = "Through-hole axis must be non-degenerate and radius must be positive";
+            return false;
+        }
+        return true;
+    }
+
+    const auto* box = std::get_if<BoxPrimitiveParams>(&params);
+    if (box == nullptr) {
+        return true;
+    }
     if (!finite(box->pose.origin) || !finite(box->pose.xDirection) ||
         !finite(box->pose.zDirection) || !std::isfinite(box->sizeX) ||
         !std::isfinite(box->sizeY) || !std::isfinite(box->sizeZ)) {

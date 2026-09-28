@@ -12,6 +12,7 @@ enum class FeatureType {
     Extrude,
     Cut,
     BoxPrimitive,
+    ThroughHolePrimitive,
 };
 
 inline FeatureType featureTypeOf(const FeatureParams& params) {
@@ -24,7 +25,10 @@ inline FeatureType featureTypeOf(const FeatureParams& params) {
     if (std::holds_alternative<CutFeatureParams>(params)) {
         return FeatureType::Cut;
     }
-    return FeatureType::BoxPrimitive;
+    if (std::holds_alternative<BoxPrimitiveParams>(params)) {
+        return FeatureType::BoxPrimitive;
+    }
+    return FeatureType::ThroughHolePrimitive;
 }
 
 struct Feature {

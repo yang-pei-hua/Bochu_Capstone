@@ -39,6 +39,7 @@ using FeatureParams = std::variant<
     SketchFeatureParams,
     ExtrudeFeatureParams,
     CutFeatureParams,
-    BoxPrimitiveParams>;
+    BoxPrimitiveParams,
+    ThroughHolePrimitiveParams>;
 
 }  // namespace modeling

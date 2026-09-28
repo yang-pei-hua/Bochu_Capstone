@@ -179,6 +179,23 @@ reconstruction::PlaneDetectionOptions PointCloudAdapter::planeOptionsFor(
     return options;
 }
 
+reconstruction::CylinderDetectionOptions PointCloudAdapter::cylinderOptionsFor(
+    const reconstruction::PointStore& cloud)
+{
+    reconstruction::CylinderDetectionOptions options;
+    const double diagonal = diagonalOf(cloud);
+    if (diagonal > 0.0) {
+        options.distanceThreshold = diagonal * 1.0e-3;
+        // Reject sub-resolution cylinders before the semantic containment test.
+        options.minimumRadius = options.distanceThreshold * 2.0;
+        options.maximumRadius = diagonal * 0.5;
+    }
+    options.minimumSupportPoints = std::max<std::size_t>(
+        30U, std::min<std::size_t>(150U, cloud.size() / 500U));
+    options.maximumCylinders = 8;
+    return options;
+}
+
 reconstruction::PlaneDetectionOptions PointCloudAdapter::planeOptionsFor(
     const reconstruction::PointStore& cloud)
 {

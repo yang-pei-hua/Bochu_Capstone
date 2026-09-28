@@ -10,4 +10,9 @@ modeling::ModelPatchResult commitBoxCandidate(
     modeling::ModelingCore& core,
     modeling::ModelRevision expectedRevision = modeling::kAnyModelRevision);
 
+modeling::ModelPatchResult commitBoxWithThroughHolesCandidate(
+    const BoxWithThroughHolesCandidate& candidate,
+    modeling::ModelingCore& core,
+    modeling::ModelRevision expectedRevision = modeling::kAnyModelRevision);
+
 }  // namespace reconstruction

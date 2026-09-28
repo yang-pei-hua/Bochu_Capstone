@@ -52,6 +52,12 @@ bool buildBoxPrimitive(
     TopoDS_Shape& output,
     std::string& error);
 
+bool buildThroughHolePrimitive(
+    const TopoDS_Shape& body,
+    const ThroughHolePrimitiveParams& params,
+    TopoDS_Shape& output,
+    std::string& error);
+
 bool isValidShape(const TopoDS_Shape& shape, std::string& error);
 double shapeVolume(const TopoDS_Shape& shape);
 double throughAllDistance(const TopoDS_Shape& shape);

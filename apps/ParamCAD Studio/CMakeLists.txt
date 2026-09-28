@@ -41,6 +41,9 @@ add_subdirectory(
 )
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
+# OpenCASCADE is resolved here as well as inside CadModelCore because the client
+# names the STEP data-exchange toolkits its importer uses directly.
+find_package(OpenCASCADE REQUIRED)
 find_package(VTK REQUIRED COMPONENTS
     CommonCore
     CommonDataModel
@@ -78,6 +81,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/io/ModelLoader.h
     src/io/PointCloudAdapter.h
     src/io/PointCloudAdapter.cpp
+    src/io/StepModelLoader.h
+    src/io/StepModelLoader.cpp
     src/io/PlyReader.h
     src/io/PlyReader.cpp
     src/io/CameraInfoBuilder.h
@@ -124,6 +129,10 @@ set_target_properties(CadPointCloudClient PROPERTIES
 )
 
 target_include_directories(CadPointCloudClient PRIVATE src)
+# The STEP importer names OCCT toolkits directly; CadModelCore already
+# contributes TKernel/TKBRep/TKTopAlgo and the OCCT include directories, so only
+# the data-exchange and meshing toolkits are added on top of it.
+target_link_directories(CadPointCloudClient PRIVATE ${OpenCASCADE_LIBRARY_DIR})
 target_link_libraries(CadPointCloudClient PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -131,6 +140,10 @@ target_link_libraries(CadPointCloudClient PRIVATE
     ${VTK_LIBRARIES}
     CadModelCore::CadModelCore
     GeometricReconstruction::GeometricReconstruction
+    TKDE
+    TKXSBase
+    TKDESTEP
+    TKMesh
 )
 
 if(MSVC)
@@ -139,11 +152,8 @@ endif()
 
 # The repository-local Qt/VTK/OpenCASCADE SDKs are not on PATH and Windows
 # resolves dependency DLLs from the executable directory, so stage the runtime
-# DLLs next to the binary. OpenCASCADE is located here only to find its runtime
-# directory - its libraries still come from CadModelCore.
+# DLLs next to the binary.
 if(WIN32)
-    find_package(OpenCASCADE REQUIRED)
-
     add_custom_command(TARGET CadPointCloudClient POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:CadPointCloudClient>
@@ -182,4 +192,29 @@ if(CAD_CLIENT_BUILD_TESTS)
         target_compile_options(point_cloud_io_test PRIVATE /W4 /permissive- /utf-8)
     endif()
     add_test(NAME point_cloud_io_test COMMAND point_cloud_io_test)
+
+    # The STEP importer is a client-side reader, so it is tested where it lives.
+    # OpenCASCADE also writes the sample it reads back, which keeps the repository
+    # free of committed model binaries.
+    add_executable(step_model_loader_test
+        tests/step_model_loader_test.cpp
+        src/io/StepModelLoader.cpp
+    )
+    target_include_directories(step_model_loader_test PRIVATE src)
+    target_link_directories(step_model_loader_test PRIVATE ${OpenCASCADE_LIBRARY_DIR})
+    target_link_libraries(step_model_loader_test PRIVATE
+        Qt6::Core
+        CadModelCore::CadModelCore
+        TKDE
+        TKXSBase
+        TKDESTEP
+    )
+    if(MSVC)
+        target_compile_options(step_model_loader_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME step_model_loader_test COMMAND step_model_loader_test)
+    set_tests_properties(step_model_loader_test PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${OpenCASCADE_BINARY_DIR}"
+    )
 endif()

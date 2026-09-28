@@ -24,6 +24,7 @@ add_library(CadModelCore
     src/occt/ExtrudeBuilder.cpp
     src/occt/ShapeOps.cpp
     src/occt/SketchBuilder.cpp
+    src/occt/ThroughHoleBuilder.cpp
 )
 
 add_library(CadModelCore::CadModelCore ALIAS CadModelCore)

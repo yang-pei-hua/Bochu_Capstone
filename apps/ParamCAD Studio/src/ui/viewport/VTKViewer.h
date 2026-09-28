@@ -140,6 +140,11 @@ public slots:
 signals:
     void cameraChanged(const CameraParameters& parameters);
 
+    // The user is dragging the camera with the right button. A pan translates
+    // the camera instead of orbiting it, which is the one camera move that has
+    // to survive whatever the panels think the pose should be.
+    void cameraPanned();
+
     // Body face under the cursor, with its exact plane when that face is
     // planar. Only emitted while sketch interaction is off.
     void facePicked(int faceId, bool planar, const sketchapp::PlaneFrame& plane);

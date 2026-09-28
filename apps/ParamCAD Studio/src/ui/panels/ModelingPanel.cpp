@@ -22,6 +22,8 @@ QString featureTypeLabel(modeling::FeatureType type)
         return QStringLiteral("Cut");
     case modeling::FeatureType::BoxPrimitive:
         return QStringLiteral("Box");
+    case modeling::FeatureType::ThroughHolePrimitive:
+        return QStringLiteral("Through Hole");
     }
     return QStringLiteral("Unknown");
 }

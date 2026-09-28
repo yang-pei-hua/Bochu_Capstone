@@ -23,6 +23,11 @@ public:
     // batch for control of the pose.
     void setFeedbackSuppressed(bool suppressed);
 
+    // Panning moves the target, which the "look at origin" pin would drag back
+    // to the origin on the next camera change, so a pan drops the pin instead of
+    // being undone by it.
+    void releaseOriginLock();
+
 signals:
     void applyRequested(const CameraParameters& parameters);
     void resetRequested();

@@ -37,4 +37,6 @@ public:
     static reconstruction::PlaneDetectionOptions planeOptionsFor(const PlyCloud& cloud);
     static reconstruction::PlaneDetectionOptions planeOptionsFor(
         const reconstruction::PointStore& cloud);
+    static reconstruction::CylinderDetectionOptions cylinderOptionsFor(
+        const reconstruction::PointStore& cloud);
 };

@@ -6,6 +6,7 @@
 #include "core/CameraController.h"
 #include "io/ModelLoader.h"
 #include "io/PointCloudAdapter.h"
+#include "io/StepModelLoader.h"
 #include "ui/panels/CameraPanel.h"
 #include "ui/panels/CapturePanel.h"
 #include "ui/panels/ModelingPanel.h"
@@ -20,6 +21,7 @@
 
 #include <modeling/SketchValidation.h>
 #include <reconstruction/BoxRecognizer.h>
+#include <reconstruction/ThroughHoleRecognizer.h>
 
 #include <QAction>
 #include <QApplication>
@@ -38,6 +40,7 @@
 #include <QStatusBar>
 #include <QStringList>
 #include <QStyle>
+#include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
 
@@ -343,6 +346,12 @@ void MainWindow::enterSketchMode()
     m_hasDraftAnchor = false;
     m_toolPalette->setActiveTool(ViewportTool::Select);
     m_toolPalette->setVisible(true);
+    // Editing a sketch inserts the sketch page into the bottom tab group and
+    // brings it forward; the console keeps its tab, so the log is one click away.
+    if (m_bottomTabs->indexOf(m_sketchPanel) < 0) {
+        m_bottomTabs->addTab(m_sketchPanel, tr("Sketch"));
+    }
+    m_bottomTabs->setCurrentWidget(m_sketchPanel);
     m_viewer->setDatumPlanesVisible(false);
     m_viewer->setSketchInteractionEnabled(true);
     m_viewer->setViewportTool(ViewportTool::Select);
@@ -372,10 +381,18 @@ void MainWindow::exitSketchMode()
         m_hasCameraBeforeSketch = false;
     }
     // The drawing tools and the reference planes swap back: the model mode picks
-    // its next sketch plane on the datum planes.
+    // its next sketch plane on the datum planes. The bottom panel returns to the
+    // console and the sketch page leaves the tab group with it.
+    m_bottomTabs->setCurrentWidget(m_console);
+    const int sketchTab = m_bottomTabs->indexOf(m_sketchPanel);
+    if (sketchTab >= 0) {
+        m_bottomTabs->removeTab(sketchTab);
+    }
     m_toolPalette->setVisible(false);
     m_viewer->clearDatumPlaneHighlight();
-    m_viewer->setDatumPlanesVisible(true);
+    // Back to the 3D view, so the planes return to whatever the View menu says
+    // rather than to visible, which would silently undo that choice.
+    m_viewer->setDatumPlanesVisible(m_datumPlanesAction->isChecked());
     updateSketchEntryState();
     m_viewer->renderNow();
     logInfo(tr("Sketch closed; the drawing tools are hidden until a sketch is started again"));
@@ -770,6 +787,13 @@ void MainWindow::createActions()
     m_topViewAction = new QAction(tr("Top View"), this);
     m_bottomViewAction = new QAction(tr("Bottom View"), this);
 
+    m_datumPlanesAction = new QAction(tr("Datum Planes"), this);
+    m_datumPlanesAction->setCheckable(true);
+    // The planes are drawn from the first frame of the 3D view, so the entry
+    // starts checked and always reflects what the viewport shows.
+    m_datumPlanesAction->setChecked(true);
+    m_datumPlanesAction->setToolTip(tr("Show the XY, YZ and XZ datum planes"));
+
     m_captureToolAction = new QAction(tr("Capture"), this);
     m_captureToolAction->setCheckable(true);
     m_captureToolAction->setToolTip(tr("Show the capture panel in Properties"));
@@ -797,6 +821,8 @@ void MainWindow::createMenus()
     viewMenu->addSeparator();
     viewMenu->addActions({m_frontViewAction, m_backViewAction, m_leftViewAction,
                           m_rightViewAction, m_topViewAction, m_bottomViewAction});
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_datumPlanesAction);
 
     QMenu* toolsMenu = menuBar()->addMenu(tr("&Tools"));
     toolsMenu->addAction(m_captureToolAction);
@@ -882,15 +908,30 @@ void MainWindow::createDockPanels()
     m_console->setReadOnly(true);
     m_console->setMaximumBlockCount(2000);
     m_console->setObjectName(QStringLiteral("console"));
-    auto* consoleDock = new QDockWidget(tr("Console / Log"), this);
-    consoleDock->setObjectName(QStringLiteral("consoleDock"));
-    consoleDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
-    consoleDock->setWidget(m_console);
-    consoleDock->setMinimumHeight(130);
-    addDockWidget(Qt::BottomDockWidgetArea, consoleDock);
+
+    m_sketchPanel = new SketchPanel(this);
+    // Built detached from the tab widget, so it has to stay hidden until a sketch
+    // is edited; a child that is never laid out would float over the tab bar.
+    m_sketchPanel->hide();
+
+    // The console and the sketch workspace share one panel as two pages, exactly
+    // like Properties groups Camera and Render, so the tabs sit on top and no
+    // title is repeated above them.
+    m_bottomTabs = new QTabWidget(this);
+    m_bottomTabs->addTab(m_console, tr("Console / Log"));
+
+    m_bottomDock = new QDockWidget(tr("Output"), this);
+    m_bottomDock->setObjectName(QStringLiteral("outputDock"));
+    m_bottomDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
+    m_bottomDock->setWidget(m_bottomTabs);
+    m_bottomDock->setMinimumHeight(150);
+    // An empty title bar collapses the dock's own header, so the tab row is the
+    // only label above the panel and "Output" never appears.
+    m_bottomDock->setTitleBarWidget(new QWidget(m_bottomDock));
+    addDockWidget(Qt::BottomDockWidgetArea, m_bottomDock);
 
     resizeDocks({sceneDock, propertyDock}, {235, 380}, Qt::Horizontal);
-    resizeDocks({consoleDock}, {150}, Qt::Vertical);
+    resizeDocks({m_bottomDock}, {170}, Qt::Vertical);
 
     m_modelingPanel = new ModelingPanel(this);
     auto* modelingDock = new QDockWidget(tr("Modeling"), this);
@@ -900,19 +941,6 @@ void MainWindow::createDockPanels()
     modelingDock->setMinimumWidth(250);
     addDockWidget(Qt::LeftDockWidgetArea, modelingDock);
     splitDockWidget(sceneDock, modelingDock, Qt::Vertical);
-
-    // The sketch panel shares the bottom row with the console: the entity list and
-    // the extrude/cut parameters need a wide slot, and the right-hand column is
-    // already taken by Properties at full height. The sketch itself is drawn in
-    // the 3D viewport, not here.
-    m_sketchPanel = new SketchPanel(this);
-    auto* sketchDock = new QDockWidget(tr("Sketch"), this);
-    sketchDock->setObjectName(QStringLiteral("sketchDock"));
-    sketchDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
-    sketchDock->setWidget(m_sketchPanel);
-    sketchDock->setMinimumWidth(360);
-    addDockWidget(Qt::BottomDockWidgetArea, sketchDock);
-    splitDockWidget(consoleDock, sketchDock, Qt::Horizontal);
 }
 
 void MainWindow::createStatusBar()
@@ -962,6 +990,11 @@ void MainWindow::connectUi()
     connect(m_bottomViewAction, &QAction::triggered, this, [this]() {
         m_viewer->setStandardView(CameraController::StandardView::Bottom);
         logInfo(tr("Bottom view selected"));
+    });
+    connect(m_datumPlanesAction, &QAction::toggled, this, [this](bool visible) {
+        m_viewer->setDatumPlanesVisible(visible);
+        m_viewer->renderNow();
+        logInfo(visible ? tr("Datum planes shown") : tr("Datum planes hidden"));
     });
     connect(m_sketchPanel, &SketchPanel::entityRemoveRequested,
             this, &MainWindow::onSketchEntityRemoved);
@@ -1027,6 +1060,9 @@ void MainWindow::connectUi()
         cameraPanel->setParameters(parameters);
         updateCameraStatus(parameters.parallelProjection);
     });
+    // A pan has to be allowed to leave the origin behind, so the panel drops its
+    // "look at origin" pin rather than pulling the camera back onto it.
+    connect(m_viewer, &VTKViewer::cameraPanned, cameraPanel, &CameraPanel::releaseOriginLock);
 
     RenderPanel* renderPanel = m_propertyPanel->renderPanel();
     connect(renderPanel, &RenderPanel::backgroundColorChanged,
@@ -1135,20 +1171,56 @@ void MainWindow::connectUi()
 
 void MainWindow::openModel()
 {
+    // Only STEP is parsed today, so that is the only filter offered: the dialog
+    // must not promise OBJ or PLY meshes the client cannot read. Point clouds
+    // keep their own "Open Point Cloud" entry.
     const QString filePath = QFileDialog::getOpenFileName(
-        this, tr("Open Model"), QString(),
-        tr("Supported Models (*.step *.stp *.obj *.ply);;STEP Files (*.step *.stp);;Mesh Files (*.obj *.ply)"));
+        this, tr("Open Model"), QString(), tr("STEP Files (*.step *.stp)"));
     if (filePath.isEmpty()) {
         return;
     }
 
-    const QFileInfo info(filePath);
+    const QString fileName = QFileInfo(filePath).fileName();
+    StepModelLoader stepLoader;
+    if (!stepLoader.canLoad(filePath)) {
+        const QString message = tr("'%1' is not a STEP file; only .step and .stp "
+                                   "models can be imported.").arg(fileName);
+        logError(message);
+        QMessageBox::warning(this, tr("Open Model"), message);
+        return;
+    }
+
+    LoadedModel loaded;
+    QString error;
+    if (!stepLoader.load(filePath, loaded, error)) {
+        // A file that could not be parsed is reported and nothing else happens:
+        // whatever model is already on screen keeps its shape, its name and its
+        // status, so a failure can never be mistaken for a successful load.
+        logError(error);
+        QMessageBox::warning(this, tr("Open Model"), error);
+        return;
+    }
+
+    // The window takes ownership of the B-Rep, then the viewer derives its
+    // display mesh from it; the actor is replaced, not stacked on the old one.
+    m_loadedModel = loaded;
     m_viewer->setObjectVisible(true);
+    m_viewer->setBodyShape(m_loadedModel.shape);
+    m_viewer->resetCamera();
+    m_viewer->renderNow();
+    syncCaptureDistance();
+
+    m_scenePanel->updateNodeLabel(SceneNodeType::Model, fileName);
     m_statusLabel->setText(tr("Ready | Model: %1 | Camera: %2")
-                               .arg(info.fileName(),
+                               .arg(fileName,
                                     m_viewer->cameraParameters().parallelProjection
                                         ? tr("Orthographic") : tr("Perspective")));
-    logWarning(tr("Loader interface reserved; '%1' is not parsed in this skeleton.").arg(info.fileName()));
+    logInfo(tr("STEP model loaded from %1: %2 solids, %3 faces, %4 edges, %5 vertices")
+                .arg(fileName)
+                .arg(m_loadedModel.solidCount)
+                .arg(m_loadedModel.faceCount)
+                .arg(m_loadedModel.edgeCount)
+                .arg(m_loadedModel.vertexCount));
 }
 
 void MainWindow::openPointCloud()
@@ -1247,11 +1319,16 @@ void MainWindow::reconstructCad()
                 .arg(preprocessingReport.removedAsOutliers)
                 .arg(preprocessingReport.normalsEstimated));
 
-    reconstruction::BoxCandidate candidate;
+    reconstruction::BoxWithThroughHolesCandidate candidate;
     std::string failure;
-    if (!reconstruction::reconstructBox(points, PointCloudAdapter::planeOptionsFor(points),
-                                        reconstruction::BoxRecognitionOptions{}, candidate,
-                                        failure)) {
+    if (!reconstruction::reconstructBoxWithThroughHoles(
+            points,
+            PointCloudAdapter::planeOptionsFor(points),
+            PointCloudAdapter::cylinderOptionsFor(points),
+            reconstruction::BoxRecognitionOptions{},
+            reconstruction::ThroughHoleRecognitionOptions{},
+            candidate,
+            failure)) {
         // No box in the cloud is an ordinary outcome for an arbitrary scan, not
         // an error, so it is reported in the log and the panel rather than in a
         // dialog the user has to dismiss.
@@ -1264,23 +1341,31 @@ void MainWindow::reconstructCad()
         return;
     }
 
-    if (!m_modelingController->commitReconstructedBox(candidate)) {
+    if (!m_modelingController->commitReconstructedBoxWithThroughHoles(candidate)) {
         const QString message = m_modelingController->lastError();
         logError(message);
         QMessageBox::warning(this, tr("Reconstruct CAD"), message);
         return;
     }
 
-    const modeling::BoxPrimitiveParams& box = candidate.primitive;
-    logInfo(tr("Reconstructed box: %1 x %2 x %3 at (%4, %5, %6), confidence %7")
+    const modeling::BoxPrimitiveParams& box = candidate.box.primitive;
+    logInfo(tr("Reconstructed box: %1 x %2 x %3 at (%4, %5, %6), confidence %7, through holes %8")
                 .arg(box.sizeX, 0, 'f', 3)
                 .arg(box.sizeY, 0, 'f', 3)
                 .arg(box.sizeZ, 0, 'f', 3)
                 .arg(box.pose.origin.x, 0, 'f', 3)
                 .arg(box.pose.origin.y, 0, 'f', 3)
                 .arg(box.pose.origin.z, 0, 'f', 3)
-                .arg(candidate.confidence, 0, 'f', 3));
-    m_statusLabel->setText(tr("Ready | Model: Reconstructed Box | Camera: %1")
+                .arg(candidate.confidence, 0, 'f', 3)
+                .arg(candidate.throughHoles.size()));
+    for (const reconstruction::ThroughHoleCandidate& hole : candidate.throughHoles) {
+        logInfo(tr("Recognized through hole: diameter %1, thickness %2, confidence %3")
+                    .arg(hole.primitive.radius * 2.0, 0, 'f', 3)
+                    .arg(hole.bodyThickness, 0, 'f', 3)
+                    .arg(hole.confidence, 0, 'f', 3));
+    }
+    m_statusLabel->setText(tr("Ready | Model: Reconstructed Box (%1 through holes) | Camera: %2")
+                               .arg(candidate.throughHoles.size())
                                .arg(m_viewer->cameraParameters().parallelProjection
                                         ? tr("Orthographic") : tr("Perspective")));
 }

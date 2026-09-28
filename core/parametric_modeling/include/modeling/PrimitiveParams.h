@@ -21,4 +21,13 @@ struct BoxPrimitiveParams {
     double sizeZ = 0.0;
 };
 
+// A cylindrical material removal that crosses the complete current body. The
+// axis is expressed in world space; unlike a blind Cut it deliberately has no
+// depth because the modeling backend derives a safe span from the body bounds.
+struct ThroughHolePrimitiveParams {
+    Vec3 axisPoint{};
+    Vec3 axisDirection{0.0, 0.0, 1.0};
+    double radius = 0.0;
+};
+
 }  // namespace modeling

@@ -23,6 +23,9 @@ derived from that history by `PartDocument::rebuild()`.
   document clearing.
 - Direct semantic `BoxPrimitiveParams`, so reconstruction can preserve a box as
   a box instead of inventing a sketch/extrude history.
+- Direct semantic `ThroughHolePrimitiveParams`. Rebuild derives an oversized
+  OpenCASCADE cylinder from the current body bounds and subtracts it, preserving
+  the hole axis and radius as editable feature state rather than only B-Rep.
 - Revision-checked, atomic `ModelPatch` application for automated producers;
   failed commands or rebuilds restore the previous document state.
 

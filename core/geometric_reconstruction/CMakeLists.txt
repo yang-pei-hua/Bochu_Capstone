@@ -30,6 +30,7 @@ add_library(GeometricReconstruction
     src/PointStore.cpp
     src/PrimitiveDetector.cpp
     src/SyntheticPointCloud.cpp
+    src/ThroughHoleRecognizer.cpp
 )
 add_library(GeometricReconstruction::GeometricReconstruction ALIAS
     GeometricReconstruction)

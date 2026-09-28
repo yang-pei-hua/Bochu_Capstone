@@ -333,6 +333,21 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
             appendIndependentSolid(box, currentBody);
             continue;
         }
+        case FeatureType::ThroughHolePrimitive: {
+            const auto* params =
+                std::get_if<ThroughHolePrimitiveParams>(&feature.params);
+            if (params == nullptr) {
+                error = "Feature parameter type does not match ThroughHolePrimitive";
+                break;
+            }
+            TopoDS_Shape cut;
+            if (!occt::buildThroughHolePrimitive(
+                    currentBody, *params, cut, error)) {
+                break;
+            }
+            currentBody = cut;
+            continue;
+        }
         }
 
         feature.valid = false;

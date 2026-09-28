@@ -32,9 +32,18 @@ synthetic surface points
   -> STEP
 ```
 
+The client reconstruction path also recognizes cylindrical through holes in a
+recognized box. Cylinder evidence must be aligned with a box axis, have enough
+angular coverage, remain inside both transverse box bounds, and span between
+both opposing exterior faces. Accepted evidence becomes a semantic
+`ThroughHolePrimitiveParams` feature and is committed atomically with the box;
+short cylinders are deliberately left unclassified rather than mislabeled as
+through holes.
+
 It does not infer an Extrude history. `AxisAlignedBoxRecognizer` remains as a
-small deterministic baseline; `reconstructBox()` is the current reconstruction
-entry point. Neither implementation depends on Qt, VTK, PCL, or client state.
+small deterministic baseline; `reconstructBoxWithThroughHoles()` is the client
+reconstruction entry point. Neither implementation depends on Qt, VTK, PCL, or
+client state.
 
 Before detection, `preprocessPointCloud()` provides the scale-aware input path:
 

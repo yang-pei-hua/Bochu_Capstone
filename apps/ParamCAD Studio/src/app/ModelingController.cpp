@@ -128,6 +128,26 @@ bool ModelingController::commitReconstructedBox(const reconstruction::BoxCandida
     return true;
 }
 
+bool ModelingController::commitReconstructedBoxWithThroughHoles(
+    const reconstruction::BoxWithThroughHolesCandidate& candidate)
+{
+    if (!m_core) {
+        return false;
+    }
+
+    const modeling::ModelPatchResult result =
+        reconstruction::commitBoxWithThroughHolesCandidate(candidate, *m_core);
+    if (!result.success) {
+        m_lastError = QString::fromStdString(result.error);
+        emit modelError(m_lastError);
+        return false;
+    }
+
+    m_lastError.clear();
+    emit modelRebuilt();
+    return true;
+}
+
 bool ModelingController::removeFeature(modeling::FeatureId id, bool cascade)
 {
     if (!execute(modeling::RemoveFeatureCommand{id, cascade})) {

@@ -227,6 +227,19 @@ void CameraPanel::setFeedbackSuppressed(bool suppressed)
     m_feedbackSuppressed = suppressed;
 }
 
+void CameraPanel::releaseOriginLock()
+{
+    if (!m_lookAtOrigin->isChecked()) {
+        return;
+    }
+    // The box is dropped without going through the toggled handler: the camera
+    // is being dragged right now, and applying the fields back would fight it.
+    // The next camera change fills the target in from the panned pose.
+    const QSignalBlocker blocker(m_lookAtOrigin);
+    m_lookAtOrigin->setChecked(false);
+    updateEnabledState();
+}
+
 CameraParameters CameraPanel::parameters() const
 {
     CameraParameters result;

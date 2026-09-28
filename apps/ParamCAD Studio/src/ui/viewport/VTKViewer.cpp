@@ -83,13 +83,15 @@ VTKViewer::VTKViewer(QWidget* parent)
     m_renderer->GradientBackgroundOn();
 
     // SolidWorks-style navigation: the left button is reserved for picking and
-    // placing geometry, so the camera lives on the middle button and the wheel.
+    // placing geometry, so the camera lives on the buttons that stay held down -
+    // the middle one rotates, the right one pans - and on the wheel.
     m_interactorStyle = vtkSmartPointer<SketchInteractorStyle>::New();
     m_interactorStyle->leftButtonPressed = [this](int x, int y) {
         onLeftButtonPressed(x, y);
     };
     m_interactorStyle->mouseMoved = [this](int x, int y) { onMouseMoved(x, y); };
     m_interactorStyle->cancelRequested = [this]() { onCancelRequested(); };
+    m_interactorStyle->panMoved = [this]() { emit cameraPanned(); };
     m_interactorStyle->keyPressed = [this](const std::string& keySym) {
         onKeyPressed(keySym);
     };

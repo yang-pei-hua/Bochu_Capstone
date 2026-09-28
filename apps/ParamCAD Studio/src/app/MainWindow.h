@@ -5,6 +5,7 @@
 #include "core/CameraController.h"
 #include "core/Scene.h"
 #include "core/SketchFrame.h"
+#include "io/ModelLoader.h"
 #include "ui/viewport/ViewportTool.h"
 
 #include <QMainWindow>
@@ -13,6 +14,7 @@
 
 class QAction;
 class CaptureController;
+class QDockWidget;
 class QLabel;
 class ModelingPanel;
 class QPlainTextEdit;
@@ -20,6 +22,7 @@ class PropertyPanel;
 class ScenePanel;
 class SketchPanel;
 class SketchToolPalette;
+class QTabWidget;
 class VTKViewer;
 
 class MainWindow final : public QMainWindow
@@ -122,6 +125,11 @@ private:
     PropertyPanel* m_propertyPanel = nullptr;
     SketchPanel* m_sketchPanel = nullptr;
     QPlainTextEdit* m_console = nullptr;
+    // The bottom dock is one tabbed panel, the way Properties groups Camera and
+    // Render: the console has a permanent tab and the sketch page only joins the
+    // group while a sketch is being edited.
+    QDockWidget* m_bottomDock = nullptr;
+    QTabWidget* m_bottomTabs = nullptr;
     QLabel* m_statusLabel = nullptr;
 
     // The sketch currently open in the panel. It enters the feature graph as soon
@@ -162,6 +170,9 @@ private:
     QAction* m_rightViewAction = nullptr;
     QAction* m_topViewAction = nullptr;
     QAction* m_bottomViewAction = nullptr;
+    // Toggles the three reference planes. Sketch mode still hides them while a
+    // sketch is open; this entry is the user's preference for the 3D view.
+    QAction* m_datumPlanesAction = nullptr;
     QAction* m_captureAction = nullptr;
     QAction* m_newSketchAction = nullptr;
     QAction* m_captureToolAction = nullptr;
@@ -171,4 +182,10 @@ private:
     // Cloud the "Reconstruct CAD" entry works on. It is the file last loaded
     // into the viewport, whether it was opened directly or produced here.
     QString m_pointCloudPath;
+
+    // The imported CAD file, kept as native B-Rep for the lifetime of the
+    // window. The viewer only tessellates it for display, so the shape has to
+    // outlive every actor built from it - the window is what owns it, and an
+    // empty shape means nothing has been imported.
+    LoadedModel m_loadedModel;
 };

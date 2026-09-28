@@ -379,6 +379,28 @@ ReconstructionSpec
    SolidWorks
 ```
 
+## 7.6 客户端模型导入现状
+
+客户端（ParamCAD Studio）通过 File → Open Model 导入 CAD 模型，当前格式支持情况：
+
+| 格式          | 现状        | 说明                              |
+| ----------- | --------- | ------------------------------- |
+| STEP / STP  | 已支持       | 真实解析为 OpenCASCADE B-Rep，并在视口中显示 |
+| PLY         | 已支持（点云路径） | 通过 File → Open Point Cloud 加载点云，不属于 CAD 模型导入 |
+| OBJ         | 未实现       | 文件过滤器不再列出该格式                    |
+| PLY（作为网格）   | 未实现       | 网格导入尚未实现，PLY 目前只按点云处理           |
+
+STEP/STP 导入由 `StepModelLoader` 完成：使用 `STEPControl_Reader` 读文件，检查 `ReadFile()` 返回 `IFSelect_RetDone`，调用 `TransferRoots()` 并检查成功传输的根节点数量，最后由 `OneShape()` 取出 `TopoDS_Shape`。加载结果保存在 `LoadedModel` 中，**原始 `TopoDS_Shape` 会被完整保留**，而不是一次性转成三角网格后丢弃；因此后续仍可进行面/边/实体拓扑遍历、几何曲面识别、参数化特征识别以及 STEP 再导出。
+
+导入时会把 shape 按质心平移到原点：能围出体积的实体取体积质心（`BRepGProp::VolumeProperties`），无体积的开放壳体或零散面取包围盒中心（`BRepBndLib`）。视口的轨道旋转与取景都围绕原点进行，模型若停在文件原本的摆放位置上，就会绕着空处摆动而不是原地转动。因此 **STEP 文件原始的摆放与位移不会被保留**，模型的尺寸和内部各部分的相对距离都不变；质心已在原点或无法计算时 shape 保持原样。
+
+视口显示的三角网格是由该 `TopoDS_Shape` 经 `OcctShapeTessellator` 按需派生出来的，并不会替换原始 B-Rep。因此一个已加载的 STEP 模型在内存中同时存在两份数据：
+
+* 原始 B-Rep：`LoadedModel::shape`（`TopoDS_Shape`）
+* 显示用网格：`vtkPolyData`，由 `BodyActor` 持有并交给 VTK 渲染
+
+导入失败时不会替换当前场景：日志与弹窗会给出具体原因，已经成功显示的模型保持不变。
+
 ---
 
 # 8. 核心数据类型
