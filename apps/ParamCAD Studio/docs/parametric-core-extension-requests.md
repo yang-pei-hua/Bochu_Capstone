@@ -8,7 +8,7 @@
 本文档用于记录客户端与核心之间的能力契约。所有能在 `apps/` 侧完成的交互仍由客户端承担；
 必须成为 Feature Graph 真源或涉及几何内核一致性的能力则由核心实现。
 
-- 提出方：`apps/cad_pointcloud_client`
+- 提出方：`apps/ParamCAD Studio`
 - 目标核心：`core/parametric_modeling`（V0）
 - 状态：已完成首轮评估与核心扩展；各项状态见下表和标题
 
@@ -213,7 +213,7 @@ struct OffsetDatumPlane {
 #### D3. 面草图使用显式 `Plane3d` 后，与上游特征的依赖边丢失 —— 状态：待专项设计（依赖 D1）
 
 - **涉及文件**：`include/modeling/FaceReference.h`、`src/PartDocument.cpp::dependsOn`、
-  `src/RebuildEngine.cpp::resolvePlane`、`apps/cad_pointcloud_client/src/app/MainWindow.cpp`
+  `src/RebuildEngine.cpp::resolvePlane`、`apps/ParamCAD Studio/src/app/MainWindow.cpp`
 - **现状**：客户端在实体面上开草图时（SolidWorks 风格：点选模型面 → New Sketch），把选中的面记为
   一个显式的世界空间 `Plane3d{origin, normal, xDirection}`，而不是
   `FaceReference{ownerFeature, FaceRole}`。好处是面可以是**任意平面**，不再受 Extrude 的
@@ -262,7 +262,7 @@ struct OffsetDatumPlane {
 - **需要新增**：`PartDocument::clear()`（含 `nextFeatureId_` 复位策略的明确约定）。
 - **为什么需要**：「新建草图 / 新建模型」。
 - **当前可绕过方案**：客户端 `new modeling::ModelingCore` 整体替换（见
-  [ModelingController.cpp L51](file:///d:/code/ECE4500J/apps/cad_pointcloud_client/src/app/ModelingController.cpp#L51)），
+  [ModelingController.cpp L51](../src/app/ModelingController.cpp#L51)），
   代价是 app 侧被迫持有 document 的所有权语义。
 
 #### E4. Feature Graph 持久化（序列化 / 反序列化） —— 状态：待 schema 设计
@@ -377,7 +377,7 @@ bool validateSketch(const SketchFeatureParams& params, std::string& error);
 
 ## 4. 明确「不需要改核心」的部分（由客户端承担）
 
-以下内容不构成对核心的扩展诉求，将在 `apps/cad_pointcloud_client` 内实现：
+以下内容不构成对核心的扩展诉求，将在 `apps/ParamCAD Studio` 内实现：
 
 - 草图会话态（当前工具、选中图元、两点工具的草稿锚点）
 - SolidWorks 风格的在视口内草图交互：3D 视图左侧常驻工具条（模型页 / 草图页）、鼠标拾取、
