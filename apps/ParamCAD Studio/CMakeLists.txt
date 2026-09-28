@@ -117,6 +117,10 @@ qt_add_executable(CadPointCloudClient WIN32
     src/ui/panels/SketchToolPalette.cpp
 )
 
+set_target_properties(CadPointCloudClient PROPERTIES
+    OUTPUT_NAME "ParamCAD Studio"
+)
+
 target_include_directories(CadPointCloudClient PRIVATE src)
 target_link_libraries(CadPointCloudClient PRIVATE
     Qt6::Core

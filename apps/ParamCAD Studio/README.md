@@ -38,14 +38,14 @@ re-run the commands above rather than creating a second build tree — only
 For VS Code, select the `msvc-debug` configure preset and the Release build
 configuration. The bundled SDK currently contains Release VTK libraries.
 
-The executable is written to `build/msvc-debug/Release/CadPointCloudClient.exe`.
+The executable is written to `build/msvc-debug/Release/ParamCAD Studio.exe`.
 The bundled Qt, VTK, and OpenCASCADE SDKs are not on `PATH`, and Windows resolves
 dependency DLLs from the executable's own directory first, so a CMake
 `POST_BUILD` step stages every required runtime DLL (plus the Qt platform, style,
 image-format, and TLS plugins) next to the executable. Launch it directly:
 
 ```powershell
-./build/msvc-debug/Release/CadPointCloudClient.exe
+& "./build/msvc-debug/Release/ParamCAD Studio.exe"
 ```
 
 Do not copy or move the executable out of `build/msvc-debug/Release`: it must stay
@@ -55,6 +55,36 @@ beside the staged DLLs, otherwise startup fails with errors such as
 The binary SDKs under the repository-root `deps/` directory are intentionally
 excluded from Git and AI context. See [`../../deps/README.md`](../../deps/README.md)
 for the canonical dependency layout and verification commands.
+
+## Windows release packages
+
+The packaging entry point builds the Release client once and emits two ZIP
+packages from the same staging logic:
+
+```powershell
+& .\packaging\package-client.ps1 `
+  -QtRoot "D:\Qt\6.11.2\msvc2022_64" `
+  -Variant All `
+  -Clean
+```
+
+- `*-offline-cuda.zip` contains the GUI runtime, reconstruction scripts,
+  embeddable Python, and COLMAP and works without a dependency download.
+- `*-bootstrap.zip` contains the independently runnable GUI and a checked
+  dependency installer. Run `Install-Dependencies.cmd` after extraction or
+  installation to download the pinned Python and COLMAP archives.
+
+Both packages include `Install-ParamCADStudio.cmd`, which installs for the
+current user under `%LOCALAPPDATA%\Programs\ParamCAD Studio` and creates a Start
+menu shortcut without requiring administrator privileges. Pass
+`-ColmapFlavor nocuda` to the packager or dependency installer for the smaller
+CPU-only COLMAP runtime.
+
+Qt, VTK, OpenCASCADE, and the MSVC runtime DLLs are always staged beside the
+GUI executable because it cannot start without them. The package does not ship
+the corresponding development headers, import libraries, or CMake metadata.
+Pinned URLs and SHA-256 values live in
+[`../../packaging/dependencies.json`](../../packaging/dependencies.json).
 
 ## Current scope
 

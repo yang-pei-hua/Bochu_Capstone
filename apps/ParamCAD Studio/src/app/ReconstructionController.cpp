@@ -112,6 +112,17 @@ QString ReconstructionController::resolvePython(QStringList& prefixArgs) const
         return configured;
     }
 
+    // Release packages install the embeddable interpreter under deps/python.
+    // Prefer it over a machine-wide Python so reconstruction behaves the same
+    // on developer workstations and clean end-user machines.
+    const QString root = resolveRepoRoot();
+    if (!root.isEmpty()) {
+        const QString bundled = QDir(root).filePath(QStringLiteral("deps/python/python.exe"));
+        if (QFileInfo::exists(bundled)) {
+            return QDir::cleanPath(bundled);
+        }
+    }
+
     const QString python = QStandardPaths::findExecutable(QStringLiteral("python"));
     if (!python.isEmpty()) {
         return python;
@@ -231,8 +242,9 @@ bool ReconstructionController::start(const ReconstructRequest& request)
     QStringList prefixArgs;
     const QString python = resolvePython(prefixArgs);
     if (python.isEmpty()) {
-        m_lastError = tr("No Python 3 interpreter was found. Install Python or set "
-                         "reconstruction/pythonInterpreter.");
+        m_lastError = tr("No Python 3 interpreter was found. Run Install-Dependencies.cmd "
+                         "from the ParamCAD Studio installation folder, install Python, or "
+                         "set reconstruction/pythonInterpreter.");
         return false;
     }
 

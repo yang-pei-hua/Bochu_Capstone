@@ -9,7 +9,7 @@ int main(int argc, char* argv[])
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat());
 
     QApplication application(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("CAD & Point Cloud Studio"));
+    QApplication::setApplicationName(QStringLiteral("ParamCAD Studio"));
     QApplication::setOrganizationName(QStringLiteral("ECE4500J"));
     QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
 
