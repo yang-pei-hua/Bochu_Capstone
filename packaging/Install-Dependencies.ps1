@@ -244,9 +244,12 @@ else {
 $python = Join-Path $InstallRoot "deps\python\python.exe"
 $script = Join-Path $InstallRoot "core\reconstruction\reconstruct.py"
 $colmapExe = Join-Path $InstallRoot "deps\colmap\bin\colmap.exe"
-$gmpRuntime = Join-Path $InstallRoot "gmp-10.dll"
-if (-not (Test-Path -LiteralPath $gmpRuntime -PathType Leaf)) {
-    throw "The CGAL GMP runtime is missing from this ParamCAD Studio installation: $gmpRuntime"
+$guiExecutable = Join-Path $InstallRoot "ParamCAD Studio.exe"
+if (Test-Path -LiteralPath $guiExecutable -PathType Leaf) {
+    $gmpRuntime = Join-Path $InstallRoot "gmp-10.dll"
+    if (-not (Test-Path -LiteralPath $gmpRuntime -PathType Leaf)) {
+        throw "The CGAL GMP runtime is missing from this ParamCAD Studio installation: $gmpRuntime"
+    }
 }
 if (Test-Path -LiteralPath $script -PathType Leaf) {
     & $python $script --help | Out-Null

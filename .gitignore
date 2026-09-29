@@ -41,6 +41,7 @@ coverage/
 /deps/occt-8.0.1/
 /deps/vtk-9.7.0/
 /deps/colmap/
+/deps/python/
 
 # Downloaded Fountain-P11 payload (metadata stays tracked)
 /data/fountain-p11/fountain-p11.zip

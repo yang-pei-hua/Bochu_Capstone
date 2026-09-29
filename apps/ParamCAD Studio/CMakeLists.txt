@@ -154,9 +154,26 @@ endif()
 # resolves dependency DLLs from the executable directory, so stage the runtime
 # DLLs next to the binary.
 if(WIN32)
+    # CGAL is linked through a static library, so CMake's transitive runtime
+    # scan does not consistently discover GMP. Locate the vcpkg runtime
+    # explicitly so a normal developer build is launchable without a manual
+    # DLL copy (the packaging script performs the same validation).
+    find_file(CAD_CLIENT_GMP_RUNTIME
+        NAMES gmp-10.dll
+        PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin"
+        NO_DEFAULT_PATH
+    )
+    if(NOT CAD_CLIENT_GMP_RUNTIME)
+        message(FATAL_ERROR
+            "gmp-10.dll was not found in the active vcpkg x64-windows installation")
+    endif()
+
     add_custom_command(TARGET CadPointCloudClient POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:CadPointCloudClient>
+                "$<TARGET_FILE_DIR:CadPointCloudClient>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CAD_CLIENT_GMP_RUNTIME}"
                 "$<TARGET_FILE_DIR:CadPointCloudClient>"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${OpenCASCADE_BINARY_DIR}"
