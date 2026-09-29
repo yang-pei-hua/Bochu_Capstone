@@ -12,14 +12,28 @@ require administrator privileges.
 
 ## Package variants
 
-- **offline** already includes the embeddable Python runtime and COLMAP. It is
-  ready for reconstruction immediately after extraction or installation.
+- **full** already includes every end-user runtime: the GUI runtime,
+  embeddable Python, and COLMAP. It is ready for reconstruction immediately
+  after extraction or installation and does not download anything.
 - **bootstrap** keeps those large optional components out of the archive. From
-  the extracted or installed folder, download the pinned, SHA-256-verified
-  runtime with:
+  the extracted folder, download the pinned, SHA-256-verified runtime with:
 
 ```powershell
 .\Install-Dependencies.cmd
+```
+
+After installing the bootstrap package, run the same command from its installed
+location:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\ParamCAD Studio\Install-Dependencies.cmd"
+```
+
+Alternatively, install the bootstrap package and fetch its dependencies in one
+command:
+
+```powershell
+.\Install-ParamCADStudio.cmd -InstallDependencies
 ```
 
 The default COLMAP payload includes CUDA for dense reconstruction. Machines
@@ -29,7 +43,8 @@ without a supported NVIDIA GPU can install the smaller CPU build instead:
 .\Install-Dependencies.cmd -ColmapFlavor nocuda
 ```
 
-The GUI runtime itself always includes the Qt, VTK, OpenCASCADE, and MSVC DLLs
-required to start. The optional payload only contains Python and COLMAP. Full
-development SDKs (`include/`, `.lib`, and CMake package files) are deliberately
-not shipped to end users.
+The GUI runtime itself always includes the Qt, VTK, OpenCASCADE, CGAL/GMP, and
+MSVC DLLs required to start. CGAL is compiled into the application; its required
+`gmp-10.dll` is present in both variants. The downloadable optional payload only
+contains Python and COLMAP. Full development SDKs (`include/`, `.lib`, and CMake
+package files) are deliberately not shipped to end users.

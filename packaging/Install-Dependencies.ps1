@@ -25,11 +25,24 @@ function Assert-ChildPath([string]$Root, [string]$Path) {
     }
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $hasher.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $hasher.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Test-Hash([string]$Path, [string]$Expected) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return $false
     }
-    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    $actual = Get-Sha256 $Path
     return $actual.Equals($Expected, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
@@ -49,7 +62,7 @@ function Get-Archive([pscustomobject]$Dependency) {
         Write-Host "Downloading $($Dependency.url)"
         Invoke-WebRequest -Uri $Dependency.url -OutFile $partial -UseBasicParsing
         if (-not (Test-Hash $partial $Dependency.sha256)) {
-            $actual = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash
+            $actual = Get-Sha256 $partial
             throw "SHA-256 mismatch for $($Dependency.fileName): expected $($Dependency.sha256), got $actual"
         }
         Move-Item -LiteralPath $partial -Destination $archive
@@ -231,6 +244,10 @@ else {
 $python = Join-Path $InstallRoot "deps\python\python.exe"
 $script = Join-Path $InstallRoot "core\reconstruction\reconstruct.py"
 $colmapExe = Join-Path $InstallRoot "deps\colmap\bin\colmap.exe"
+$gmpRuntime = Join-Path $InstallRoot "gmp-10.dll"
+if (-not (Test-Path -LiteralPath $gmpRuntime -PathType Leaf)) {
+    throw "The CGAL GMP runtime is missing from this ParamCAD Studio installation: $gmpRuntime"
+}
 if (Test-Path -LiteralPath $script -PathType Leaf) {
     & $python $script --help | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -241,4 +258,4 @@ if (Test-Path -LiteralPath $script -PathType Leaf) {
 if ($LASTEXITCODE -ne 0) {
     throw "COLMAP validation failed with exit code $LASTEXITCODE"
 }
-Write-Host "ParamCAD Studio reconstruction dependencies are ready under $InstallRoot"
+Write-Host "ParamCAD Studio dependencies are ready under $InstallRoot"

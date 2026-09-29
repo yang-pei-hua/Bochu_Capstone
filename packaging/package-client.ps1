@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("All", "Offline", "Bootstrap")]
+    [ValidateSet("All", "Full", "Offline", "Bootstrap")]
     [string]$Variant = "All",
     [ValidateSet("cuda", "nocuda")]
     [string]$ColmapFlavor = "cuda",
@@ -9,6 +9,7 @@ param(
     [string]$Version = "0.1.0",
     [string]$OutputDirectory,
     [string]$BuildDirectory,
+    [string]$LocalColmapPath,
     [switch]$Clean,
     [switch]$SkipBuild,
     [switch]$SkipSmokeTest
@@ -70,6 +71,41 @@ function Assert-ClientRuntime([string]$Directory) {
         $path = Join-Path $Directory $file
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Missing required GUI runtime dependency: $path"
+        }
+    }
+}
+
+function Assert-PackageStage([string]$Directory, [bool]$IncludesOptionalDependencies) {
+    $requiredFiles = @(
+        "ParamCAD Studio.exe",
+        "gmp-10.dll",
+        "dependencies.json",
+        "Install-Dependencies.ps1",
+        "Install-Dependencies.cmd",
+        "Install-ParamCADStudio.ps1",
+        "Install-ParamCADStudio.cmd",
+        "README.md"
+    )
+    foreach ($relativePath in $requiredFiles) {
+        $path = Join-Path $Directory $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Package stage is missing required file: $path"
+        }
+    }
+
+    $optionalAnchors = @(
+        "deps\python\python.exe",
+        "deps\colmap\bin\colmap.exe"
+    )
+    foreach ($relativePath in $optionalAnchors) {
+        $path = Join-Path $Directory $relativePath
+        if ($IncludesOptionalDependencies) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Full package is missing bundled dependency: $path"
+            }
+        }
+        elseif (Test-Path -LiteralPath $path) {
+            throw "Bootstrap package unexpectedly contains optional dependency: $path"
         }
     }
 }
@@ -143,11 +179,13 @@ function New-PackageStage([string]$Name, [bool]$IncludeDependencies) {
             "-CacheDirectory", (Join-Path $projectRoot "artifacts\cache"),
             "-ColmapFlavor", $ColmapFlavor
         )
-        if ($ColmapFlavor -eq "cuda") {
-            $arguments += @("-LocalColmapPath", (Join-Path $projectRoot "deps\colmap"))
+        if (-not [string]::IsNullOrWhiteSpace($LocalColmapPath)) {
+            $arguments += @("-LocalColmapPath", $LocalColmapPath)
         }
         Invoke-Native "powershell.exe" $arguments
     }
+
+    Assert-PackageStage $stage $IncludeDependencies
 
     if (-not $SkipSmokeTest) {
         $executable = Join-Path $stage "ParamCAD Studio.exe"
@@ -208,10 +246,11 @@ foreach ($file in $requiredFiles) {
         throw "Missing packaging prerequisite: $file"
     }
 }
-if (($Variant -eq "All" -or $Variant -eq "Offline") -and $ColmapFlavor -eq "cuda") {
-    $localColmap = Join-Path $projectRoot "deps\colmap\bin\colmap.exe"
+if (-not [string]::IsNullOrWhiteSpace($LocalColmapPath)) {
+    $LocalColmapPath = [System.IO.Path]::GetFullPath($LocalColmapPath)
+    $localColmap = Join-Path $LocalColmapPath "bin\colmap.exe"
     if (-not (Test-Path -LiteralPath $localColmap -PathType Leaf)) {
-        throw "Missing local CUDA COLMAP runtime for the offline package: $localColmap"
+        throw "Local COLMAP payload is missing its executable: $localColmap"
     }
 }
 
@@ -256,8 +295,8 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 
 $created = @()
-if ($Variant -eq "All" -or $Variant -eq "Offline") {
-    $created += New-PackageStage "ParamCAD-Studio-$Version-windows-x64-offline-$ColmapFlavor" $true
+if ($Variant -eq "All" -or $Variant -eq "Full" -or $Variant -eq "Offline") {
+    $created += New-PackageStage "ParamCAD-Studio-$Version-windows-x64-full-$ColmapFlavor" $true
 }
 if ($Variant -eq "All" -or $Variant -eq "Bootstrap") {
     $created += New-PackageStage "ParamCAD-Studio-$Version-windows-x64-bootstrap" $false

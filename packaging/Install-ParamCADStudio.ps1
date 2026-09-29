@@ -75,3 +75,10 @@ Write-Host "ParamCAD Studio installed at $destinationPath"
 if (-not $NoShortcut) {
     Write-Host "Start menu shortcut: ParamCAD Studio"
 }
+$python = Join-Path $destinationPath "deps\python\python.exe"
+$colmap = Join-Path $destinationPath "deps\colmap\bin\colmap.exe"
+if (-not (Test-Path -LiteralPath $python -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $colmap -PathType Leaf)) {
+    Write-Host "Optional reconstruction dependencies are not installed. Run:"
+    Write-Host "  `"$destinationPath\Install-Dependencies.cmd`""
+}

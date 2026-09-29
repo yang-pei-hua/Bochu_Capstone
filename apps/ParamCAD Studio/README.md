@@ -71,7 +71,7 @@ packages from the same staging logic:
   -Clean
 ```
 
-- `*-offline-cuda.zip` contains the GUI runtime, reconstruction scripts,
+- `*-full-cuda.zip` contains the GUI runtime, reconstruction scripts,
   embeddable Python, and COLMAP and works without a dependency download.
 - `*-bootstrap.zip` contains the independently runnable GUI and a checked
   dependency installer. Run `Install-Dependencies.cmd` after extraction or
@@ -83,9 +83,10 @@ menu shortcut without requiring administrator privileges. Pass
 `-ColmapFlavor nocuda` to the packager or dependency installer for the smaller
 CPU-only COLMAP runtime.
 
-Qt, VTK, OpenCASCADE, and the MSVC runtime DLLs are always staged beside the
-GUI executable because it cannot start without them. The package does not ship
-the corresponding development headers, import libraries, or CMake metadata.
+Qt, VTK, OpenCASCADE, CGAL's GMP runtime, and the MSVC runtime DLLs are always
+staged beside the GUI executable because it cannot start without them. CGAL
+itself is compiled into the application. The package does not ship the
+corresponding development headers, import libraries, or CMake metadata.
 Pinned URLs and SHA-256 values live in
 [`../../packaging/dependencies.json`](../../packaging/dependencies.json).
 
