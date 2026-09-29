@@ -1,0 +1,10 @@
+# Large local runtime dependencies. Keep them out of recursive search/indexing.
+deps/occt-8.0.1/
+deps/vtk-9.7.0/
+deps/colmap/
+
+# Downloaded datasets and generated reconstruction artifacts.
+data/fountain-p11/fountain-p11.zip
+data/fountain-p11/images/
+data/fountain-p11/raw/
+outputs/

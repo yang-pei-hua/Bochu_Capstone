@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "dependencies": {
+    "python": {
+      "version": "3.13.10",
+      "fileName": "python-3.13.10-embeddable-amd64.zip",
+      "url": "https://www.python.org/ftp/python/3.13.10/python-3.13.10-embeddable-amd64.zip",
+      "sha256": "42a6995f5badcde341d8cf28b1479dc62d97c6cb153aee694eeeef09b56b9f70",
+      "installPath": "deps/python",
+      "anchor": "python.exe"
+    },
+    "colmapCuda": {
+      "version": "4.2.0",
+      "fileName": "colmap-x64-windows-cuda.zip",
+      "url": "https://github.com/colmap/colmap/releases/download/4.2.0/colmap-x64-windows-cuda.zip",
+      "sha256": "991e0bae403a496fcc4de0c1f1f428619bf12f8000978f77bc6799d9bfeac23e",
+      "installPath": "deps/colmap",
+      "anchor": "bin/colmap.exe"
+    },
+    "colmapNoCuda": {
+      "version": "4.2.0",
+      "fileName": "colmap-x64-windows-nocuda.zip",
+      "url": "https://github.com/colmap/colmap/releases/download/4.2.0/colmap-x64-windows-nocuda.zip",
+      "sha256": "7dd1e72f9632199b7f6d80ab6f545fa8d2a2ea023e4802cab3a4624e309f18a1",
+      "installPath": "deps/colmap",
+      "anchor": "bin/colmap.exe"
+    }
+  }
+}
