@@ -11,8 +11,8 @@ class QToolButton;
 // 3D viewport while a sketch is open: the drawing tools plus the exit button, so
 // the tools only exist for as long as there is a sketch to draw on.
 //
-// It is shown by the window in sketch mode only. In model mode the sketch plane
-// is picked on the datum planes drawn in the viewport itself, which is why this
+// The sketch workspace shows it only while editing. In model mode the sketch
+// plane is picked on the datum planes drawn in the viewport, which is why this
 // strip has no plane buttons of its own.
 //
 // The palette owns no model state. It reports the user's intent and is told what

@@ -63,6 +63,16 @@ qt_add_executable(CadPointCloudClient WIN32
     src/main.cpp
     src/app/MainWindow.h
     src/app/MainWindow.cpp
+    src/app/WorkspaceController.h
+    src/app/CapturePlan.h
+    src/app/SketchWorkspaceController.h
+    src/app/SketchWorkspaceController.cpp
+    src/app/PointCloudWorkspaceController.h
+    src/app/PointCloudWorkspaceController.cpp
+    src/app/CaptureWorkspaceController.h
+    src/app/CaptureWorkspaceController.cpp
+    src/app/ModelViewController.h
+    src/app/ModelViewController.cpp
     src/app/ModelingController.h
     src/app/ModelingController.cpp
     src/app/CaptureController.h
@@ -264,21 +274,24 @@ if(CAD_CLIENT_BUILD_TESTS)
     # wiring of the same widgets maintained only for tests.
     get_target_property(CAD_CLIENT_TEST_SOURCES CadPointCloudClient SOURCES)
     list(REMOVE_ITEM CAD_CLIENT_TEST_SOURCES src/main.cpp)
-    add_executable(point_cloud_interaction_test
-        tests/point_cloud_interaction_test.cpp ${CAD_CLIENT_TEST_SOURCES})
-    target_include_directories(point_cloud_interaction_test PRIVATE src)
-    target_link_directories(point_cloud_interaction_test PRIVATE ${OpenCASCADE_LIBRARY_DIR})
-    target_link_libraries(point_cloud_interaction_test PRIVATE
-        Qt6::Core Qt6::Gui Qt6::Widgets ${VTK_LIBRARIES}
-        CadModelCore::CadModelCore GeometricReconstruction::GeometricReconstruction
-        TKDE TKXSBase TKDESTEP TKMesh)
-    vtk_module_autoinit(TARGETS point_cloud_interaction_test MODULES ${VTK_LIBRARIES})
-    if(MSVC)
-        target_compile_options(point_cloud_interaction_test PRIVATE /W4 /permissive- /utf-8)
-    endif()
-    add_test(NAME point_cloud_interaction_test COMMAND point_cloud_interaction_test)
-    set_tests_properties(point_cloud_interaction_test PROPERTIES TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
+    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test)
+        add_executable(${interaction_test}
+            tests/${interaction_test}.cpp ${CAD_CLIENT_TEST_SOURCES})
+        target_include_directories(${interaction_test} PRIVATE src)
+        target_link_directories(${interaction_test} PRIVATE ${OpenCASCADE_LIBRARY_DIR})
+        target_link_libraries(${interaction_test} PRIVATE
+            Qt6::Core Qt6::Gui Qt6::Widgets ${VTK_LIBRARIES}
+            CadModelCore::CadModelCore GeometricReconstruction::GeometricReconstruction
+            TKDE TKXSBase TKDESTEP TKMesh)
+        vtk_module_autoinit(TARGETS ${interaction_test} MODULES ${VTK_LIBRARIES})
+        if(MSVC)
+            target_compile_options(${interaction_test} PRIVATE /W4 /permissive- /utf-8)
+        endif()
+        add_test(NAME ${interaction_test} COMMAND ${interaction_test})
+        set_tests_properties(${interaction_test} PROPERTIES TIMEOUT 60
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
+    endforeach()
+    set_tests_properties(workspace_interaction_test PROPERTIES TIMEOUT 120)
     add_executable(orbit_camera_test
         tests/orbit_camera_test.cpp
         src/core/OrbitCamera.cpp

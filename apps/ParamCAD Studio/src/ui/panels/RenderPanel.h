@@ -20,8 +20,8 @@ public:
     int outputWidth() const;
     int outputHeight() const;
 
-    // Texture controls. The panel only reports the intent: the window owns the
-    // file dialog and the viewport owns the texture itself, so these two are the
+    // Texture controls report intents: ModelViewController owns the file dialog
+    // and the viewport owns the texture itself, so these two are the
     // viewport's state pushed back into the widgets.
     void setTexturePath(const QString& path);
     void setTextureEnabled(bool enabled);

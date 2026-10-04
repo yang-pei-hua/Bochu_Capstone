@@ -21,7 +21,7 @@ class QTreeWidget;
 //
 // The panel is a view: the open sketch lives in the core's feature graph and is
 // pushed in through setSketch(). Every user action is reported as an intent
-// signal and the window turns it into a core command, so there is exactly one
+// signal and the sketch workspace turns it into a core command, so there is one
 // sketch source of truth.
 class SketchPanel final : public QWidget
 {

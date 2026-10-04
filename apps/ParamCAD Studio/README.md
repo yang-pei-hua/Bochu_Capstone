@@ -90,6 +90,43 @@ corresponding development headers, import libraries, or CMake metadata.
 Pinned URLs and SHA-256 values live in
 [`../../packaging/dependencies.json`](../../packaging/dependencies.json).
 
+## Client architecture
+
+`src/app/MainWindow` is the composition root: it creates the widgets and command
+controllers, lays out docks/menus/toolbars, connects scene navigation and camera
+display controls, and presents shared logs and status messages. Editing state
+and feature-specific signal connections live in the following controllers:
+
+| Controller | Responsibility |
+| --- | --- |
+| `SketchWorkspaceController` | Plane selection, sketch session/drafts, entity edits, extrude/cut, feature deletion, rebuild feedback and camera restoration |
+| `PointCloudWorkspaceController` | Cloud loading, selection/annotations/relationships, asynchronous fitting, photo reconstruction UI and CAD reconstruction |
+| `CaptureWorkspaceController` | Screenshot/photo/orbit intents, capture output settings, shot list, batch feedback and capture distance synchronization |
+| `ModelViewController` | Imported B-Rep lifetime, STEP import, model visibility, texture controls and performance capture entry |
+
+Each workspace receives a small `*Ui` aggregate of borrowed view pointers and the
+command controllers it needs. Workspaces do not depend on `MainWindow` or each
+other. `WorkspaceController` supplies common Qt signals for logs, status and
+scene framing; the window routes framing notifications to capture distance
+synchronization. Existing strings retain their `MainWindow` translation context.
+
+`ModelingController`, `CaptureController` and `ReconstructionController` remain
+the command/process layer. `core/` holds client document and camera state,
+`io/` handles adapters/readers, `rendering/` maps geometry to VTK actors, and
+`ui/` contains views and viewport interaction. Geometry algorithms continue to
+live in the repository's core libraries.
+
+Qt parents own widgets, workspaces and command controllers. The window deletes
+workspaces before its widgets are destroyed; the point-cloud workspace waits
+for its analysis worker before destruction. Worker results still require the
+same document revision before they can be applied. `CapturePlan.h` provides the
+shared 62-view plan for interactive and validation captures.
+
+With `CAD_CLIENT_BUILD_TESTS=ON`, `workspace_interaction_test` drives the actual
+window's sketch/extrude/cut, import/texture and capture connections, checks the
+validation output and exercises destruction while analysis is pending. The
+existing `point_cloud_interaction_test` covers cloud edits and stale results.
+
 ## Current scope
 
 - Dockable Scene, Properties, Modeling, and Console panels
