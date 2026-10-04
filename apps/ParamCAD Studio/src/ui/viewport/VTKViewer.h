@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/CameraController.h"
-#include "core/PointCloudSelection.h"
+#include "core/PointCloudDocument.h"
 #include "rendering/BodyActor.h"
 #include "rendering/DatumPlaneActor.h"
 #include "rendering/PointCloudActor.h"
@@ -34,7 +34,8 @@ class VTKViewer final : public QVTKOpenGLNativeWidget
     Q_OBJECT
 
 public:
-    explicit VTKViewer(QWidget* parent = nullptr);
+    // An injected document must outlive this view; standalone views create one.
+    explicit VTKViewer(QWidget* parent = nullptr, PointCloudDocument* document = nullptr);
     ~VTKViewer() override;
 
     CameraParameters cameraParameters() const;
@@ -62,42 +63,16 @@ public:
     void clearSketch();
     bool hasSketch() const noexcept;
 
-    // Loads a PLY point cloud from disk. It coexists with the body actor.
-    bool loadPointCloud(const QString& plyPath, QString& error);
-    void clearPointCloud();
+    // Consumes document state; only selection gestures and display controls
+    // live in the viewport. Document commands are issued by the workspace.
+    PointCloudDocument* pointCloudDocument() const noexcept { return m_pointCloudDocument; }
     bool hasPointCloud() const noexcept;
-    int pointCloudPointCount() const noexcept;
     void resetCameraToPointCloud();
-    const PointCloudSelection& pointCloudSelection() const { return m_pointSelection; }
     int pointCloudSelectionMode() const { return m_pointSelectionMode; }
-    QString pointCloudSourcePath() const { return m_pointCloudSourcePath; }
     double suggestedPointCloudRadius() const;
     void setPointCloudSelectionMode(int mode);
     void resetPointCloudBox();
     void selectPointCloudBox(bool add);
-    void expandPointCloudSelection(double radius);
-    void clearPointCloudSelection();
-    void assignPointCloudRegion(const QString& geometry, const QString& name, int regionId);
-    void selectPointCloudRegion(int regionId);
-    void removePointCloudRegion(int regionId);
-    void unassignPointCloudSelection();
-    bool savePointCloudAnnotations(const QString& path, QString& error) const;
-    bool loadPointCloudAnnotations(const QString& path, QString& error);
-    PlyCloud workingPointCloud(std::vector<vtkIdType>* ids = nullptr, bool unassignedOnly = false, int regionId = -1) const;
-    void editPointCloudRegion(int id, const QString& name, const QString& geometry);
-    void replacePointCloudRegionPoints(int id);
-    void updatePointCloudRegionFit(int id, const PointCloudRegion& fitted);
-    void deletePointCloudRegionPoints(int id);
-    void deleteSelectedPointCloudPoints();
-    void selectUnassignedPointCloudPoints();
-    void selectPointCloudPoint(vtkIdType id);
-    void selectPointCloudRelation(int id);
-    int setPointCloudRelation(int id, int first, int second, const QString& type);
-    void removePointCloudRelation(int id);
-    void inferPointCloudRelations(double distanceTolerance, double angleDegrees);
-    void addPointCloudSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces);
-    void undoPointCloudEdit();
-    bool exportPointCloud(const QString& path, QString& error) const;
 
     // Texture projection. The image is cast onto the body from one direction
     // instead of being unwrapped onto it, so any picture lands on any model
@@ -175,7 +150,6 @@ public slots:
 signals:
     void pointCloudSelectionChanged();
     void pointCloudLoaded();
-    void pointCloudDocumentChanged();
     void cameraChanged(const CameraParameters& parameters);
 
     // The user is dragging the camera with the right button. A pan translates
@@ -226,7 +200,9 @@ private:
     // Bounds of everything the user actually modeled, which is what the camera
     // is fitted to. False when the scene has no such geometry yet.
     bool sceneBounds(double bounds[6]);
-    void refreshPointCloudSelection(bool documentChanged = false);
+    const PointCloudSelection& pointCloudSelection() const { return m_pointCloudDocument->selection(); }
+    void syncPointCloud();
+    void refreshPointCloudSelection();
 
     vtkSmartPointer<vtkGenericOpenGLRenderWindow> m_renderWindow;
     vtkSmartPointer<vtkRenderer> m_renderer;
@@ -234,12 +210,11 @@ private:
     BodyActor m_bodyActor;
     quint64 m_bodyRevision = 0;
     PointCloudActor m_pointCloudActor;
-    PointCloudSelection m_pointSelection;
+    PointCloudDocument* const m_pointCloudDocument;
     vtkSmartPointer<vtkBoxWidget2> m_pointBox;
     vtkSmartPointer<vtkBoxRepresentation> m_pointBoxRepresentation;
     int m_pointSelectionMode = 0;
     bool m_pointCloudVisible = true;
-    QString m_pointCloudSourcePath;
     SketchActor m_sketchActor;
     DatumPlaneActor m_datumPlanes;
     vtkSmartPointer<vtkAxesActor> m_axesActor;

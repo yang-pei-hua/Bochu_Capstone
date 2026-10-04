@@ -8,6 +8,7 @@ class CadReconstructionTask;
 struct CadReconstructionResult;
 class ModelingController;
 class ModelingPanel;
+class PointCloudDocument;
 class PointCloudRelationsPanel;
 class PropertyPanel;
 class ReconstructionController;
@@ -35,7 +36,8 @@ class PointCloudWorkspaceController final : public WorkspaceController
 {
     Q_OBJECT
 public:
-    PointCloudWorkspaceController(ModelingController* modelingController,
+    PointCloudWorkspaceController(PointCloudDocument* document,
+                                  ModelingController* modelingController,
                                   ReconstructionController* reconstructionController,
                                   const PointCloudWorkspaceUi& ui,
                                   QWidget* dialogParent, QObject* parent = nullptr);
@@ -53,10 +55,10 @@ private:
     void onReconstructionFinished(const QString& pointCloudPath, int pointCount,
                                   const QString& cameraMode, bool dense);
 
+    PointCloudDocument* const m_document;
     ModelingController* const m_modelingController;
     ReconstructionController* const m_reconstructionController;
     const PointCloudWorkspaceUi m_ui;
-    QString m_pointCloudPath;
     QThread* m_analysisThread = nullptr;
     CadReconstructionTask* m_cadTask;
     bool m_startingCad = false;

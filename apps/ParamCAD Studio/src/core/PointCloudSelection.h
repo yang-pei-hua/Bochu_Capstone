@@ -71,6 +71,7 @@ public:
     bool active(vtkIdType id) const;
     int activePointCount() const;
     quint64 revision() const { return m_revision; }
+    const PlyCloud& sourceCloud() const noexcept { return m_sourceCloud; }
     const std::vector<unsigned char>& deleted() const { return m_deleted; }
     const std::vector<PointCloudRelation>& relations() const { return m_relations; }
     const PointCloudRegion* region(int id) const;

@@ -85,6 +85,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/app/ReconstructionController.cpp
     src/core/Scene.h
     src/core/Scene.cpp
+    src/core/PointCloudDocument.h
+    src/core/PointCloudDocument.cpp
     src/core/PointCloudSelection.h
     src/core/PointCloudSelection.cpp
     src/core/PointCloudEdits.cpp
@@ -239,6 +241,19 @@ endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(point_cloud_document_test tests/point_cloud_document_test.cpp
+        src/core/PointCloudDocument.h src/core/PointCloudDocument.cpp
+        src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp
+        src/core/PointCloudRelations.cpp src/io/PlyReader.cpp)
+    target_include_directories(point_cloud_document_test PRIVATE src)
+    target_link_libraries(point_cloud_document_test PRIVATE
+        Qt6::Core VTK::CommonCore VTK::CommonDataModel)
+    if(MSVC)
+        target_compile_options(point_cloud_document_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME point_cloud_document_test COMMAND point_cloud_document_test)
+    set_tests_properties(point_cloud_document_test PROPERTIES TIMEOUT 60
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(cad_reconstruction_task_test tests/cad_reconstruction_task_test.cpp
         src/app/CadReconstructionTask.h src/app/CadReconstructionTask.cpp
         src/io/PointCloudAdapter.cpp src/io/PlyReader.cpp)

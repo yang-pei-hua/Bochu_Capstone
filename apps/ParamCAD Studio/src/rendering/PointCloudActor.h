@@ -13,7 +13,7 @@ class vtkUnsignedCharArray;
 class PointCloudSelection;
 
 // Owns the VTK pipeline that draws one reconstructed point cloud. Like
-// BodyActor it is a display cache: the cloud on disk stays the source of truth.
+// BodyActor it is a display cache; PointCloudDocument owns the working state.
 class PointCloudActor
 {
 public:

@@ -106,7 +106,7 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
     auto* cancelButton = window.findChild<QPushButton*>("cancelCadReconstructionButton");
     auto* status = window.findChild<QLabel*>("pointCloudRelationStatus");
     QString error;
-    require(viewer->loadPointCloud(cloudPath, error), "load metric CAD fixture");
+    require(viewer->pointCloudDocument()->load(cloudPath, error), "load metric CAD fixture");
     const auto initialRevision = model->revision();
     int starts = 0;
     bool commitsOnOwner = true;
@@ -140,15 +140,15 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
             "model revision prevents old candidate from overwriting new commands");
 
     reconstruct->trigger();
-    viewer->selectPointCloudPoint(0);
-    viewer->deleteSelectedPointCloudPoints();
+    viewer->pointCloudDocument()->selectPoint(0);
+    viewer->pointCloudDocument()->deleteSelectedPoints();
     waitForCad(window);
-    require(model->revision() == editedRevision && viewer->pointCloudPointCount() == 599
+    require(model->revision() == editedRevision && viewer->pointCloudDocument()->pointCount() == 599
             && status->text().contains("未应用"), "point deletion invalidates candidate and preserves working cloud");
 
-    require(viewer->loadPointCloud(cloudPath, error), "restore metric cloud");
+    require(viewer->pointCloudDocument()->load(cloudPath, error), "restore metric cloud");
     reconstruct->trigger();
-    require(viewer->loadPointCloud(cloudPath, error), "replace cloud with identical file while worker is pending");
+    require(viewer->pointCloudDocument()->load(cloudPath, error), "replace cloud with identical file while worker is pending");
     waitForCad(window);
     require(model->revision() == editedRevision && status->text().contains("未应用"),
             "cloud revision invalidates same-file replacement");
@@ -156,7 +156,7 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
     reconstruct->trigger();
     window.findChild<ReconstructionController*>()->finished(cloudPath, 600, "fixed", false);
     waitForCad(window, true);
-    require(model->revision() == editedRevision && viewer->pointCloudSelection().regions().size() == 6,
+    require(model->revision() == editedRevision && viewer->pointCloudDocument()->selection().regions().size() == 6,
             "new photo reconstruction defers automatic analysis until the old CAD job drains");
 
     reconstruct->trigger();
@@ -173,14 +173,14 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
             "closing model cancels pending CAD replacement");
 
     reconstruct->trigger();
-    viewer->clearPointCloud();
+    viewer->pointCloudDocument()->clear();
     waitForCad(window);
     require(!reconstruct->isEnabled() && !cancel->isEnabled() && model->revision() == editedRevision,
             "clearing cloud prevents model commit and leaves reconstruction disabled");
 
     // Confirming unknown scale uses a nested event loop. A document replacement
     // inside that dialog must not pair old observations with the new revision.
-    require(viewer->loadPointCloud(cloudPath, error), "load scale-dialog fixture");
+    require(viewer->pointCloudDocument()->load(cloudPath, error), "load scale-dialog fixture");
     QFile metadata(QFileInfo(cloudPath).dir().filePath(QFileInfo(cloudPath).completeBaseName() + ".json"));
     require(metadata.open(QIODevice::WriteOnly | QIODevice::Truncate), "remove metric scale for modal test");
     metadata.write("{\"unit\":\"arbitrary\"}"); metadata.close();
@@ -201,7 +201,7 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
         auto* box = window.findChild<QMessageBox*>();
         if (!box) return;
         box->setAttribute(Qt::WA_DontShowOnScreen);
-        replaced = viewer->loadPointCloud(cloudPath, error);
+        replaced = viewer->pointCloudDocument()->load(cloudPath, error);
         workspace->reconstructCad();
         confirmed = true;
         box->button(QMessageBox::Yes)->click();
@@ -215,7 +215,7 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
     QObject::disconnect(rebuilt);
 
     auto closing = std::make_unique<MainWindow>();
-    require(closing->findChild<VTKViewer*>()->loadPointCloud(cloudPath, error), "load CAD shutdown fixture");
+    require(closing->findChild<VTKViewer*>()->pointCloudDocument()->load(cloudPath, error), "load CAD shutdown fixture");
     action(*closing, "Reconstruct CAD")->trigger();
     require(closing->findChild<CadReconstructionTask*>()->isRunning(), "worker running when window is destroyed");
     closing.reset();
@@ -384,7 +384,7 @@ int main(int argc, char** argv)
         // are delivered. This verifies the workspace's worker/view lifetime boundary.
         auto shutdownWindow = std::make_unique<MainWindow>();
         auto* shutdownViewer = shutdownWindow->findChild<VTKViewer*>();
-        require(shutdownViewer->loadPointCloud(cloudPath, error), "load shutdown fixture");
+        require(shutdownViewer->pointCloudDocument()->load(cloudPath, error), "load shutdown fixture");
         shutdownWindow->findChild<PointCloudRelationsPanel*>()->detectRequested();
         shutdownWindow.reset();
         std::cout << "Workspace interaction tests passed.\n";

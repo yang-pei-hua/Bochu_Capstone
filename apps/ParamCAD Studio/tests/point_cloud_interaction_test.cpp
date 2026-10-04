@@ -91,8 +91,11 @@ int main(int argc, char** argv)
         auto* viewer = window.findChild<VTKViewer*>();
         auto* panel = window.findChild<PointCloudPanel*>();
         require(viewer && panel && !panel->isEnabled(), "empty cloud disables panel");
+        auto* document = window.findChild<PointCloudDocument*>();
+        require(document && document == viewer->pointCloudDocument(),
+                "composition root supplies one document to the viewport and workspace");
         QString error;
-        require(viewer->loadPointCloud(ply.fileName(), error), "load cloud into viewport");
+        require(viewer->pointCloudDocument()->load(ply.fileName(), error), "load cloud into viewport");
         viewer->resetCameraToPointCloud();
         viewer->setStandardView(CameraController::StandardView::Top);
         application.processEvents();
@@ -106,24 +109,24 @@ int main(int argc, char** argv)
         require(!expand->isEnabled(), "empty selection disables expansion");
         // Pick a point that does not share a projection with another point.
         pick(viewer, 1, 0, 0);
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>{1}, "actual VTK point pick reports original ID");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>{1}, "actual VTK point pick reports original ID");
         radius->setValue(1.01);
         expand->click();
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>({0, 1, 2}), "panel button expands one round");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>({0, 1, 2}), "panel button expands one round");
         expand->click();
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>({0, 1, 2, 3}), "second panel click expands current set");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>({0, 1, 2, 3}), "second panel click expands current set");
         assign->click();
-        require(viewer->pointCloudSelection().regions().size() == 1
-                && viewer->pointCloudSelection().regionPointCount(1) == 4, "panel assigns cuboid group");
-        viewer->clearPointCloudSelection();
+        require(viewer->pointCloudDocument()->selection().regions().size() == 1
+                && viewer->pointCloudDocument()->selection().regionPointCount(1) == 4, "panel assigns cuboid group");
+        viewer->pointCloudDocument()->clearSelection();
         pick(viewer, 1, 0, 0);
         pick(viewer, 3, 0, 0, true);
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>({1, 3}), "Ctrl picking adds a second point");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>({1, 3}), "Ctrl picking adds a second point");
         pick(viewer, 1, 0, 0, true);
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>{3}, "Ctrl picking removes selected point");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>{3}, "Ctrl picking removes selected point");
         mode->setCurrentIndex(2);
         viewer->selectPointCloudBox(false);
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>({0, 1}), "3D box has finite depth and original IDs");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>({0, 1}), "3D box has finite depth and original IDs");
         // Box mode must preserve both camera gestures even over the box.
         const auto cameraBefore = viewer->cameraParameters();
         auto* interactor = viewer->renderWindow()->GetInteractor();
@@ -151,18 +154,18 @@ int main(int argc, char** argv)
         require(!QImage(photo).isNull() && viewer->pointCloudSelectionMode() == 2,
                 "capture succeeds and restores box mode");
         viewer->selectPointCloudBox(false);
-        require(viewer->pointCloudSelection().selected().size() == 2, "capture preserves selection box bounds");
-        require(viewer->savePointCloudAnnotations(temp.filePath("regions.json"), error), "save viewer annotations");
-        require(viewer->loadPointCloudAnnotations(temp.filePath("regions.json"), error), "reload viewer annotations");
+        require(viewer->pointCloudDocument()->selection().selected().size() == 2, "capture preserves selection box bounds");
+        require(viewer->pointCloudDocument()->saveAnnotations(temp.filePath("regions.json"), error), "save viewer annotations");
+        require(viewer->pointCloudDocument()->loadAnnotations(temp.filePath("regions.json"), error), "reload viewer annotations");
         require(regions->count() == 2, "loaded groups refresh panel list");
         viewer->setSketchInteractionEnabled(true);
         require(viewer->pointCloudSelectionMode() == 0 && mode->currentIndex() == 0, "sketch entry exits point-cloud selection");
         mode->setCurrentIndex(2);
         require(viewer->pointCloudSelectionMode() == 0 && mode->currentIndex() == 0, "cloud mode cannot steal active sketch input");
         viewer->setSketchInteractionEnabled(false);
-        require(viewer->loadPointCloud(ply.fileName(), error), "replace cloud");
-        require(viewer->pointCloudSelection().regions().empty()
-            && viewer->pointCloudSelection().selected().empty() && regions->count() == 1,
+        require(viewer->pointCloudDocument()->load(ply.fileName(), error), "replace cloud");
+        require(viewer->pointCloudDocument()->selection().regions().empty()
+            && viewer->pointCloudDocument()->selection().selected().empty() && regions->count() == 1,
             "replacing cloud resets annotations, selection and region controls");
 
         auto* relationships = window.findChild<PointCloudRelationsPanel*>();
@@ -170,42 +173,42 @@ int main(int argc, char** argv)
         auto* tree = window.findChild<QTreeWidget*>("pointCloudRelationshipTree");
         require(relationships && tree && structure && structure->count() == 2
             && structure->tabText(1) == "CAD 特征", "left structure dock retains CAD features alongside point relationships");
-        viewer->selectPointCloudPoint(0); viewer->assignPointCloudRegion("plane","顶面",0);
-        viewer->selectPointCloudPoint(1); viewer->assignPointCloudRegion("plane","顶面",1);
-        viewer->selectPointCloudPoint(2); viewer->assignPointCloudRegion("plane","侧面",0);
-        viewer->selectPointCloudPoint(3); viewer->assignPointCloudRegion("plane","侧面",2);
-        const int relation = viewer->setPointCloudRelation(0,1,2,"perpendicular");
+        viewer->pointCloudDocument()->selectPoint(0); viewer->pointCloudDocument()->assignRegion("plane","顶面",0);
+        viewer->pointCloudDocument()->selectPoint(1); viewer->pointCloudDocument()->assignRegion("plane","顶面",1);
+        viewer->pointCloudDocument()->selectPoint(2); viewer->pointCloudDocument()->assignRegion("plane","侧面",0);
+        viewer->pointCloudDocument()->selectPoint(3); viewer->pointCloudDocument()->assignRegion("plane","侧面",2);
+        const int relation = viewer->pointCloudDocument()->setRelation(0,1,2,"perpendicular");
         require(relation && findNode(tree,2,relation), "relation is visible in actual left tree");
         tree->setCurrentItem(findNode(tree,2,relation));
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>({0,1,2,3}), "clicking relationship highlights both point collections");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>({0,1,2,3}), "clicking relationship highlights both point collections");
         auto* removeRelation = window.findChild<QPushButton*>("removeCloudRelationButton");
         auto* undo = window.findChild<QPushButton*>("undoCloudEditButton");
         removeRelation->click();
-        require(viewer->pointCloudSelection().relations().empty() && viewer->pointCloudPointCount() == 7,
+        require(viewer->pointCloudDocument()->selection().relations().empty() && viewer->pointCloudDocument()->pointCount() == 7,
             "delete relationship preserves collections and observations");
         undo->click();
-        require(viewer->pointCloudSelection().relation(relation), "left undo restores relationship");
+        require(viewer->pointCloudDocument()->selection().relation(relation), "left undo restores relationship");
         tree->setCurrentItem(findNode(tree,1,1));
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>({0,1}), "collection click highlights source points");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>({0,1}), "collection click highlights source points");
         auto* points = findNode(tree,3,1); require(points,"point list exists"); points->setExpanded(true);
         require(points->childCount() == 2 && findNode(tree,4,0), "source point list loads lazily with stable IDs");
         window.findChild<QPushButton*>("deleteRegionPointsButton")->click();
-        require(viewer->pointCloudPointCount() == 5 && viewer->workingPointCloud().positions.size() == 5,
+        require(viewer->pointCloudDocument()->pointCount() == 5 && viewer->pointCloudDocument()->workingCloud().positions.size() == 5,
             "left collection point deletion reaches rendering and CAD working input");
-        undo->click(); require(viewer->pointCloudPointCount() == 7, "left undo restores removed points");
+        undo->click(); require(viewer->pointCloudDocument()->pointCount() == 7, "left undo restores removed points");
         tree->setCurrentItem(findNode(tree,1,1));
         window.findChild<QPushButton*>("removePointCollectionButton")->click();
-        require(!viewer->pointCloudSelection().region(1) && viewer->pointCloudPointCount() == 7,
+        require(!viewer->pointCloudDocument()->selection().region(1) && viewer->pointCloudDocument()->pointCount() == 7,
             "remove collection unassigns instead of deleting source points");
         undo->click();
         auto* pointId = window.findChild<QLineEdit*>("relationshipPointId");
         pointId->setText("1"); window.findChild<QPushButton*>("relationshipLocatePoint")->click();
-        require(viewer->pointCloudSelection().selected() == std::vector<vtkIdType>{1}, "point ID lookup selects the source observation");
+        require(viewer->pointCloudDocument()->selection().selected() == std::vector<vtkIdType>{1}, "point ID lookup selects the source observation");
         window.findChild<QPushButton*>("deleteSelectedCloudPointsButton")->click();
         viewer->resetCameraToPointCloud(); viewer->setStandardView(CameraController::StandardView::Top);
         pick(viewer,1,0,0);
-        require(viewer->pointCloudSelection().selected().empty(), "VTK picking excludes deleted vertices even when original IDs are retained");
-        undo->click(); require(viewer->pointCloudPointCount() == 7,"undo selected point deletion");
+        require(viewer->pointCloudDocument()->selection().selected().empty(), "VTK picking excludes deleted vertices even when original IDs are retained");
+        undo->click(); require(viewer->pointCloudDocument()->pointCount() == 7,"undo selected point deletion");
 
         // Run the real asynchronous controller on a closed six-face fixture.
         QFile box(temp.filePath("box.ply")); require(box.open(QIODevice::WriteOnly),"create face fixture");
@@ -217,24 +220,47 @@ int main(int argc, char** argv)
             const auto line = QStringLiteral("%1 %2 %3 %4 %5 %6\n").arg(p[0]).arg(p[1]).arg(p[2]).arg(n[0]).arg(n[1]).arg(n[2]);
             box.write(line.toUtf8());
         }
-        box.close(); require(viewer->loadPointCloud(box.fileName(),error),"load analysis fixture");
+        box.close(); require(viewer->pointCloudDocument()->load(box.fileName(),error),"load analysis fixture");
         auto* detect = window.findChild<QPushButton*>("detectCloudSurfacesButton");
         auto* status = window.findChild<QLabel*>("pointCloudRelationStatus");
         detect->click();
-        viewer->selectPointCloudPoint(0); viewer->assignPointCloudRegion("plane","用户编辑",0);
+        viewer->pointCloudDocument()->selectPoint(0); viewer->pointCloudDocument()->assignRegion("plane","用户编辑",0);
         waitForAnalysis(status);
-        require(status->text().contains("未应用") && viewer->pointCloudSelection().regions().size()==1,
+        require(status->text().contains("未应用") && viewer->pointCloudDocument()->selection().regions().size()==1,
             "concurrent user edits prevent stale background evidence from overwriting work");
         undo->click(); detect->click(); waitForAnalysis(status);
-        require(viewer->pointCloudSelection().regions().size()==6 && !viewer->pointCloudSelection().relations().empty(),
+        require(viewer->pointCloudDocument()->selection().regions().size()==6 && !viewer->pointCloudDocument()->selection().relations().empty(),
             "background detection publishes fitted faces, original memberships and relationships to window");
         viewer->resetCameraToPointCloud(); application.processEvents();
-        auto* firstFace = findNode(tree,1,viewer->pointCloudSelection().regions().front().id);
+        auto* firstFace = findNode(tree,1,viewer->pointCloudDocument()->selection().regions().front().id);
         firstFace->setExpanded(true); tree->setCurrentItem(firstFace);
         if(argc>1) require(window.grab().save(QString::fromLocal8Bit(argv[1])),"save relationship UI preview");
-        viewer->clearPointCloud();
+        viewer->pointCloudDocument()->clear();
         require(!panel->isEnabled() && !relationships->isEnabled(), "clearing cloud disables both point-cloud panels");
+        require(document->sourcePath().isEmpty(), "clear resets the shared source identity");
         window.close();
+
+        // A document can be edited before any view exists and survives a view.
+        PointCloudDocument detached;
+        require(detached.load(ply.fileName(), error), "load detached document");
+        detached.selectPoint(1);
+        detached.deleteSelectedPoints();
+        {
+            VTKViewer attached(nullptr, &detached);
+            attached.setAttribute(Qt::WA_DontShowOnScreen);
+            attached.show();
+            application.processEvents();
+            attached.resetCameraToPointCloud();
+            attached.setStandardView(CameraController::StandardView::Top);
+            pick(&attached, 1, 0, 0);
+            require(detached.selection().selected().empty(), "new view respects preexisting deletion mask");
+            require(detached.undo() && detached.pointCount() == 7, "document undo reaches attached view");
+            pick(&attached, 1, 0, 0);
+            require(detached.selection().selected() == std::vector<vtkIdType>{1},
+                    "attached view picks restored original observation");
+        }
+        require(detached.hasCloud() && detached.pointCount() == 7,
+                "destroying a borrowed view preserves document data");
         std::cout << "Point cloud interaction tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

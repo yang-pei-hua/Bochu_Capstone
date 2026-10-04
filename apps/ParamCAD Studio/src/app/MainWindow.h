@@ -18,6 +18,7 @@ class SketchToolPalette;
 class VTKViewer;
 class CaptureWorkspaceController;
 class ModelViewController;
+class PointCloudDocument;
 class PointCloudWorkspaceController;
 class SketchWorkspaceController;
 
@@ -58,6 +59,7 @@ private:
     void updateCameraStatus(bool parallelProjection);
 
     Scene m_scene;
+    PointCloudDocument* m_pointCloudDocument = nullptr;
     VTKViewer* m_viewer = nullptr;
     SketchToolPalette* m_toolPalette = nullptr;
     ModelingPanel* m_modelingPanel = nullptr;

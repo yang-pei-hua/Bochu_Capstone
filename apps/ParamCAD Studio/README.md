@@ -100,7 +100,7 @@ and feature-specific signal connections live in the following controllers:
 | Controller | Responsibility |
 | --- | --- |
 | `SketchWorkspaceController` | Plane selection, sketch session/drafts, entity edits, extrude/cut, feature deletion, rebuild feedback and camera restoration |
-| `PointCloudWorkspaceController` | Cloud loading, selection/annotations/relationships, asynchronous fitting, photo reconstruction UI and guarded CAD candidate commits |
+| `PointCloudWorkspaceController` | Routes panel intents to the cloud document, coordinates asynchronous fitting and photo reconstruction, and guards CAD candidate commits |
 | `CaptureWorkspaceController` | Screenshot/photo/orbit intents, capture output settings, shot list, batch feedback and capture distance synchronization |
 | `ModelViewController` | Imported B-Rep lifetime, STEP import, model visibility, texture controls and performance capture entry |
 
@@ -116,9 +116,26 @@ the command/process layer. `core/` holds client document and camera state,
 `ui/` contains views and viewport interaction. Geometry algorithms continue to
 live in the repository's core libraries.
 
+`MainWindow` also creates one `PointCloudDocument` and injects it into the
+point-cloud workspace and `VTKViewer`. The document owns the source path and,
+through the existing `PointCloudSelection` spatial/edit engine, source
+observations, selection, deletion masks, regions, relationships, undo history
+and a monotonic revision. Callers receive read-only state or owned working-cloud
+snapshots with original point IDs. Selection gestures leave the revision intact;
+semantic edits, annotation loads, undo, replacement and clear advance it. Failed
+loads preserve the previous document. Annotation JSON and PLY formats are unchanged.
+
+Document commands need only Qt Core and VTK's data/spatial-index modules, without
+widgets or rendering. `VTKViewer` converts picking/box gestures into document
+selection commands and subscribes to document changes to rebuild its render
+cache. The workspace sends edits, file operations and analysis results directly
+to the document; it retains no duplicate source path. The viewport owns selection
+mode, visibility, box handles and camera state. Injected documents must outlive
+their views; a standalone viewport can create its own document.
+
 Qt parents own widgets, workspaces and command controllers. The window deletes
-workspaces before its widgets are destroyed; the point-cloud workspace waits
-for its analysis worker before destruction. Worker results still require the
+workspaces and joins their workers before deleting the viewport, then the cloud
+document. The point-cloud workspace waits for its analysis worker before destruction. Worker results still require the
 same document revision before they can be applied. `CapturePlan.h` provides the
 shared 62-view plan for interactive and validation captures.
 
@@ -138,7 +155,11 @@ results, and window destruction joins the worker before destroying its views.
 With `CAD_CLIENT_BUILD_TESTS=ON`, `workspace_interaction_test` drives the actual
 window's sketch/extrude/cut, import/texture and capture connections, checks the
 validation output and exercises destruction while analysis is pending. The
-existing `point_cloud_interaction_test` covers cloud edits and stale results.
+existing `point_cloud_interaction_test` covers cloud edits, stale results and
+attaching/destroying a view around an independently edited document.
+`point_cloud_document_test` exercises the document without a render window:
+source identity, signals, snapshots and original IDs, annotation/PLY round trips,
+undo, failed loads and revision invalidation on replacement/clear.
 `cad_reconstruction_task_test` covers worker results, dimensional accuracy,
 duplicate requests, cancellation (including queued completion), failure paths
 and destruction. Workspace interaction also covers cancellation and invalidation

@@ -1,7 +1,5 @@
 #include "ui/viewport/VTKViewer.h"
 
-#include "io/PlyReader.h"
-
 #include <QByteArray>
 #include <QSize>
 
@@ -73,10 +71,11 @@ bool normalize(double v[3])
 
 }  // namespace
 
-VTKViewer::VTKViewer(QWidget* parent)
+VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
     : QVTKOpenGLNativeWidget(parent)
     , m_renderWindow(vtkSmartPointer<vtkGenericOpenGLRenderWindow>::New())
     , m_renderer(vtkSmartPointer<vtkRenderer>::New())
+    , m_pointCloudDocument(document ? document : new PointCloudDocument(this))
 {
     setObjectName(QStringLiteral("vtkViewport"));
     setMinimumSize(480, 320);
@@ -136,6 +135,15 @@ VTKViewer::VTKViewer(QWidget* parent)
     m_cameraObserverTag = m_renderer->GetActiveCamera()->AddObserver(
         vtkCommand::ModifiedEvent, m_cameraCallback);
 
+    connect(m_pointCloudDocument, &PointCloudDocument::cloudChanged,
+            this, &VTKViewer::syncPointCloud);
+    connect(m_pointCloudDocument, &PointCloudDocument::documentChanged, this, [this] {
+        m_pointCloudActor.setPointMask(pointCloudSelection().deleted());
+        m_renderer->ResetCameraClippingRange();
+    });
+    connect(m_pointCloudDocument, &PointCloudDocument::selectionChanged,
+            this, &VTKViewer::refreshPointCloudSelection);
+    if (m_pointCloudDocument->hasCloud()) syncPointCloud();
     renderNow();
 }
 VTKViewer::~VTKViewer()
@@ -573,9 +581,8 @@ void VTKViewer::onLeftButtonPressed(int x, int y)
             const vtkIdType id = picker->GetPointId();
             const bool add = m_renderWindow->GetInteractor()->GetControlKey()
                 || m_renderWindow->GetInteractor()->GetShiftKey();
-            if (add) m_pointSelection.toggle(id);
-            else m_pointSelection.select(id >= 0 ? std::vector<vtkIdType>{id} : std::vector<vtkIdType>{});
-            refreshPointCloudSelection();
+            if (add) m_pointCloudDocument->toggle(id);
+            else m_pointCloudDocument->select(id >= 0 ? std::vector<vtkIdType>{id} : std::vector<vtkIdType>{});
         }
         return;
     }
@@ -724,7 +731,7 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
 
     m_datumPlanes.setVisible(datumPlanesWereVisible);
     m_pointBox->SetEnabled(boxWasVisible ? 1 : 0);
-    m_pointCloudActor.setAnnotations(&m_pointSelection);
+    m_pointCloudActor.setAnnotations(&pointCloudSelection());
     if (highlightedFace >= 0) {
         m_bodyActor.highlightFace(highlightedFace);
     }
@@ -745,55 +752,25 @@ QSize VTKViewer::captureSourceSize() const
     return QSize(size[0], size[1]);
 }
 
-bool VTKViewer::loadPointCloud(const QString& plyPath, QString& error)
+void VTKViewer::syncPointCloud()
 {
-    PlyCloud cloud;
-    if (!PlyReader::read(plyPath, cloud, error)) {
-        return false;
+    if (m_pointCloudDocument->hasCloud()) {
+        m_pointCloudActor.setCloud(m_pointCloudDocument->sourceCloud());
+        m_pointCloudActor.setPointMask(pointCloudSelection().deleted());
+        m_pointCloudVisible = true;
+        m_pointCloudActor.setVisible(true);
+        resetPointCloudBox();
+        setPointCloudSelectionMode(m_sketchInteraction ? 0 : 1);
+        emit pointCloudLoaded();
+    } else {
+        setPointCloudSelectionMode(0);
+        m_pointCloudActor.clear();
     }
-    if (cloud.positions.empty()) {
-        error = tr("Point cloud is empty: %1").arg(plyPath);
-        return false;
-    }
-    if (!m_pointCloudActor.setCloud(cloud)) {
-        error = QStringLiteral("point cloud is empty: %1").arg(plyPath);
-        return false;
-    }
-    m_pointSelection.setCloud(cloud);
-    m_pointCloudActor.setPointMask(m_pointSelection.deleted());
-    m_pointCloudSourcePath = plyPath;
-    m_pointCloudVisible = true;
-    m_pointCloudActor.setVisible(true);
-    resetPointCloudBox();
-    setPointCloudSelectionMode(m_sketchInteraction ? 0 : 1);
-    emit pointCloudLoaded();
-    emit pointCloudDocumentChanged();
-    m_renderer->ResetCameraClippingRange();
-    renderNow();
-    return true;
-}
-
-void VTKViewer::clearPointCloud()
-{
-    m_pointSelection.setCloud(PlyCloud{});
-    m_pointCloudSourcePath.clear();
-    setPointCloudSelectionMode(0);
-    m_pointCloudActor.clear();
-    emit pointCloudDocumentChanged();
-    emit pointCloudSelectionChanged();
     m_renderer->ResetCameraClippingRange();
     renderNow();
 }
 
-bool VTKViewer::hasPointCloud() const noexcept
-{
-    return m_pointCloudActor.hasCloud();
-}
-
-int VTKViewer::pointCloudPointCount() const noexcept
-{
-    return m_pointCloudActor.pointCount();
-}
+bool VTKViewer::hasPointCloud() const noexcept { return m_pointCloudDocument->hasCloud(); }
 
 void VTKViewer::resetCameraToPointCloud()
 {
@@ -893,123 +870,14 @@ void VTKViewer::selectPointCloudBox(bool add)
     if (m_pointSelectionMode != 2) return;
     vtkNew<vtkPlanes> planes;
     m_pointBoxRepresentation->GetPlanes(planes);
-    m_pointSelection.selectBox(planes, add);
-    refreshPointCloudSelection();
+    m_pointCloudDocument->selectBox(planes, add);
 }
 
-void VTKViewer::refreshPointCloudSelection(bool documentChanged)
+void VTKViewer::refreshPointCloudSelection()
 {
-    if (documentChanged) {
-        m_pointCloudActor.setPointMask(m_pointSelection.deleted());
-        m_renderer->ResetCameraClippingRange();
-        emit pointCloudDocumentChanged();
-    }
-    m_pointCloudActor.setAnnotations(&m_pointSelection);
+    m_pointCloudActor.setAnnotations(&pointCloudSelection());
     emit pointCloudSelectionChanged();
     renderNow();
-}
-
-void VTKViewer::expandPointCloudSelection(double radius)
-{
-    m_pointSelection.expand(radius);
-    refreshPointCloudSelection();
-}
-void VTKViewer::clearPointCloudSelection()
-{
-    m_pointSelection.select({});
-    refreshPointCloudSelection();
-}
-void VTKViewer::assignPointCloudRegion(const QString& geometry, const QString& name, int regionId)
-{
-    m_pointSelection.assign(geometry, name, regionId);
-    refreshPointCloudSelection(true);
-}
-void VTKViewer::selectPointCloudRegion(int regionId)
-{
-    m_pointSelection.selectRegion(regionId);
-    refreshPointCloudSelection();
-}
-void VTKViewer::removePointCloudRegion(int regionId)
-{
-    m_pointSelection.removeRegion(regionId);
-    refreshPointCloudSelection(true);
-}
-void VTKViewer::unassignPointCloudSelection()
-{
-    m_pointSelection.unassign();
-    refreshPointCloudSelection(true);
-}
-bool VTKViewer::savePointCloudAnnotations(const QString& path, QString& error) const
-{
-    return m_pointSelection.save(path, m_pointCloudSourcePath, error);
-}
-bool VTKViewer::loadPointCloudAnnotations(const QString& path, QString& error)
-{
-    if (!m_pointSelection.load(path, error)) return false;
-    refreshPointCloudSelection(true);
-    return true;
-}
-
-PlyCloud VTKViewer::workingPointCloud(std::vector<vtkIdType>* ids, bool unassignedOnly, int regionId) const
-{
-    return m_pointSelection.workingCloud(ids, unassignedOnly, regionId);
-}
-void VTKViewer::replacePointCloudRegionPoints(int id)
-{
-    m_pointSelection.replaceRegionPoints(id); refreshPointCloudSelection(true);
-}
-void VTKViewer::updatePointCloudRegionFit(int id, const PointCloudRegion& fitted)
-{
-    m_pointSelection.updateRegionFit(id, fitted); refreshPointCloudSelection(true);
-}
-void VTKViewer::editPointCloudRegion(int id, const QString& name, const QString& geometry)
-{
-    m_pointSelection.editRegion(id, name, geometry); refreshPointCloudSelection(true);
-}
-void VTKViewer::deletePointCloudRegionPoints(int id)
-{
-    m_pointSelection.deleteRegionPoints(id); refreshPointCloudSelection(true);
-}
-void VTKViewer::deleteSelectedPointCloudPoints()
-{
-    m_pointSelection.deleteSelectedPoints(); refreshPointCloudSelection(true);
-}
-void VTKViewer::selectUnassignedPointCloudPoints()
-{
-    m_pointSelection.selectUnassigned(); refreshPointCloudSelection();
-}
-void VTKViewer::selectPointCloudPoint(vtkIdType id)
-{
-    m_pointSelection.select({id}); refreshPointCloudSelection();
-}
-void VTKViewer::selectPointCloudRelation(int id)
-{
-    m_pointSelection.selectRelation(id); refreshPointCloudSelection();
-}
-int VTKViewer::setPointCloudRelation(int id, int first, int second, const QString& type)
-{
-    const int result = m_pointSelection.setRelation(id, first, second, type);
-    refreshPointCloudSelection(true); return result;
-}
-void VTKViewer::removePointCloudRelation(int id)
-{
-    m_pointSelection.removeRelation(id); refreshPointCloudSelection(true);
-}
-void VTKViewer::inferPointCloudRelations(double distanceTolerance, double angleDegrees)
-{
-    m_pointSelection.inferRelations(distanceTolerance, angleDegrees); refreshPointCloudSelection(true);
-}
-void VTKViewer::addPointCloudSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces)
-{
-    m_pointSelection.addSurfaces(surfaces); refreshPointCloudSelection(true);
-}
-void VTKViewer::undoPointCloudEdit()
-{
-    if (m_pointSelection.undo()) refreshPointCloudSelection(true);
-}
-bool VTKViewer::exportPointCloud(const QString& path, QString& error) const
-{
-    return m_pointSelection.exportCloud(path, error);
 }
 
 void VTKViewer::setPointCloudPointSize(double size)

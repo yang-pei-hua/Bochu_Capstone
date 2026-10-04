@@ -7,6 +7,7 @@
 #include "app/ReconstructionController.h"
 #include "app/SketchWorkspaceController.h"
 #include "core/CameraController.h"
+#include "core/PointCloudDocument.h"
 #include "ui/panels/CameraPanel.h"
 #include "ui/panels/CapturePanel.h"
 #include "ui/panels/ModelingPanel.h"
@@ -73,6 +74,9 @@ MainWindow::~MainWindow()
     delete m_sketchWorkspace;
     delete m_captureWorkspace;
     delete m_modelViewController;
+    // The view borrows the document; release it after workers and before data.
+    delete m_viewer;
+    delete m_pointCloudDocument;
 }
 
 bool MainWindow::runPerformanceCapture(const QString& modelPath,
@@ -96,7 +100,7 @@ void MainWindow::createWorkspaceControllers()
     m_captureWorkspace = new CaptureWorkspaceController(capture,
         {m_viewer, m_propertyPanel, m_captureToolAction}, this, this);
     m_propertyPanel->reconstructPanel()->setCaptureBaseDirectory(capture->baseDirectory());
-    m_pointCloudWorkspace = new PointCloudWorkspaceController(modeling, reconstruction,
+    m_pointCloudWorkspace = new PointCloudWorkspaceController(m_pointCloudDocument, modeling, reconstruction,
         {m_viewer, m_modelingPanel, m_relationsPanel, m_structureTabs, m_scenePanel,
          m_propertyPanel, m_reconstructCadAction, m_cancelCadAction, m_reconstructToolAction}, this, this);
     m_modelViewController = new ModelViewController(capture,
@@ -258,7 +262,8 @@ void MainWindow::createToolBar()
 
 void MainWindow::createCentralArea()
 {
-    m_viewer = new VTKViewer(this);
+    m_pointCloudDocument = new PointCloudDocument(this);
+    m_viewer = new VTKViewer(this, m_pointCloudDocument);
     m_toolPalette = new SketchToolPalette(this);
 
     // The tool strip sits against the left edge of the viewport rather than
