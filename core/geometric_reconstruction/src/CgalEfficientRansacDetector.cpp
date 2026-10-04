@@ -12,6 +12,8 @@
 #include <CGAL/Shape_detection/Efficient_RANSAC/Torus.h>
 #include <CGAL/number_utils.h>
 #include <CGAL/property_map.h>
+#include <CGAL/Random.h>
+#include <Eigen/Dense>
 
 #include <algorithm>
 #include <array>
@@ -44,10 +46,83 @@ using CgalSphere = CGAL::Shape_detection::Sphere<Traits>;
 using CgalCone = CGAL::Shape_detection::Cone<Traits>;
 using CgalTorus = CGAL::Shape_detection::Torus<Traits>;
 
+// A pair of perpendicular normals on a box edge can produce a zero-radius
+// cylinder which CGAL still marks valid. Its angular parameterization then
+// divides by zero and indexes the connectivity bitmap with non-finite values.
+// Reject degenerate candidates before scoring; use CGAL's spatial connectivity
+// for cylinders so axial points and the angular seam cannot corrupt the bitmap.
+class SafeCylinder final : public CgalCylinder {
+  protected:
+    void create_shape(const std::vector<std::size_t> &indices) override {
+        CgalCylinder::create_shape(indices);
+        if (!this->m_is_valid)
+            return;
+        const double radius = CGAL::to_double(this->radius());
+        if (!std::isfinite(radius) || radius <= 1e-12) {
+            this->m_is_valid = false;
+            return;
+        }
+        const auto axis = this->axis();
+        const auto p = axis.point(0);
+        const auto v = axis.to_vector();
+        if (!std::isfinite(CGAL::to_double(p.x())) || !std::isfinite(CGAL::to_double(p.y())) ||
+            !std::isfinite(CGAL::to_double(p.z())) ||
+            !std::isfinite(CGAL::to_double(v.squared_length())) ||
+            CGAL::to_double(v.squared_length()) <= 1e-24)
+            this->m_is_valid = false;
+    }
+    std::size_t connected_component(std::vector<std::size_t> &indices,
+                                    Traits::FT epsilon) override {
+        if (indices.empty())
+            return 0;
+        return this->connected_component_kdTree(indices, epsilon);
+    }
+};
+
+class ScopedRandomStream {
+    CGAL::Random::State previous;
+
+  public:
+    explicit ScopedRandomStream(std::uint32_t seed) {
+        auto &stream = CGAL::get_default_random();
+        stream.save_state(previous);
+        stream = CGAL::Random(seed);
+    }
+    ~ScopedRandomStream() { CGAL::get_default_random().restore_state(previous); }
+    ScopedRandomStream(const ScopedRandomStream &) = delete;
+    ScopedRandomStream &operator=(const ScopedRandomStream &) = delete;
+};
+
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kTwoPi = 2.0 * kPi;
 
-modeling::Vec3 toVec3(const CgalPoint& point) {
+bool duplicateCylinder(const CylinderEvidence& left, const CylinderEvidence& right,
+                       const CylinderDetectionOptions& options) {
+    if (std::abs(math3::dot(left.cylinder.axisDirection, right.cylinder.axisDirection)) <
+        std::cos(kPi / 90.0)) {
+        return false;
+    }
+    const auto offset = math3::subtract(left.cylinder.axisPoint, right.cylinder.axisPoint);
+    const auto radial = math3::subtract(
+        offset, math3::scale(left.cylinder.axisDirection,
+                            math3::dot(offset, left.cylinder.axisDirection)));
+    if (math3::length(radial) > 3.0 * options.distanceThreshold ||
+        std::abs(left.cylinder.radius - right.cylinder.radius) >
+            3.0 * options.distanceThreshold) {
+        return false;
+    }
+    // Geometry alone could merge two nearby real holes. Require the proposals
+    // to explain the same source observations after full-cloud reassessment.
+    const std::unordered_set<PointId> ids(left.supportPointIds.begin(), left.supportPointIds.end());
+    std::size_t shared = 0;
+    for (const auto id : right.supportPointIds) {
+        shared += ids.count(id);
+    }
+    return double(shared) >= 0.7 * double(std::min(left.supportPointIds.size(),
+                                                 right.supportPointIds.size()));
+}
+
+modeling::Vec3 toVec3(const CgalPoint &point) {
     return {
         CGAL::to_double(point.x()),
         CGAL::to_double(point.y()),
@@ -377,19 +452,78 @@ bool makeCylinderEvidence(
         return false;
     }
 
-    // With the CGAL axis fixed, the least-squares radius is the mean radial
-    // distance of all assigned observations rather than the two-point sample.
+    auto refine = [&]() {
+        // Normals span the transverse plane: its smallest eigenvector gives
+        // the axis without a biased two-point RANSAC sample. Sign is immaterial.
+        std::sort(support.begin(), support.end(),
+                  [&](auto a, auto b) { return std::get<2>(input[a]) < std::get<2>(input[b]); });
+        std::array<std::array<double, 3>, 3> covariance{};
+        for (auto index : support) {
+            const auto n = toVec3(std::get<1>(input[index]));
+            const std::array<double, 3> v{{n.x, n.y, n.z}};
+            for (int a = 0; a < 3; ++a)
+                for (int b = 0; b < 3; ++b)
+                    covariance[a][b] += v[a] * v[b];
+        }
+        const auto fit = math3::symmetricEigenDecomposition(covariance);
+        if (fit.values[1] < support.size() * 0.01)
+            return false; // unidentifiable line/very short arc
+        const auto axis = fit.vectors[0];
+        if (std::abs(math3::dot(axis, cylinder.axisDirection)) < 0.95)
+            return false;
+        const auto center = centroidOf(input, support);
+        const auto u = math3::normalized(math3::cross(
+            axis, std::abs(axis.z) < 0.9 ? modeling::Vec3{0, 0, 1} : modeling::Vec3{1, 0, 0}));
+        const auto v = math3::cross(axis, u);
+        Eigen::Matrix3d matrix = Eigen::Matrix3d::Zero();
+        Eigen::Vector3d rhs = Eigen::Vector3d::Zero();
+        for (auto index : support) {
+            const auto d = math3::subtract(toVec3(std::get<0>(input[index])), center);
+            const double x = math3::dot(d, u), y = math3::dot(d, v);
+            const Eigen::Vector3d row(x, y, 1);
+            matrix += row * row.transpose();
+            rhs -= row * (x * x + y * y);
+        }
+        const auto solver = matrix.fullPivLu();
+        if (!solver.isInvertible())
+            return false;
+        const Eigen::Vector3d solution = solver.solve(rhs);
+        const double r2 = (solution[0] * solution[0] + solution[1] * solution[1]) / 4 - solution[2];
+        if (!solution.allFinite() || !(r2 > 0))
+            return false;
+        const auto point = math3::add(center, math3::add(math3::scale(u, -solution[0] / 2),
+                                                         math3::scale(v, -solution[1] / 2)));
+        cylinder.axisDirection = axis;
+        cylinder.axisPoint = math3::subtract(point, math3::scale(axis, math3::dot(point, axis)));
+        cylinder.radius = std::sqrt(r2);
+        return true;
+    };
+    if (!refine())
+        return false;
+    // Re-establish complete support with the fitted geometry, then refine once
+    // more. Assigned points alone vary with random sampling and other shapes.
+    support.clear();
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        modeling::Vec3 radial{};
+        if (cylinderResidual(cylinder, toVec3(std::get<0>(input[index])), nullptr, &radial) <=
+                options.distanceThreshold &&
+            std::abs(math3::dot(toVec3(std::get<1>(input[index])), radial)) >=
+                options.minimumNormalAlignment)
+            support.push_back(index);
+    }
+    if (support.size() < options.minimumSupportPoints || !refine())
+        return false;
+    // Radius is the mean radial distance after the axis and centre fit.
     double radiusSum = 0.0;
     for (const std::size_t index : support) {
-        const modeling::Vec3 offset = math3::subtract(
-            toVec3(std::get<0>(input[index])), cylinder.axisPoint);
+        const modeling::Vec3 offset =
+            math3::subtract(toVec3(std::get<0>(input[index])), cylinder.axisPoint);
         const double axial = math3::dot(offset, cylinder.axisDirection);
-        radiusSum += math3::length(math3::subtract(
-            offset, math3::scale(cylinder.axisDirection, axial)));
+        radiusSum +=
+            math3::length(math3::subtract(offset, math3::scale(cylinder.axisDirection, axial)));
     }
     cylinder.radius = radiusSum / static_cast<double>(support.size());
-    if (cylinder.radius < options.minimumRadius ||
-        cylinder.radius > options.maximumRadius) {
+    if (cylinder.radius < options.minimumRadius || cylinder.radius > options.maximumRadius) {
         return false;
     }
 
@@ -853,12 +987,13 @@ bool detectWithCgalEfficientRansac(
         : std::max(parameters.epsilon * 3.0, diagonal * 0.1);
 
     Ransac ransac;
+    ScopedRandomStream randomStream(options.randomSeed);
     ransac.set_input(input, InputPointMap{}, InputNormalMap{});
     if (options.detectPlanes) {
         ransac.add_shape_factory<CgalPlane>();
     }
     if (options.detectCylinders) {
-        ransac.add_shape_factory<CgalCylinder>();
+        ransac.add_shape_factory<SafeCylinder>();
     }
     if (options.detectSpheres) {
         ransac.add_shape_factory<CgalSphere>();
@@ -926,6 +1061,23 @@ bool detectWithCgalEfficientRansac(
                     points,
                     options.cylinder,
                     evidence)) {
+                bool duplicate = false;
+                for (auto& accepted : output.evidence) {
+                    auto* previous = std::get_if<CylinderEvidence>(&accepted);
+                    if (!previous || !duplicateCylinder(*previous, evidence, options.cylinder)) {
+                        continue;
+                    }
+                    if (evidence.supportPointIds.size() > previous->supportPointIds.size() ||
+                        (evidence.supportPointIds.size() == previous->supportPointIds.size() &&
+                         evidence.confidence > previous->confidence)) {
+                        *previous = std::move(evidence);
+                    }
+                    duplicate = true;
+                    break;
+                }
+                if (duplicate) {
+                    continue;
+                }
                 output.evidence.emplace_back(std::move(evidence));
                 ++cylinderCount;
             }

@@ -1461,20 +1461,15 @@ void MainWindow::reconstructCad()
                 .arg(preprocessingReport.removedAsOutliers)
                 .arg(preprocessingReport.normalsEstimated));
 
-    reconstruction::BoxWithThroughHolesCandidate candidate;
+    reconstruction::CompoundCandidate candidate;
     std::string failure;
-    if (!reconstruction::reconstructBoxWithThroughHoles(
+    if (!reconstruction::reconstructParametricSolid(
             points,
             PointCloudAdapter::planeOptionsFor(points),
             PointCloudAdapter::cylinderOptionsFor(points),
-            reconstruction::BoxRecognitionOptions{},
-            reconstruction::ThroughHoleRecognitionOptions{},
             candidate,
             failure)) {
-        // No box in the cloud is an ordinary outcome for an arbitrary scan, not
-        // an error, so it is reported in the log and the panel rather than in a
-        // dialog the user has to dismiss.
-        const QString message = tr("No box could be recognized in %1: %2")
+        const QString message = tr("No supported solid could be reconstructed in %1: %2")
                                     .arg(QFileInfo(m_pointCloudPath).fileName(),
                                          QString::fromStdString(failure));
         logWarning(message);
@@ -1483,31 +1478,24 @@ void MainWindow::reconstructCad()
         return;
     }
 
-    if (!m_modelingController->commitReconstructedBoxWithThroughHoles(candidate)) {
+    if (!m_modelingController->commitReconstructedCompound(candidate)) {
         const QString message = m_modelingController->lastError();
         logError(message);
         QMessageBox::warning(this, tr("Reconstruct CAD"), message);
         return;
     }
 
-    const modeling::BoxPrimitiveParams& box = candidate.box.primitive;
-    logInfo(tr("Reconstructed box: %1 x %2 x %3 at (%4, %5, %6), confidence %7, through holes %8")
-                .arg(box.sizeX, 0, 'f', 3)
-                .arg(box.sizeY, 0, 'f', 3)
-                .arg(box.sizeZ, 0, 'f', 3)
-                .arg(box.pose.origin.x, 0, 'f', 3)
-                .arg(box.pose.origin.y, 0, 'f', 3)
-                .arg(box.pose.origin.z, 0, 'f', 3)
-                .arg(candidate.confidence, 0, 'f', 3)
-                .arg(candidate.throughHoles.size()));
+    logInfo(tr("Reconstructed solid: %1 boxes, %2 polygonal prisms, %3 through holes, surface coverage %4")
+                .arg(candidate.boxes.size()).arg(candidate.prisms.size())
+                .arg(candidate.throughHoles.size()).arg(candidate.surfaceCoverage, 0, 'f', 3));
     for (const reconstruction::ThroughHoleCandidate& hole : candidate.throughHoles) {
         logInfo(tr("Recognized through hole: diameter %1, thickness %2, confidence %3")
                     .arg(hole.primitive.radius * 2.0, 0, 'f', 3)
                     .arg(hole.bodyThickness, 0, 'f', 3)
                     .arg(hole.confidence, 0, 'f', 3));
     }
-    m_statusLabel->setText(tr("Ready | Model: Reconstructed Box (%1 through holes) | Camera: %2")
-                               .arg(candidate.throughHoles.size())
+    m_statusLabel->setText(tr("Ready | Model: Reconstructed Solid (%1 boxes, %2 prisms) | Camera: %3")
+                               .arg(candidate.boxes.size()).arg(candidate.prisms.size())
                                .arg(m_viewer->cameraParameters().parallelProjection
                                         ? tr("Orthographic") : tr("Perspective")));
 }

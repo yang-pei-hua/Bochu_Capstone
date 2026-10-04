@@ -128,6 +128,20 @@ bool ModelingController::commitReconstructedBox(const reconstruction::BoxCandida
     return true;
 }
 
+bool ModelingController::commitReconstructedCompound(const reconstruction::CompoundCandidate& candidate)
+{
+    if (!m_core) return false;
+    const auto result = reconstruction::commitCompoundCandidate(candidate, *m_core);
+    if (!result.success) {
+        m_lastError = QString::fromStdString(result.error);
+        emit modelError(m_lastError);
+        return false;
+    }
+    m_lastError.clear();
+    emit modelRebuilt();
+    return true;
+}
+
 bool ModelingController::commitReconstructedBoxWithThroughHoles(
     const reconstruction::BoxWithThroughHolesCandidate& candidate)
 {

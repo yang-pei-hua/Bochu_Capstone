@@ -1,0 +1,619 @@
+// Repository-owned validation: generate exact STEP fixtures, then exercise the
+// same cloud -> semantic features -> ModelingCore path as the desktop client.
+#include "io/PlyReader.h"
+#include "io/PointCloudAdapter.h"
+#include "io/StepModelLoader.h"
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepGProp.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <Bnd_Box.hxx>
+#include <GProp_GProps.hxx>
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
+#include <Standard_Failure.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <gp_Ax2.hxx>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <modeling/StepExporter.h>
+#include <random>
+#include <reconstruction/ModelingAdapter.h>
+#include <reconstruction/PrimitiveDetector.h>
+#include <reconstruction/ThroughHoleRecognizer.h>
+#include <stdexcept>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <dbghelp.h>
+#endif
+
+namespace {
+#ifdef _WIN32
+QString nativeCrashPath;
+LONG WINAPI recordNativeCrash(EXCEPTION_POINTERS *exception) {
+    QJsonArray frames;
+    const auto process = GetCurrentProcess();
+    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+    if (SymInitialize(process, nullptr, TRUE)) {
+        CONTEXT context = *exception->ContextRecord;
+        STACKFRAME64 frame{};
+        frame.AddrPC.Offset = context.Rip;
+        frame.AddrPC.Mode = AddrModeFlat;
+        frame.AddrFrame.Offset = context.Rbp;
+        frame.AddrFrame.Mode = AddrModeFlat;
+        frame.AddrStack.Offset = context.Rsp;
+        frame.AddrStack.Mode = AddrModeFlat;
+        for (int i = 0; i < 16; ++i) {
+            alignas(SYMBOL_INFOW) char storage[sizeof(SYMBOL_INFOW) + 1024 * sizeof(wchar_t)]{};
+            auto *symbol = reinterpret_cast<SYMBOL_INFOW *>(storage);
+            symbol->SizeOfStruct = sizeof(SYMBOL_INFOW);
+            symbol->MaxNameLen = 1023;
+            DWORD64 offset = 0;
+            DWORD lineOffset = 0;
+            IMAGEHLP_LINE64 line{};
+            line.SizeOfStruct = sizeof(line);
+            QJsonObject item{{"address", QString::number(frame.AddrPC.Offset, 16)}};
+            if (SymFromAddrW(process, frame.AddrPC.Offset, &offset, symbol))
+                item["function"] = QString::fromWCharArray(symbol->Name).left(500);
+            if (SymGetLineFromAddr64(process, frame.AddrPC.Offset, &lineOffset, &line)) {
+                item["file"] = QString::fromLocal8Bit(line.FileName);
+                item["line"] = int(line.LineNumber);
+            }
+            frames.append(item);
+            if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, GetCurrentThread(), &frame,
+                             &context, nullptr, SymFunctionTableAccess64, SymGetModuleBase64,
+                             nullptr))
+                break;
+        }
+        SymCleanup(process);
+    }
+    QFile file(nativeCrashPath);
+    if (file.open(QIODevice::WriteOnly))
+        file.write(QJsonDocument(
+                       QJsonObject{{"schema", "paramcad.native-crash"},
+                                   {"exception_code",
+                                    QString::number(exception->ExceptionRecord->ExceptionCode, 16)},
+                                   {"stack", frames}})
+                       .toJson());
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+void require(bool condition, const std::string &error) {
+    if (!condition)
+        throw std::runtime_error(error);
+}
+QJsonObject readObject(const QString &path) {
+    QFile file(path);
+    require(file.open(QIODevice::ReadOnly), "Cannot read JSON: " + path.toStdString());
+    QJsonParseError error;
+    const auto doc = QJsonDocument::fromJson(file.readAll(), &error);
+    require(error.error == QJsonParseError::NoError && doc.isObject(), "Invalid JSON object");
+    return doc.object();
+}
+void writeObject(const QString &path, const QJsonObject &report) {
+    QSaveFile file(path);
+    require(file.open(QIODevice::WriteOnly), "Cannot create report: " + path.toStdString());
+    const auto bytes = QJsonDocument(report).toJson(QJsonDocument::Indented);
+    require(file.write(bytes) == bytes.size() && file.commit(), "Cannot save report");
+}
+double volume(const TopoDS_Shape &shape) {
+    GProp_GProps props;
+    BRepGProp::VolumeProperties(shape, props);
+    return props.Mass();
+}
+QJsonObject sampledDifference(const TopoDS_Shape &reference, const TopoDS_Shape &actual,
+                              double referenceVolume) {
+    Bnd_Box box;
+    BRepBndLib::AddOptimal(reference, box, false, false);
+    BRepBndLib::AddOptimal(actual, box, false, false);
+    double lo[3], hi[3];
+    box.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+    using Classifiers = std::vector<std::unique_ptr<BRepClass3d_SolidClassifier>>;
+    auto classifiers = [](const TopoDS_Shape &shape) {
+        Classifiers result;
+        for (TopExp_Explorer it(shape, TopAbs_SOLID); it.More(); it.Next())
+            result.push_back(std::make_unique<BRepClass3d_SolidClassifier>(it.Current()));
+        return result;
+    };
+    auto first = classifiers(reference), second = classifiers(actual);
+    auto inside = [](Classifiers &solid, const gp_Pnt &p) {
+        for (auto &classifier : solid) {
+            classifier->Perform(p, 1e-7);
+            if (classifier->State() == TopAbs_IN || classifier->State() == TopAbs_ON)
+                return true;
+        }
+        return false;
+    };
+    constexpr int samples = 32768;
+    std::mt19937 engine(4500);
+    std::uniform_real_distribution<double> uniform(0, 1);
+    int mismatches = 0;
+    for (int i = 0; i < samples; ++i) {
+        gp_Pnt p(lo[0] + (hi[0] - lo[0]) * uniform(engine),
+                 lo[1] + (hi[1] - lo[1]) * uniform(engine),
+                 lo[2] + (hi[2] - lo[2]) * uniform(engine));
+        mismatches += inside(first, p) != inside(second, p);
+    }
+    const double ratio = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]) / referenceVolume;
+    const double probability = double(mismatches) / samples, z = 3.0;
+    const double upper = (probability + z * z / (2 * samples) +
+                          z * std::sqrt(probability * (1 - probability) / samples +
+                                        z * z / (4.0 * samples * samples))) /
+                         (1 + z * z / samples);
+    return {{"samples", samples},
+            {"seed", 4500},
+            {"mismatches", mismatches},
+            {"estimate", probability * ratio},
+            {"upper_confidence_bound", upper * ratio},
+            {"confidence_z", z}};
+}
+QJsonArray vector(const modeling::Vec3 &v) { return {v.x, v.y, v.z}; }
+QJsonObject cloudBounds(const reconstruction::PointStore &cloud) {
+    if (cloud.empty())
+        return {};
+    auto low = cloud.points().front().position, high = low;
+    for (const auto &point : cloud.points()) {
+        const auto &p = point.position;
+        low.x = std::min(low.x, p.x);
+        low.y = std::min(low.y, p.y);
+        low.z = std::min(low.z, p.z);
+        high.x = std::max(high.x, p.x);
+        high.y = std::max(high.y, p.y);
+        high.z = std::max(high.z, p.z);
+    }
+    return {{"minimum", vector(low)},
+            {"maximum", vector(high)},
+            {"dimensions", QJsonArray{high.x - low.x, high.y - low.y, high.z - low.z}}};
+}
+QJsonArray bounds(const TopoDS_Shape &shape) {
+    Bnd_Box box;
+    BRepBndLib::AddOptimal(shape, box, false, false);
+    double x0, y0, z0, x1, y1, z1;
+    box.Get(x0, y0, z0, x1, y1, z1);
+    return {x1 - x0, y1 - y0, z1 - z0};
+}
+TopoDS_Shape cut(const TopoDS_Shape &a, const TopoDS_Shape &b, double fuzzyTolerance = 0.0) {
+    BRepAlgoAPI_Cut operation;
+    TopTools_ListOfShape arguments, tools;
+    arguments.Append(a);
+    tools.Append(b);
+    operation.SetArguments(arguments);
+    operation.SetTools(tools);
+    operation.SetFuzzyValue(fuzzyTolerance);
+    operation.Build();
+    require(operation.IsDone(), "Boolean cut failed");
+    return operation.Shape();
+}
+TopoDS_Shape fuse(const TopoDS_Shape &a, const TopoDS_Shape &b) {
+    BRepAlgoAPI_Fuse operation(a, b);
+    require(operation.IsDone(), "Boolean fusion failed");
+    operation.SimplifyResult();
+    return operation.Shape();
+}
+std::filesystem::path nativePath(const QString &path) {
+    return std::filesystem::path(path.toStdWString());
+}
+void generate(const QStringList &args, QJsonObject &report) {
+    require(args.size() == 5, "Usage: generate case.json model.step report.json");
+    const auto definition = readObject(args[2]);
+    require(definition["unit"] == "mm", "Standard cases must use millimeters");
+    const auto p = definition["parameters"].toObject();
+    const auto number = [&p](const char *key) {
+        const double value = p[key].toDouble(-1);
+        require(std::isfinite(value) && value > 0, std::string("Invalid dimension: ") + key);
+        return value;
+    };
+    TopoDS_Shape shape;
+    double analyticVolume = 0;
+    if (definition["geometry"] == "box_through_hole") {
+        const double x = number("size_x"), y = number("size_y"), z = number("size_z");
+        const double radius = number("hole_diameter") / 2;
+        require(2 * radius < std::min(x, y), "Hole must stay within the box");
+        shape = cut(BRepPrimAPI_MakeBox(x, y, z).Shape(),
+                    BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(x / 2, y / 2, -1), gp_Dir(0, 0, 1)),
+                                             radius, z + 2)
+                        .Shape());
+        analyticVolume = x * y * z - std::acos(-1.0) * radius * radius * z;
+    } else if (definition["geometry"] == "l_bracket_gusset") {
+        const double w = number("width"), d = number("base_depth"), b = number("base_thickness");
+        const double t = number("upright_thickness"), h = number("upright_height");
+        const double r = number("rib_thickness"), run = number("rib_run"),
+                     rise = number("rib_rise");
+        require(t + run <= d && rise <= h && r < w, "Rib must fit inside the bracket");
+        auto base = BRepPrimAPI_MakeBox(w, d, b).Shape();
+        auto upright = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, b), w, t, h).Shape();
+        BRepBuilderAPI_MakePolygon polygon;
+        polygon.Add(gp_Pnt((w - r) / 2, t, b));
+        polygon.Add(gp_Pnt((w - r) / 2, t + run, b));
+        polygon.Add(gp_Pnt((w - r) / 2, t, b + rise));
+        polygon.Close();
+        const auto rib =
+            BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(polygon.Wire()).Face(), gp_Vec(r, 0, 0))
+                .Shape();
+        shape = fuse(fuse(base, upright), rib);
+        analyticVolume = w * d * b + w * t * h + 0.5 * r * run * rise;
+    } else if (definition["geometry"] == "box_union") {
+        for (const auto value : p["boxes"].toArray()) {
+            const auto box = value.toObject();
+            const auto origin = box["origin"].toArray(), size = box["size"].toArray();
+            auto solid =
+                BRepPrimAPI_MakeBox(
+                    gp_Pnt(origin[0].toDouble(), origin[1].toDouble(), origin[2].toDouble()),
+                    size[0].toDouble(), size[1].toDouble(), size[2].toDouble())
+                    .Shape();
+            shape = shape.IsNull() ? solid : fuse(shape, solid);
+        }
+        const auto rib = p["rib"].toObject();
+        if (!rib.isEmpty()) {
+            const auto vertices = rib["vertices"].toArray();
+            BRepBuilderAPI_MakePolygon polygon;
+            for (const auto v : vertices) {
+                auto q = v.toArray();
+                polygon.Add(gp_Pnt(q[0].toDouble(), q[1].toDouble(), q[2].toDouble()));
+            }
+            polygon.Close();
+            shape =
+                fuse(shape, BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(polygon.Wire()).Face(),
+                                                  gp_Vec(rib["depth"].toDouble(), 0, 0))
+                                .Shape());
+        }
+        const auto rotation = p["rotation"].toArray();
+        if (rotation.size() == 3) {
+            gp_Trsf transform;
+            auto a = rotation[0].toArray(), b = rotation[1].toArray(), c = rotation[2].toArray();
+            transform.SetValues(a[0].toDouble(), a[1].toDouble(), a[2].toDouble(), 0,
+                                b[0].toDouble(), b[1].toDouble(), b[2].toDouble(), 0,
+                                c[0].toDouble(), c[1].toDouble(), c[2].toDouble(), 0);
+            shape = BRepBuilderAPI_Transform(shape, transform, true).Shape();
+        }
+        analyticVolume = definition["expected"].toObject()["volume_mm3"].toDouble();
+    } else
+        throw std::runtime_error("Unsupported standard-case geometry");
+    require(BRepCheck_Analyzer(shape).IsValid(), "Generated B-Rep is invalid");
+    require(std::abs(volume(shape) - analyticVolume) < analyticVolume * 1e-8,
+            "Analytic volume mismatch");
+    std::string error;
+    require(modeling::exportStep(shape, nativePath(args[3]), &error), error);
+    LoadedModel loaded;
+    QString loadError;
+    StepModelLoader loader;
+    require(loader.load(args[3], loaded, loadError), loadError.toStdString());
+    require(loaded.solidCount == definition["expected"].toObject()["solids"].toInt(1) &&
+                BRepCheck_Analyzer(loaded.shape).IsValid(),
+            "STEP solid count or validity mismatch");
+    require(std::abs(volume(loaded.shape) - analyticVolume) < analyticVolume * 1e-8,
+            "STEP volume mismatch");
+    const auto actualBounds = bounds(loaded.shape);
+    const auto expectedBounds = definition["expected"].toObject()["bounding_box_mm"].toArray();
+    require(expectedBounds.size() == 3, "Missing expected bounding box");
+    for (int i = 0; i < 3; ++i)
+        require(std::abs(actualBounds[i].toDouble() - expectedBounds[i].toDouble()) < 1e-6,
+                "STEP dimension mismatch");
+    report["status"] = "generated_and_round_trip_verified";
+    report["case_id"] = definition["id"];
+    report["unit"] = "mm";
+    report["volume_mm3"] = volume(loaded.shape);
+    report["analytic_volume_mm3"] = analyticVolume;
+    report["bounding_box_mm"] = actualBounds;
+    report["solids"] = loaded.solidCount;
+    report["faces"] = loaded.faceCount;
+    report["edges"] = loaded.edgeCount;
+    report["vertices"] = loaded.vertexCount;
+    report["brep_valid"] = true;
+}
+void fit(const QStringList &args, QJsonObject &report) {
+    require(args.size() == 5 || args.size() == 7,
+            "Usage: fit cloud.ply report.json result.step [reference.step "
+            "case.json]");
+    const auto checkpoint = [&](const char *stage) {
+        report["stage"] = stage;
+        report["status"] = "running";
+        report["complete_cad_fit"] = false;
+        writeObject(args[3], report);
+    };
+    checkpoint("point_cloud_loading");
+    PlyCloud cloud;
+    QString error;
+    require(PlyReader::read(args[2], cloud, error), error.toStdString());
+    const auto unit = PointCloudAdapter::lengthUnitFor(args[2]);
+    require(unit != reconstruction::LengthUnit::Arbitrary,
+            "Metric cloud metadata is required; no implicit millimeter assumption");
+    const auto source = PointCloudAdapter::toPointStore(cloud, unit);
+    reconstruction::PointStore processed({}, unit);
+    reconstruction::PointCloudPreprocessingReport pre;
+    std::string text;
+    const auto preprocessingOptions = PointCloudAdapter::preprocessingOptionsFor(cloud);
+    checkpoint("preprocessing");
+    require(
+        reconstruction::preprocessPointCloud(source, preprocessingOptions, processed, pre, text),
+        text);
+    report["preprocessing"] =
+        QJsonObject{{"input_points", double(pre.inputPointCount)},
+                    {"output_points", double(pre.outputPointCount)},
+                    {"voxel_duplicates_removed", double(pre.removedByVoxel)},
+                    {"statistical_outliers_removed", double(pre.removedAsOutliers)},
+                    {"normals_estimated", double(pre.normalsEstimated)},
+                    {"voxel_size", preprocessingOptions.voxelSize},
+                    {"scale_to_mm", pre.appliedScaleToMillimeters}};
+    auto planes = PointCloudAdapter::planeOptionsFor(processed);
+    auto cylinders = PointCloudAdapter::cylinderOptionsFor(processed);
+    const auto seedText = qEnvironmentVariable("PCAD_RANSAC_SEED");
+    bool validSeed = true;
+    const auto seed = seedText.isEmpty() ? 4500 : seedText.toULongLong(&validSeed);
+    require(validSeed && seed <= std::numeric_limits<std::uint32_t>::max(),
+            "Invalid PCAD_RANSAC_SEED");
+    planes.randomSeed = cylinders.randomSeed = static_cast<std::uint32_t>(seed);
+    report["ransac_seed"] = double(seed);
+    report["processed_bounds_mm"] = cloudBounds(processed);
+    reconstruction::CompoundCandidate compound;
+    checkpoint("compound_reconstruction");
+    const bool compoundRecognized =
+        reconstruction::reconstructParametricSolid(processed, planes, cylinders, compound, text);
+    const std::string compoundFailure = text;
+    report["detection_options"] =
+        QJsonObject{{"plane_distance_threshold_mm", planes.distanceThreshold},
+                    {"plane_minimum_support", double(planes.minimumSupportPoints)},
+                    {"cylinder_distance_threshold_mm", cylinders.distanceThreshold},
+                    {"cylinder_minimum_support", double(cylinders.minimumSupportPoints)},
+                    {"production_maximum_planes", double(planes.maximumPlanes)}};
+    reconstruction::PrimitiveDetectionOptions options;
+    options.randomSeed = planes.randomSeed;
+    options.plane = planes;
+    options.plane.maximumPlanes =
+        32; // diagnostic only; production recognition retains its own defaults
+    options.cylinder = cylinders;
+    options.sphere.distanceThreshold = options.cone.distanceThreshold =
+        options.torus.distanceThreshold = planes.distanceThreshold;
+    options.sphere.minimumSupportPoints = options.cone.minimumSupportPoints =
+        options.torus.minimumSupportPoints = planes.minimumSupportPoints;
+    reconstruction::PrimitiveDetectionResult evidence;
+    checkpoint("joint_primitive_detection");
+    const bool detected = compoundRecognized || reconstruction::detectPrimitiveEvidence(
+                                                    processed, options, evidence, text);
+    QJsonArray summaries;
+    QJsonObject counts{{"planes", 0}, {"cylinders", 0}, {"spheres", 0}, {"cones", 0}, {"tori", 0}};
+    const char *keys[] = {"planes", "cylinders", "spheres", "cones", "tori"};
+    for (const auto &primitive : evidence.evidence) {
+        const char *key = keys[static_cast<int>(reconstruction::primitiveKind(primitive))];
+        counts[key] = counts[key].toInt() + 1;
+        std::visit(
+            [&](const auto &e) {
+                QJsonObject item{{"kind", key},
+                                 {"support_points", double(e.supportPointIds.size())},
+                                 {"mean_residual_mm", e.meanAbsoluteResidual},
+                                 {"confidence", e.confidence}};
+                using E = std::decay_t<decltype(e)>;
+                if constexpr (std::is_same_v<E, reconstruction::PlaneEvidence>) {
+                    item["normal"] = vector(e.plane.normal);
+                    item["offset_mm"] = e.plane.offset;
+                } else if constexpr (std::is_same_v<E, reconstruction::CylinderEvidence>) {
+                    item["diameter_mm"] = 2 * e.cylinder.radius;
+                    item["angular_coverage"] = e.angularCoverage;
+                    item["axial_span_mm"] = e.axialMaximum - e.axialMinimum;
+                }
+                summaries.append(item);
+            },
+            primitive);
+    }
+    counts["unassigned_points"] = double(evidence.unassignedPointIds.size());
+    counts["detected"] = detected;
+    counts["skipped_for_compound"] = compoundRecognized;
+    if (!detected)
+        counts["reason"] = QString::fromStdString(text);
+    report["primitive_proposals"] = counts;
+    report["evidence_summary"] = summaries;
+    reconstruction::BoxWithThroughHolesCandidate candidate;
+    checkpoint("production_reconstruction");
+    const bool recognized = compoundRecognized;
+    // Optional joint diagnostics must not overwrite the production failure.
+    if (!recognized)
+        text = compoundFailure;
+    if (compoundRecognized && !compound.boxes.empty())
+        candidate.box = compound.boxes.front();
+    candidate.throughHoles = compound.throughHoles;
+    report["compound_recognition"] =
+        QJsonObject{{"recognized", compoundRecognized},
+                    {"boxes", int(compound.boxes.size())},
+                    {"prisms", int(compound.prisms.size())},
+                    {"occupancy_error", compound.occupancyError},
+                    {"grid_cells", int(compound.gridCells)},
+                    {"surface_coverage", compound.surfaceCoverage},
+                    {"minimum_box_count_proven", compound.minimumBoxCountProven},
+                    {"search_nodes", int(compound.searchNodes)},
+                    {"fallback_reason", QString::fromStdString(compoundFailure)}};
+    const bool boxRecognized = !compound.boxes.empty();
+    QJsonObject recognition{
+        {"recognized", recognized},
+        {"reason", recognized ? QJsonValue() : QJsonValue(QString::fromStdString(text))}};
+    if (!recognized) {
+        const bool detectionFailed = text.rfind("CGAL", 0) == 0;
+        recognition["failure_stage"] =
+            boxRecognized ? (detectionFailed ? "cylinder_detection" : "through_hole_recognition")
+                          : (detectionFailed ? "plane_detection" : "box_recognition");
+    }
+    report["recognition"] = recognition;
+    report["box_recognition"] = QJsonObject{{"recognized", boxRecognized}};
+    if (boxRecognized)
+        report["box_recognition"] =
+            QJsonObject{{"recognized", true},
+                        {"dimensions_mm",
+                         QJsonArray{candidate.box.primitive.sizeX, candidate.box.primitive.sizeY,
+                                    candidate.box.primitive.sizeZ}},
+                        {"confidence", candidate.box.confidence}};
+    report["complete_cad_fit"] = false;
+    report["status"] = "cad_not_recognized";
+    if (!recognized)
+        return;
+    QJsonArray holes;
+    for (const auto &hole : candidate.throughHoles)
+        holes.append(QJsonObject{{"diameter_mm", 2 * hole.primitive.radius},
+                                 {"axis_point_mm", vector(hole.primitive.axisPoint)},
+                                 {"axis_direction", vector(hole.primitive.axisDirection)},
+                                 {"confidence", hole.confidence}});
+    report["through_holes"] = holes;
+    modeling::ModelingCore core;
+    checkpoint("model_patch");
+    const auto commit =
+        compoundRecognized ? reconstruction::commitCompoundCandidate(compound, core, 0)
+                           : reconstruction::commitBoxWithThroughHolesCandidate(candidate, core, 0);
+    require(commit.success, commit.error);
+    require(BRepCheck_Analyzer(core.bodyShape()).IsValid(), "Reconstructed B-Rep is invalid");
+    checkpoint("step_export");
+    require(modeling::exportStep(core.bodyShape(), nativePath(args[4]), &text), text);
+    LoadedModel exported;
+    checkpoint("step_round_trip");
+    StepModelLoader exportReader;
+    require(exportReader.load(args[4], exported, error), error.toStdString());
+    const int expectedSolids = args.size() == 7
+                                   ? readObject(args[6])["expected"].toObject()["solids"].toInt(1)
+                                   : exported.solidCount;
+    require(exported.solidCount == expectedSolids && BRepCheck_Analyzer(exported.shape).IsValid(),
+            "Exported CAD solid count or validity mismatch");
+    require(std::abs(volume(exported.shape) - volume(core.bodyShape())) <
+                volume(core.bodyShape()) * 1e-7,
+            "Exported CAD changed volume");
+    report["status"] = "cad_exported";
+    report["cad"] = QJsonObject{{"brep_valid", true},
+                                {"features", int(core.features().size())},
+                                {"solids", exported.solidCount},
+                                {"step", args[4]},
+                                {"step_round_trip_verified", true},
+                                {"volume_mm3", volume(core.bodyShape())},
+                                {"bounding_box_mm", bounds(core.bodyShape())}};
+    // Recognizing a box alone does not establish that the source part was
+    // recovered.
+    if (args.size() == 7) {
+        LoadedModel reference;
+        StepModelLoader loader;
+        require(loader.load(args[5], reference, error), error.toStdString());
+        const auto definition = readObject(args[6]);
+        const auto expected = definition["expected"].toObject();
+        const auto acceptance = definition["acceptance"].toObject();
+        const double referenceVolume = volume(reference.shape);
+        // Exact test clouds put independently constructed faces within floating
+        // point noise of one another. Use a documented 0.00001 mm boolean
+        // tolerance to avoid spurious whole-body differences at coincident faces.
+        constexpr double comparisonTolerance = 1.0e-5;
+        checkpoint("accuracy_boolean_comparison");
+        const auto removed = cut(reference.shape, core.bodyShape(), comparisonTolerance);
+        const auto added = cut(core.bodyShape(), reference.shape, comparisonTolerance);
+        const double rawDifference = (volume(removed) + volume(added)) / referenceVolume;
+        const auto sampling = sampledDifference(reference.shape, core.bodyShape(), referenceVolume);
+        const bool booleanTrusted =
+            BRepCheck_Analyzer(removed).IsValid() && BRepCheck_Analyzer(added).IsValid() &&
+            rawDifference >= 0 && std::abs(rawDifference - sampling["estimate"].toDouble()) < 0.02;
+        const double difference =
+            booleanTrusted ? rawDifference : sampling["upper_confidence_bound"].toDouble();
+        const auto actualBounds = bounds(core.bodyShape());
+        const auto expectedBounds = expected["bounding_box_mm"].toArray();
+        QJsonArray dimensionErrors;
+        bool dimensionsPass = true;
+        for (int i = 0; i < 3; ++i) {
+            double value = std::abs(actualBounds[i].toDouble() - expectedBounds[i].toDouble());
+            dimensionErrors.append(value);
+            dimensionsPass &= value <= acceptance["dimension_tolerance_mm"].toDouble();
+        }
+        auto expectedDiameters = expected["hole_diameters_mm"].toArray();
+        std::vector<double> actualDiameters, targetDiameters;
+        for (auto h : holes)
+            actualDiameters.push_back(h.toObject()["diameter_mm"].toDouble());
+        for (auto d : expectedDiameters)
+            targetDiameters.push_back(d.toDouble());
+        std::sort(actualDiameters.begin(), actualDiameters.end());
+        std::sort(targetDiameters.begin(), targetDiameters.end());
+        bool holesPass = holes.size() == expected["through_holes"].toInt() &&
+                         actualDiameters.size() == targetDiameters.size();
+        QJsonArray diameterErrors;
+        for (std::size_t i = 0; i < std::min(actualDiameters.size(), targetDiameters.size()); ++i) {
+            const double value = std::abs(actualDiameters[i] - targetDiameters[i]);
+            diameterErrors.append(value);
+            holesPass &= value <= acceptance["hole_diameter_tolerance_mm"].toDouble();
+        }
+        report["accuracy"] =
+            QJsonObject{{"dimension_errors_mm", dimensionErrors},
+                        {"dimensions_pass", dimensionsPass},
+                        {"hole_diameter_errors_mm", diameterErrors},
+                        {"holes_pass", holesPass},
+                        {"relative_volume_error",
+                         std::abs(volume(core.bodyShape()) - referenceVolume) / referenceVolume},
+                        {"symmetric_difference_volume_fraction", difference},
+                        {"boolean_fuzzy_tolerance_mm", comparisonTolerance},
+                        {"boolean_raw_difference_fraction", rawDifference},
+                        {"boolean_result_trusted", booleanTrusted},
+                        {"difference_method", booleanTrusted ? "boolean_verified_by_sampling"
+                                                             : "sampling_upper_confidence_bound"},
+                        {"independent_volume_sampling", sampling}};
+        const double tolerance = acceptance["symmetric_difference_volume_fraction"].toDouble();
+        const bool passed = dimensionsPass && holesPass && difference <= tolerance &&
+                            sampling["upper_confidence_bound"].toDouble() <= tolerance;
+        report["complete_cad_fit"] = passed;
+        report["status"] = passed ? "cad_accuracy_passed" : "cad_accuracy_failed";
+    }
+}
+} // namespace
+
+int main(int argc, char **argv) {
+    QCoreApplication application(argc, argv);
+    const auto args = application.arguments();
+    const bool generating = args.value(1) == "generate";
+    const QString reportPath = generating ? args.value(4) : args.value(3);
+#ifdef _WIN32
+    nativeCrashPath = reportPath + ".native-crash.json";
+    QFile::remove(nativeCrashPath);
+    SetUnhandledExceptionFilter(recordNativeCrash);
+#endif
+    QJsonObject report{{"schema", "paramcad.cad-validation"}, {"version", 1}};
+    QElapsedTimer timer;
+    timer.start();
+    int exitCode = 0;
+    try {
+        if (generating) {
+            generate(args, report);
+        } else {
+            require(args.value(1) == "fit", "Expected generate or fit mode");
+            fit(args, report);
+        }
+    } catch (const Standard_Failure &error) {
+        report["status"] = "failed";
+        report["error"] = error.what();
+        exitCode = 2;
+    } catch (const std::exception &error) {
+        report["status"] = "failed";
+        report["error"] = error.what();
+        exitCode = 2;
+    }
+    report["elapsed_seconds"] = timer.elapsed() / 1000.0;
+    if (report["status"] != "failed")
+        report["stage"] = "completed";
+    if (!reportPath.isEmpty()) {
+        try {
+            writeObject(reportPath, report);
+        } catch (const std::exception &error) {
+            std::cerr << error.what() << '\n';
+            return 2;
+        }
+    }
+    std::cout << "CAD validation: " << report["status"].toString().toStdString() << '\n';
+    return exitCode;
+}

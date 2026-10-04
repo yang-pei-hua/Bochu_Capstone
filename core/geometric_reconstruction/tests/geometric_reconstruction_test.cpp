@@ -106,6 +106,48 @@ void testSyntheticBoxToCad(const std::filesystem::path& outputDirectory) {
             "Synthetic box STEP output was not created");
 }
 
+void testPreprocessingPreservesNormalOrientation() {
+    reconstruction::SyntheticBoxRequest request;
+    request.box.sizeX=30;request.box.sizeY=20;request.box.sizeZ=10;
+    const auto source=reconstruction::makeSyntheticBoxSurface(request);
+    reconstruction::PointCloudPreprocessingOptions options;
+    options.removeStatisticalOutliers=false;
+    reconstruction::PointStore processed({});
+    reconstruction::PointCloudPreprocessingReport report;
+    std::string error;
+    require(reconstruction::preprocessPointCloud(source,options,processed,report,error),error);
+    require(processed.size()==source.size(),"Normal test must retain source observations");
+    for(std::size_t i=0;i<source.size();++i) {
+        const auto before=*source.points()[i].normal,after=*processed.points()[i].normal;
+        require(before.x*after.x+before.y*after.y+before.z*after.z>0.999,
+            "Preprocessing must preserve outward input normal orientation");
+    }
+}
+
+void testCompoundCommitFusesSolidsAtomically() {
+    reconstruction::CompoundCandidate candidate;
+    reconstruction::BoxCandidate base,upright;
+    base.primitive.sizeX=80;base.primitive.sizeY=60;base.primitive.sizeZ=8;
+    upright.primitive.pose.origin={0,0,8};
+    upright.primitive.sizeX=80;upright.primitive.sizeY=8;upright.primitive.sizeZ=60;
+    candidate.boxes={base,upright};
+    reconstruction::PrismCandidate rib;
+    rib.plane={{36,8,8},{1,0,0},{0,1,0}};
+    rib.polygon={{0,0},{40,0},{0,50}};rib.depth=8;
+    candidate.prisms.push_back(rib);
+    modeling::ModelingCore core;
+    const auto committed=reconstruction::commitCompoundCandidate(candidate,core,0);
+    require(committed.success,committed.error);
+    require(core.features().size()==4,"L part requires two boxes, one sketch and one extrusion");
+    requireNear(volumeOf(core.bodyShape()),84800,1e-6,"Fused L bracket volume");
+    const auto stale=reconstruction::commitCompoundCandidate(candidate,core,0);
+    require(!stale.success&&core.features().size()==4,"Stale patch must leave compound unchanged");
+    modeling::ModelingCore empty;
+    candidate.prisms[0].depth=-1;
+    const auto invalid=reconstruction::commitCompoundCandidate(candidate,empty,0);
+    require(!invalid.success&&empty.features().empty(),"Invalid prism must roll back all preceding boxes");
+}
+
 void testRecognitionRequiresKnownScale() {
     std::vector<reconstruction::PointSample> points{
         {1, {0.0, 0.0, 0.0}, std::nullopt, 1.0},
@@ -414,6 +456,55 @@ void testCylinderPrimitiveProposal() {
 
     require(result.unassignedPointIds.size() >= 64U,
             "Cylinder proposal must leave distant outliers unassigned");
+    requireNear(cylinder.cylinder.axisPoint.x, 5.0, 0.001,
+                "refined cylinder centre X");
+    requireNear(cylinder.cylinder.axisPoint.y, -3.0, 0.001,
+                "refined cylinder centre Y");
+    // Changing the sample stream must still recover the geometry. Returning to
+    // the original stream must reproduce parameters and source support exactly,
+    // regardless of the detections performed between these two calls.
+    for (const std::uint32_t seed : {1U, 999U, 4500U}) {
+        primitiveOptions.randomSeed = seed;
+        reconstruction::PrimitiveDetectionResult repeated;
+        require(reconstruction::detectPrimitiveEvidence(
+                    points, primitiveOptions, repeated, error), error);
+        require(repeated.evidence.size() == 1U,
+                "Every sample stream must retain one cylinder");
+        const auto& fitted = std::get<reconstruction::CylinderEvidence>(
+            repeated.evidence.front());
+        requireNear(fitted.cylinder.radius, cylinder.cylinder.radius, 1.0e-12,
+                    "all-support radius must be stable across sample streams");
+        requireNear(fitted.cylinder.axisPoint.x, cylinder.cylinder.axisPoint.x,
+                    1.0e-12, "all-support centre X must be stable");
+        requireNear(fitted.cylinder.axisPoint.y, cylinder.cylinder.axisPoint.y,
+                    1.0e-12, "all-support centre Y must be stable");
+        if (seed == 4500U) {
+            require(fitted.supportPointIds == cylinder.supportPointIds,
+                    "Repeated detection must preserve identical source support");
+            require(fitted.cylinder.radius == cylinder.cylinder.radius &&
+                        fitted.cylinder.axisPoint.x == cylinder.cylinder.axisPoint.x &&
+                        fitted.cylinder.axisPoint.y == cylinder.cylinder.axisPoint.y,
+                    "Same seed must reproduce cylinder parameters exactly");
+        }
+    }
+    auto pairedSamples = points.points();
+    for (const auto& point : points.points()) {
+        if (point.id > 768U) {
+            continue;
+        }
+        auto second = point;
+        second.id += 10000U;
+        second.position.x += 22.0;
+        pairedSamples.push_back(second);
+    }
+    const reconstruction::PointStore paired(
+        std::move(pairedSamples), reconstruction::LengthUnit::Millimeter);
+    primitiveOptions.cylinder.maximumCylinders = 2;
+    reconstruction::PrimitiveDetectionResult twoCylinders;
+    require(reconstruction::detectPrimitiveEvidence(
+                paired, primitiveOptions, twoCylinders, error), error);
+    require(twoCylinders.evidence.size() == 2U,
+            "Nearby real cylinders with distinct support must remain separate");
 }
 
 void testThroughHoleRecognitionAndCadCommit() {
@@ -808,6 +899,8 @@ void testTorusPrimitiveProposal() {
 int main() {
     try {
         testSyntheticBoxToCad(RECONSTRUCTION_TEST_OUTPUT_DIR);
+        testPreprocessingPreservesNormalOrientation();
+        testCompoundCommitFusesSolidsAtomically();
         testRecognitionRequiresKnownScale();
         testRotatedNoisyBoxWithOutliers(RECONSTRUCTION_TEST_OUTPUT_DIR);
         testDuplicateDepthLayersDoNotHideBoxFaces();

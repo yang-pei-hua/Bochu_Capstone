@@ -3,6 +3,7 @@
 #include "reconstruction/PrimitiveEvidence.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -20,6 +21,7 @@ struct PlaneDetectionOptions {
     double duplicatePlaneAngularToleranceRadians =
         0.03490658503988659;  // 2 degrees
     double duplicatePlaneDistanceMultiplier = 3.0;
+    std::uint32_t randomSeed = 4500;
 };
 
 struct CylinderDetectionOptions {
@@ -32,6 +34,7 @@ struct CylinderDetectionOptions {
     double clusterEpsilon = 0.0;
     double minimumRadius = 0.0;
     double maximumRadius = std::numeric_limits<double>::infinity();
+    std::uint32_t randomSeed = 4500;
 };
 
 struct SphereDetectionOptions {
@@ -70,6 +73,9 @@ struct TorusDetectionOptions {
 };
 
 struct PrimitiveDetectionOptions {
+    // Each detection owns a reproducible random stream, independent of earlier
+    // CGAL calls. Callers can vary this explicitly for multi-seed diagnostics.
+    std::uint32_t randomSeed = 4500;
     bool detectPlanes = true;
     bool detectCylinders = true;
     bool detectSpheres = true;

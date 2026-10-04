@@ -214,6 +214,7 @@ bool reconstructBox(
     detectionOptions.detectCones = false;
     detectionOptions.detectTori = false;
     detectionOptions.plane = planeOptions;
+    detectionOptions.randomSeed = planeOptions.randomSeed;
     PrimitiveDetectionResult proposals;
     if (!detectPrimitiveEvidence(
             points, detectionOptions, proposals, error)) {

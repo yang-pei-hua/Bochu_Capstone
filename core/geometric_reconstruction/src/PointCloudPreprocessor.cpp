@@ -258,7 +258,9 @@ void estimateNormalsAndCurvature(
         PointSample& sample = points[index];
         if (sample.normal.has_value()) {
             try {
-                sample.normal = math3::canonicalDirection(*sample.normal);
+                // Input normals carry outward/inward orientation needed for
+                // material occupancy. Canonicalizing destroys that information.
+                sample.normal = math3::normalized(*sample.normal);
                 ++report.normalsFromInput;
             } catch (const std::invalid_argument&) {
                 sample.normal.reset();

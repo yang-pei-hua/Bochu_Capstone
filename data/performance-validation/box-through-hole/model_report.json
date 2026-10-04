@@ -1,0 +1,21 @@
+{
+  "analytic_volume_mm3": 45738.05328941535,
+  "bounding_box_mm": [
+    60,
+    40,
+    20
+  ],
+  "brep_valid": true,
+  "case_id": "box-through-hole",
+  "edges": 15,
+  "elapsed_seconds": 0.049,
+  "faces": 7,
+  "schema": "paramcad.cad-validation",
+  "solids": 1,
+  "status": "generated_and_round_trip_verified",
+  "unit": "mm",
+  "version": 1,
+  "vertices": 10,
+  "volume_mm3": 45738.05328941527,
+  "model_sha256": "0399cc23dce75aa3e25dcb02ecf008094af8aa2c1eb5b301a625f58bc01245f8"
+}

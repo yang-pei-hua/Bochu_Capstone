@@ -19,6 +19,8 @@ struct BoxPrimitiveParams {
     double sizeX = 0.0;
     double sizeY = 0.0;
     double sizeZ = 0.0;
+    // Fuse with the existing body when reconstructing connected primitives.
+    bool join = false;
 };
 
 // A cylindrical material removal that crosses the complete current body. The

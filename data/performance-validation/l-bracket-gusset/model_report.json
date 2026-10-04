@@ -1,0 +1,21 @@
+{
+  "analytic_volume_mm3": 84800,
+  "bounding_box_mm": [
+    80,
+    60,
+    68
+  ],
+  "brep_valid": true,
+  "case_id": "l-bracket-gusset",
+  "edges": 27,
+  "elapsed_seconds": 0.025,
+  "faces": 11,
+  "schema": "paramcad.cad-validation",
+  "solids": 1,
+  "status": "generated_and_round_trip_verified",
+  "unit": "mm",
+  "version": 1,
+  "vertices": 18,
+  "volume_mm3": 84800.0000000012,
+  "model_sha256": "c7c3f7beef91e9fce34affc6ec379ce740dbf75a2fd9a9ea4c53437075e6f46a"
+}

@@ -4,6 +4,7 @@
 #include <modeling/ModelCommand.h>
 #include <modeling/ModelingCore.h>
 #include <reconstruction/ReconstructionCandidate.h>
+#include <reconstruction/CompoundRecognizer.h>
 
 #include <TopoDS_Shape.hxx>
 
@@ -52,6 +53,7 @@ public:
     // author of the same feature graph, so it enters through the core's atomic
     // patch boundary rather than through the sketch commands.
     bool commitReconstructedBox(const reconstruction::BoxCandidate& candidate);
+    bool commitReconstructedCompound(const reconstruction::CompoundCandidate& candidate);
     bool commitReconstructedBoxWithThroughHoles(
         const reconstruction::BoxWithThroughHolesCandidate& candidate);
 

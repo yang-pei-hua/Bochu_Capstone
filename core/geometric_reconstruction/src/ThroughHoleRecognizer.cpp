@@ -200,6 +200,7 @@ bool reconstructBoxWithThroughHoles(
     detectionOptions.detectCones = false;
     detectionOptions.detectTori = false;
     detectionOptions.cylinder = cylinderOptions;
+    detectionOptions.randomSeed = cylinderOptions.randomSeed;
     PrimitiveDetectionResult proposals;
     if (!detectPrimitiveEvidence(points, detectionOptions, proposals, error)) {
         return false;

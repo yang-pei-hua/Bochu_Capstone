@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import struct
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,20 +33,41 @@ class _Runner:
     def __init__(self, executable: Path, log_path: Path) -> None:
         self.executable = executable
         self.log_path = log_path
+        self.stages: list[dict] = []
+
+    def _publish(self, current: dict) -> None:
+        path = self.log_path.parent / "progress.json"
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps({"schema": "paramcad.colmap-progress", "version": 1,
+                                         "current": current, "stages": self.stages}, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
 
     def run(self, command: str, *args: str | Path) -> None:
         invocation = [str(self.executable), command, *(str(arg) for arg in args)]
+        stage = {"command": command, "arguments": [str(arg) for arg in args],
+                 "status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
+        self._publish(stage)
+        started = time.monotonic()
         with self.log_path.open("a", encoding="utf-8") as log:
             log.write("\n$ " + subprocess.list2cmdline(invocation) + "\n")
             log.flush()
             try:
                 subprocess.run(invocation, check=True, stdout=log, stderr=subprocess.STDOUT)
             except FileNotFoundError as exc:
+                stage.update(status="failed", error="executable_not_found", elapsed_seconds=time.monotonic()-started)
+                self.stages.append(stage)
+                self._publish(stage)
                 raise ReconstructionError(f"COLMAP executable not found: {self.executable}") from exc
             except subprocess.CalledProcessError as exc:
+                stage.update(status="failed", exit_code=exc.returncode, elapsed_seconds=time.monotonic()-started)
+                self.stages.append(stage)
+                self._publish(stage)
                 raise ReconstructionError(
                     f"COLMAP command {command!r} failed with exit code {exc.returncode}; see {self.log_path}"
                 ) from exc
+        stage.update(status="completed", exit_code=0, elapsed_seconds=time.monotonic()-started)
+        self.stages.append(stage)
+        self._publish(stage)
 
 
 def find_colmap_executable(explicit: str | Path | None = None) -> Path:

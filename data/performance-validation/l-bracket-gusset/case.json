@@ -1,0 +1,11 @@
+{
+  "schema": "paramcad.standard-case",
+  "version": 1,
+  "id": "l-bracket-gusset",
+  "geometry": "l_bracket_gusset",
+  "unit": "mm",
+  "parameters": {"width": 80, "base_depth": 60, "base_thickness": 8, "upright_thickness": 8, "upright_height": 60, "rib_thickness": 8, "rib_run": 40, "rib_rise": 50},
+  "expected": {"bounding_box_mm": [80, 60, 68], "volume_mm3": 84800, "through_holes": 0, "solids": 1},
+  "acceptance": {"dimension_tolerance_mm": 0.5, "symmetric_difference_volume_fraction": 0.05},
+  "description": "Base x=0..80,y=0..60,z=0..8; upright x=0..80,y=0..8,z=8..68. Rib x=36..44; YZ triangle (8,8),(48,8),(8,58). All three features fuse into one solid. Compound-part recognition is a capability probe, not an expected failure that counts as a pass."
+}

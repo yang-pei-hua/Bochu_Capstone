@@ -330,7 +330,13 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
             if (!occt::buildBoxPrimitive(*params, box, error)) {
                 break;
             }
-            appendIndependentSolid(box, currentBody);
+            if (params->join && !currentBody.IsNull()) {
+                ExtrudeFeatureParams operation;
+                operation.operation = ExtrudeOperation::Join;
+                if (!applyExtrudeOperation(operation, box, currentBody, error)) break;
+            } else {
+                appendIndependentSolid(box, currentBody);
+            }
             continue;
         }
         case FeatureType::ThroughHolePrimitive: {

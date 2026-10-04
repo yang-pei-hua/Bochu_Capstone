@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 project(CadPointCloudClient VERSION 0.1.0 LANGUAGES CXX)
 
 option(CAD_CLIENT_BUILD_TESTS "Build ParamCAD Studio I/O tests" OFF)
+option(CAD_CLIENT_BUILD_VALIDATION_TOOLS "Build standard STEP and CAD validation tools" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -192,6 +193,27 @@ vtk_module_autoinit(
     TARGETS CadPointCloudClient
     MODULES ${VTK_LIBRARIES}
 )
+
+if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
+    add_executable(cad_reconstruction_validation
+        ../../tools/cad_reconstruction_validation.cpp
+        src/io/PlyReader.cpp
+        src/io/PointCloudAdapter.cpp
+        src/io/StepModelLoader.cpp
+    )
+    target_include_directories(cad_reconstruction_validation PRIVATE src)
+    target_link_directories(cad_reconstruction_validation PRIVATE ${OpenCASCADE_LIBRARY_DIR})
+    target_link_libraries(cad_reconstruction_validation PRIVATE
+        Qt6::Core GeometricReconstruction::GeometricReconstruction TKDE TKXSBase TKDESTEP)
+    if(MSVC)
+        target_compile_options(cad_reconstruction_validation PRIVATE /W4 /permissive- /utf-8)
+        # Native failures get a bounded symbolized JSON stack beside the report.
+        target_compile_options(cad_reconstruction_validation PRIVATE /Zi)
+        target_compile_options(GeometricReconstruction PRIVATE /Zi)
+        target_link_options(cad_reconstruction_validation PRIVATE /DEBUG)
+        target_link_libraries(cad_reconstruction_validation PRIVATE dbghelp)
+    endif()
+endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)

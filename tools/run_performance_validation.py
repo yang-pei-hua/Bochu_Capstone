@@ -7,7 +7,7 @@ The pipeline keeps every generated artifact inside one case directory:
 2. Run the deterministic 62-view client capture.
 3. Validate the aggregate camera manifest and CameraInfo.
 4. Run COLMAP reconstruction (GPU dense by default, CPU sparse on --no-gpu).
-5. Run the point-cloud preprocessing and primitive-fitting validation executable.
+5. Run the point-cloud preprocessing, semantic CAD reconstruction and STEP validation executable.
 6. Write machine-readable reports and a concise README.
 
 COLMAP's dense PatchMatch implementation requires CUDA. Therefore --no-gpu
@@ -44,6 +44,7 @@ EXPECTED_RING_ELEVATIONS = (-60, -30, 0, 30, 60)
 EXPECTED_AZIMUTHS = tuple(range(0, 360, 30))
 
 CLIENT_CANDIDATES = (
+    REPOSITORY_ROOT / "apps" / "ParamCAD Studio" / "build" / "msvc-debug" / "Release" / "ParamCAD Studio.exe",
     REPOSITORY_ROOT / "build" / "paramcad-validation" / "Release" / "ParamCAD Studio.exe",
     REPOSITORY_ROOT / "build" / "paramcad-studio-cgal" / "Release" / "ParamCAD Studio.exe",
     REPOSITORY_ROOT / "build" / "msvc-debug" / "Release" / "ParamCAD Studio.exe",
@@ -75,7 +76,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Run STEP capture, CameraInfo validation, COLMAP reconstruction, "
-            "point-cloud preprocessing/fitting, and report generation."
+            "point-cloud preprocessing/CAD reconstruction, STEP export, and accuracy checks."
         ),
     )
     parser.add_argument("--model", required=True, help="Input STEP/STP model")
@@ -111,8 +112,9 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--colmap", help="COLMAP executable override")
     parser.add_argument(
         "--fit-executable",
-        help="point_cloud_io_test executable override",
+        help="cad_reconstruction_validation executable override",
     )
+    parser.add_argument("--expected", help="Dimensioned case.json; defaults to case.json beside the model")
     parser.add_argument(
         "--progress-seconds",
         type=int,
@@ -181,17 +183,17 @@ def find_client(explicit: str | None) -> Path:
 def find_fit_executable(explicit: str | None, client: Path) -> Path:
     if explicit:
         return resolve_input(explicit, "fit executable")
-    beside_client = client.parent / "point_cloud_io_test.exe"
+    beside_client = client.parent / "cad_reconstruction_validation.exe"
     if beside_client.is_file():
         return beside_client.resolve()
     matches = sorted(
-        (path for path in (REPOSITORY_ROOT / "build").glob("*/Release/point_cloud_io_test.exe") if path.is_file()),
+        (path for path in (REPOSITORY_ROOT / "build").glob("*/Release/cad_reconstruction_validation.exe") if path.is_file()),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
     if matches:
         return matches[0].resolve()
-    raise PipelineError("cannot find point_cloud_io_test.exe; pass --fit-executable")
+    raise PipelineError("cannot find cad_reconstruction_validation.exe; build with CAD_CLIENT_BUILD_VALIDATION_TOOLS=ON")
 
 
 def find_colmap(explicit: str | None) -> Path:
@@ -226,10 +228,6 @@ def read_json(path: Path) -> Any:
         raise PipelineError(f"cannot read valid JSON from {path}: {error}") from error
 
 
-def command_tail(output: str, lines: int = 30) -> str:
-    return "\n".join(output.splitlines()[-lines:])
-
-
 def hidden_process_options() -> dict[str, Any]:
     if os.name != "nt":
         return {}
@@ -248,6 +246,7 @@ def run_command(
     log_path: Path,
     pipeline_log: PipelineLog,
     progress_seconds: int,
+    collect_output: bool = False,
 ) -> CommandResult:
     command = [str(value) for value in arguments]
     pipeline_log.write(f"{stage}: started; details -> {log_path.name}")
@@ -276,11 +275,16 @@ def run_command(
                 pipeline_log.write(f"{stage}: still running ({elapsed:.0f}s)")
 
     elapsed = time.monotonic() - started
-    output = log_path.read_text(encoding="utf-8", errors="replace")
+    # Engine logs stay on disk. Only the short model-analyzer diagnostic needs
+    # textual output; capture, reconstruction and fitting use JSON reports.
+    output = ""
+    if collect_output:
+        with log_path.open("rb") as stream:
+            stream.seek(max(0, log_path.stat().st_size - 65536))
+            output = stream.read().decode("utf-8", errors="replace")
     if exit_code != 0:
         raise PipelineError(
-            f"{stage} failed with exit code {exit_code}; log: {log_path}\n"
-            f"{command_tail(output)}"
+            f"{stage} failed with exit code {exit_code}; log: {log_path}"
         )
     pipeline_log.write(f"{stage}: completed in {elapsed:.3f}s")
     return CommandResult(elapsed_seconds=elapsed, output=output)
@@ -520,20 +524,28 @@ def collect_reconstruction_statistics(
         case / "model_analyzer.log",
         pipeline_log,
         progress_seconds,
+        collect_output=True,
     )
     model = parse_model_analyzer(analyzer.output)
-    colmap_log_path = workspace / "colmap.log"
-    colmap_log = colmap_log_path.read_text(encoding="utf-8", errors="replace")
+    progress = read_json(workspace / "progress.json")
+    stages = progress["stages"]
     depth_directory = workspace / "dense" / "stereo" / "depth_maps"
     photometric = len(list(depth_directory.glob("*.photometric.bin"))) if depth_directory.is_dir() else 0
     geometric = len(list(depth_directory.glob("*.geometric.bin"))) if depth_directory.is_dir() else 0
-    cuda_mentions = colmap_log.count("cudacc.cc")
-    feature_gpu = "--FeatureExtraction.use_gpu 1" in colmap_log
-    matching_gpu = "--FeatureMatching.use_gpu 1" in colmap_log
-    gpu_verified = gpu_requested and feature_gpu and matching_gpu and cuda_mentions > 0
+    def used_gpu(command: str, option: str) -> bool:
+        for item in stages:
+            arguments = item["arguments"]
+            if item["command"] == command and option in arguments:
+                index = arguments.index(option)
+                return item["exit_code"] == 0 and arguments[index+1] == "1"
+        return False
+    feature_gpu = used_gpu("feature_extractor", "--FeatureExtraction.use_gpu")
+    matching_gpu = used_gpu("exhaustive_matcher" if any(s["command"] == "exhaustive_matcher" for s in stages) else "sequential_matcher", "--FeatureMatching.use_gpu")
+    patch_match_ok = any(s["command"] == "patch_match_stereo" and s["exit_code"] == 0 for s in stages)
+    gpu_verified = gpu_requested and feature_gpu and matching_gpu and patch_match_ok and geometric > 0
     if gpu_requested and not gpu_verified:
         raise PipelineError(
-            "GPU mode was requested but CUDA execution could not be verified in workspace/colmap.log"
+            "GPU mode was requested but successful GPU stages/depth maps could not be verified"
         )
 
     point_cloud = Path(reconstruction["point_cloud"])
@@ -546,10 +558,7 @@ def collect_reconstruction_statistics(
         "gpu_verified": gpu_verified,
         "feature_extraction_gpu_verified": feature_gpu,
         "feature_matching_gpu_verified": matching_gpu,
-        "cuda_sweep_log_mentions": cuda_mentions,
-        "fatal_error_count": len(
-            re.findall(r"CUDA.*error|Check failed|FATAL", colmap_log, flags=re.IGNORECASE)
-        ),
+        "stage_results": [{"command": s["command"], "exit_code": s["exit_code"], "elapsed_seconds": s["elapsed_seconds"]} for s in stages],
         "photometric_depth_maps": photometric,
         "geometric_depth_maps": geometric,
         "point_count": ply_vertex_count(point_cloud),
@@ -561,67 +570,6 @@ def collect_reconstruction_statistics(
     result.update(database)
     result.update(model)
     return result
-
-
-def parse_fitting_output(output: str, elapsed_seconds: float, point_cloud: Path) -> dict[str, Any]:
-    preprocessing = re.search(
-        r"Preprocessed\s+(\d+)\s+->\s+(\d+)\s+points\s+"
-        r"\(voxel removed\s+(\d+),\s+outliers removed\s+(\d+),\s+"
-        r"normals estimated\s+(\d+)\)\.",
-        output,
-    )
-    proposals = re.search(
-        r"Primitive proposals:\s+(\d+) planes,\s+(\d+) cylinders,\s+"
-        r"(\d+) spheres,\s+(\d+) cones,\s+(\d+) tori,\s+"
-        r"(\d+) unassigned points\.",
-        output,
-    )
-    no_proposals = re.search(r"No primitive proposals:\s+(.+)", output)
-    if (
-        not preprocessing
-        or (not proposals and not no_proposals)
-        or "Point-cloud I/O test passed." not in output
-    ):
-        raise PipelineError("could not parse the point-cloud fitting validation output")
-
-    recognized = re.search(
-        r"Recognized box\s+(.+?),\s+confidence\s+([0-9.eE+-]+)\.", output
-    )
-    not_recognized = re.search(r"No box recognized:\s+(.+)", output)
-    proposal_report = {
-        "planes": int(proposals.group(1)) if proposals else 0,
-        "cylinders": int(proposals.group(2)) if proposals else 0,
-        "spheres": int(proposals.group(3)) if proposals else 0,
-        "cones": int(proposals.group(4)) if proposals else 0,
-        "tori": int(proposals.group(5)) if proposals else 0,
-        "unassigned_points": int(proposals.group(6)) if proposals else int(preprocessing.group(2)),
-        "detection_error": no_proposals.group(1).strip() if no_proposals else None,
-    }
-    report: dict[str, Any] = {
-        "schema": "paramcad.fitting-report",
-        "version": 1,
-        "source_point_cloud": point_cloud.name,
-        "exit_code": 0,
-        "elapsed_seconds": elapsed_seconds,
-        "preprocessing": {
-            "input_points": int(preprocessing.group(1)),
-            "output_points": int(preprocessing.group(2)),
-            "voxel_duplicates_removed": int(preprocessing.group(3)),
-            "statistical_outliers_removed": int(preprocessing.group(4)),
-            "normals_estimated": int(preprocessing.group(5)),
-        },
-        "box_recognition": {
-            "recognized": recognized is not None,
-            "description": recognized.group(1) if recognized else None,
-            "confidence": float(recognized.group(2)) if recognized else None,
-            "reason": not_recognized.group(1).strip() if not_recognized else None,
-        },
-        "primitive_proposals": proposal_report,
-        "status": "io_and_detection_pipeline_passed",
-        "log": "fitting.log",
-    }
-    report["complete_cad_fit"] = bool(recognized)
-    return report
 
 
 def relative_to_case(path: Path, case: Path) -> str:
@@ -660,7 +608,11 @@ def write_readme(
             f"{proposals['spheres']} 球、{proposals['cones']} 圆锥、"
             f"{proposals['tori']} 圆环"
         ),
-        f"- 完整箱体拟合：{'成功' if fitting['complete_cad_fit'] else '未识别'}",
+        f"- CAD 验收：{fitting['status']}",
+        f"- CAD 达标：{'是' if fitting['complete_cad_fit'] else '否'}",
+        f"- 物块：{fitting.get('compound_recognition', {}).get('boxes', 0)} 长方体，"
+        f"{fitting.get('compound_recognition', {}).get('prisms', 0)} 拉伸体",
+        f"- 识别诊断：{fitting.get('recognition', {}).get('reason') or '见 accuracy 字段'}",
         "",
         "## 输入快照",
         "",
@@ -694,6 +646,9 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     client = find_client(args.client)
     colmap = find_colmap(args.colmap)
     fit_executable = find_fit_executable(args.fit_executable, client)
+    expected = resolve_input(args.expected, "case definition") if args.expected else model.parent / "case.json"
+    if not expected.is_file():
+        expected = None
     if not RECONSTRUCTION_SCRIPT.is_file():
         raise PipelineError(f"reconstruction script is missing: {RECONSTRUCTION_SCRIPT}")
 
@@ -724,8 +679,14 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 "sha256": sha256(texture_snapshot),
             },
         }
+        expected_snapshot = None
+        if expected:
+            expected_snapshot = input_directory / "case.json"
+            shutil.copy2(expected, expected_snapshot)
+            input_report["expected"] = {"snapshot": relative_to_case(expected_snapshot, case), "sha256": sha256(expected_snapshot)}
 
         stage = "capture"
+        write_json(case / "pipeline_status.json", {"status": "running", "stage": stage, "pid": os.getpid()})
         capture_result = run_command(
             "62-view capture",
             [
@@ -749,6 +710,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         )
 
         stage = "reconstruction"
+        write_json(case / "pipeline_status.json", {"status": "running", "stage": stage, "pid": os.getpid(), "capture_images": capture["images"]})
         point_cloud = case / ("dense_cloud.ply" if args.gpu else "sparse_cloud.ply")
         reconstruction_command: list[str | Path] = [
             sys.executable,
@@ -791,18 +753,19 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         )
 
         stage = "fitting"
+        write_json(case / "pipeline_status.json", {"status": "running", "stage": stage, "pid": os.getpid()})
+        fit_command = [fit_executable, "fit", point_cloud, case / "fitting_report.json", case / "reconstructed.step"]
+        if expected_snapshot:
+            fit_command.extend([model_snapshot, expected_snapshot])
         fitting_result = run_command(
             "point-cloud preprocessing and fitting",
-            [fit_executable, point_cloud],
+            fit_command,
             case / "fitting.log",
             pipeline_log,
             args.progress_seconds,
         )
-        fitting = parse_fitting_output(
-            fitting_result.output,
-            fitting_result.elapsed_seconds,
-            point_cloud,
-        )
+        fitting = read_json(case / "fitting_report.json")
+        fitting["process_elapsed_seconds"] = fitting_result.elapsed_seconds
         write_json(case / "fitting_report.json", fitting)
 
         stage = "reporting"
@@ -834,6 +797,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             },
         }
         write_json(case / "validation_report.json", report)
+        write_json(case / "pipeline_status.json", {"status": "completed", "stage": "reporting", "cad_status": fitting["status"], "cad_passed": fitting["complete_cad_fit"]})
         write_readme(case, capture, reconstruction, fitting, model_snapshot, texture_snapshot)
         report["case_bytes"] = directory_size(case)
         write_json(case / "validation_report.json", report)
@@ -851,6 +815,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             "error": str(error),
         }
         write_json(case / "pipeline_failure.json", failure)
+        write_json(case / "pipeline_status.json", failure)
         pipeline_log.write(f"pipeline failed during {stage}: {error}")
         if isinstance(error, PipelineError):
             raise

@@ -25,6 +25,7 @@ add_library(GeometricReconstruction
     src/AxisAlignedBoxRecognizer.cpp
     src/BoxRecognizer.cpp
     src/CgalEfficientRansacDetector.cpp
+    src/CompoundRecognizer.cpp
     src/ModelingAdapter.cpp
     src/PointCloudPreprocessor.cpp
     src/PointStore.cpp
