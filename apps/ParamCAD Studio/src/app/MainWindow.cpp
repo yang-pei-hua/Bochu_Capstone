@@ -98,7 +98,7 @@ void MainWindow::createWorkspaceControllers()
     m_propertyPanel->reconstructPanel()->setCaptureBaseDirectory(capture->baseDirectory());
     m_pointCloudWorkspace = new PointCloudWorkspaceController(modeling, reconstruction,
         {m_viewer, m_modelingPanel, m_relationsPanel, m_structureTabs, m_scenePanel,
-         m_propertyPanel, m_reconstructCadAction, m_reconstructToolAction}, this, this);
+         m_propertyPanel, m_reconstructCadAction, m_cancelCadAction, m_reconstructToolAction}, this, this);
     m_modelViewController = new ModelViewController(capture,
         {m_viewer, m_propertyPanel, m_scenePanel}, this, this);
 
@@ -144,6 +144,9 @@ void MainWindow::createActions()
     m_reconstructCadAction->setToolTip(
         tr("Recognize a box in the loaded point cloud and add it to the model"));
     m_reconstructCadAction->setEnabled(false);
+    m_cancelCadAction = new QAction(tr("Cancel CAD Reconstruction"), this);
+    m_cancelCadAction->setObjectName(QStringLiteral("cancelCadReconstructionAction"));
+    m_cancelCadAction->setEnabled(false);
     // Texturing is a presentation step rather than a modeling one, so it sits
     // next to the loading actions and appears as soon as a body exists.
     m_textureAction = new QAction(tr("Apply Texture..."), this);
@@ -196,6 +199,7 @@ void MainWindow::createMenus()
     fileMenu->addAction(m_openAction);
     fileMenu->addAction(m_openPointCloudAction);
     fileMenu->addAction(m_reconstructCadAction);
+    fileMenu->addAction(m_cancelCadAction);
     fileMenu->addAction(m_textureAction);
     fileMenu->addAction(m_closeAction);
     fileMenu->addSeparator();
@@ -346,9 +350,13 @@ void MainWindow::connectUi()
     connect(m_openAction, &QAction::triggered, m_modelViewController, &ModelViewController::openModel);
     connect(m_openPointCloudAction, &QAction::triggered, m_pointCloudWorkspace, &PointCloudWorkspaceController::openPointCloud);
     connect(m_reconstructCadAction, &QAction::triggered, m_pointCloudWorkspace, &PointCloudWorkspaceController::reconstructCad);
+    connect(m_cancelCadAction, &QAction::triggered,
+            m_pointCloudWorkspace, &PointCloudWorkspaceController::cancelCadReconstruction);
     connect(m_textureAction, &QAction::triggered, m_modelViewController, &ModelViewController::chooseTexture);
     connect(m_captureAction, &QAction::triggered, m_captureWorkspace, &CaptureWorkspaceController::captureImage);
     connect(m_closeAction, &QAction::triggered, m_modelViewController, &ModelViewController::closeModel);
+    connect(m_closeAction, &QAction::triggered,
+            m_pointCloudWorkspace, &PointCloudWorkspaceController::cancelCadReconstruction);
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::saveProject);
     connect(m_exitAction, &QAction::triggered, qApp, &QApplication::closeAllWindows);
 

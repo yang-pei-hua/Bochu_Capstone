@@ -136,6 +136,11 @@ PointCloudRelationsPanel::PointCloudRelationsPanel(QWidget* parent) : QWidget(pa
     m_detect = new QPushButton(tr("识别未归属点"), this); m_detect->setObjectName("detectCloudSurfacesButton");
     m_infer = new QPushButton(tr("更新关系"), this); m_infer->setObjectName("inferCloudRelationsButton");
     analysisButtons->addWidget(m_detect); analysisButtons->addWidget(m_infer); layout->addLayout(analysisButtons);
+    m_cancelCad = new QPushButton(tr("取消 CAD 重建"), this);
+    m_cancelCad->setObjectName("cancelCadReconstructionButton");
+    m_cancelCad->hide();
+    layout->addWidget(m_cancelCad);
+    connect(m_cancelCad, &QPushButton::clicked, this, &PointCloudRelationsPanel::cancelCadRequested);
     auto* files = new QHBoxLayout;
     m_undo = new QPushButton(tr("撤销"), this); m_undo->setObjectName("undoCloudEditButton");
     auto* save = new QPushButton(tr("保存关系…"), this);
@@ -390,6 +395,11 @@ void PointCloudRelationsPanel::editRelation(bool create)
         emit setRelationRequested(id, first->currentData().toInt(), second->currentData().toInt(), type->currentData().toString());
 }
 void PointCloudRelationsPanel::setBusy(bool busy) { m_busy = busy; updateActions(); }
+void PointCloudRelationsPanel::setCadReconstructionBusy(bool busy, bool cancellable)
+{
+    m_cancelCad->setVisible(busy);
+    m_cancelCad->setEnabled(cancellable);
+}
 void PointCloudRelationsPanel::setStatus(const QString& text) { m_status->setText(text); }
 void PointCloudRelationsPanel::setDefaultTolerances(double diagonal)
 {

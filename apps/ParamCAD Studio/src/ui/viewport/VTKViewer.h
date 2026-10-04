@@ -50,6 +50,8 @@ public:
     void setBodyShape(const TopoDS_Shape& shape);
     void clearBody();
     bool hasBody() const noexcept;
+    // Imported/replaced bodies may change without a feature-history command.
+    quint64 bodyRevision() const noexcept { return m_bodyRevision; }
     void renderNow();
 
     // Mirrors the sketch that is currently open in the feature graph, on the
@@ -230,6 +232,7 @@ private:
     vtkSmartPointer<vtkRenderer> m_renderer;
     vtkSmartPointer<SketchInteractorStyle> m_interactorStyle;
     BodyActor m_bodyActor;
+    quint64 m_bodyRevision = 0;
     PointCloudActor m_pointCloudActor;
     PointCloudSelection m_pointSelection;
     vtkSmartPointer<vtkBoxWidget2> m_pointBox;

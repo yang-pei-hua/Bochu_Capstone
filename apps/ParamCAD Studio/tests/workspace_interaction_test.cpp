@@ -1,5 +1,7 @@
 #include "app/MainWindow.h"
+#include "app/CadReconstructionTask.h"
 #include "app/CaptureController.h"
+#include "app/PointCloudWorkspaceController.h"
 #include "app/ModelingController.h"
 #include "app/ReconstructionController.h"
 #include "ui/panels/CapturePanel.h"
@@ -14,18 +16,25 @@
 #include <STEPControl_Writer.hxx>
 
 #include <QAction>
+#include <QAbstractButton>
 #include <QApplication>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLabel>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSurfaceFormat>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QTimer>
 #include <QTreeWidget>
 
@@ -70,6 +79,147 @@ bool sameVector(const double first[3], const double second[3])
         if (std::abs(first[i] - second[i]) > 1.0e-6) return false;
     }
     return true;
+}
+
+void waitForCad(MainWindow& window, bool includeAnalysis = false)
+{
+    auto* task = window.findChild<CadReconstructionTask*>();
+    auto* reconstruct = action(window, "Reconstruct CAD");
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while ((task->isRunning() || (includeAnalysis && !reconstruct->isEnabled()))
+           && elapsed.elapsed() < 30000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QThread::msleep(1);
+    }
+    require(!task->isRunning() && (!includeAnalysis || reconstruct->isEnabled()), "CAD/analysis completed within deadline");
+}
+
+void testCadReconstruction(MainWindow& window, const QString& cloudPath)
+{
+    auto* viewer = window.findChild<VTKViewer*>();
+    auto* model = window.findChild<ModelingController*>();
+    auto* workspace = window.findChild<PointCloudWorkspaceController*>();
+    auto* task = window.findChild<CadReconstructionTask*>();
+    auto* reconstruct = action(window, "Reconstruct CAD");
+    auto* cancel = action(window, "Cancel CAD Reconstruction");
+    auto* cancelButton = window.findChild<QPushButton*>("cancelCadReconstructionButton");
+    auto* status = window.findChild<QLabel*>("pointCloudRelationStatus");
+    QString error;
+    require(viewer->loadPointCloud(cloudPath, error), "load metric CAD fixture");
+    const auto initialRevision = model->revision();
+    int starts = 0;
+    bool commitsOnOwner = true;
+    const auto started = QObject::connect(task, &CadReconstructionTask::runningChanged, &window,
+        [&](bool running) { starts += running; });
+    const auto rebuilt = QObject::connect(model, &ModelingController::modelRebuilt, &window,
+        [&] { commitsOnOwner &= QThread::currentThread() == window.thread(); });
+    reconstruct->trigger();
+    require(task->isRunning() && !reconstruct->isEnabled() && cancel->isEnabled()
+            && !cancelButton->isHidden(), "running reconstruction exposes cancel and prevents duplicate commands");
+    workspace->reconstructCad();
+    require(starts == 1, "direct duplicate intent does not launch another worker");
+    waitForCad(window, true);
+    require(model->revision() > initialRevision && viewer->hasBody() && commitsOnOwner,
+            "background candidate commits to model on GUI thread");
+    require(!cancel->isEnabled() && cancelButton->isHidden(), "completion restores controls");
+
+    const auto completedRevision = model->revision();
+    reconstruct->trigger();
+    cancelButton->click();
+    waitForCad(window);
+    require(model->revision() == completedRevision && status->text().contains("已取消"),
+            "cancel button discards pending reconstruction without modifying model");
+
+    reconstruct->trigger();
+    modeling::FeatureId sketchId = modeling::kInvalidFeatureId;
+    require(model->addSketch({}, sketchId), "edit model while CAD worker owns snapshot");
+    const auto editedRevision = model->revision();
+    waitForCad(window);
+    require(model->revision() == editedRevision && status->text().contains("未应用"),
+            "model revision prevents old candidate from overwriting new commands");
+
+    reconstruct->trigger();
+    viewer->selectPointCloudPoint(0);
+    viewer->deleteSelectedPointCloudPoints();
+    waitForCad(window);
+    require(model->revision() == editedRevision && viewer->pointCloudPointCount() == 599
+            && status->text().contains("未应用"), "point deletion invalidates candidate and preserves working cloud");
+
+    require(viewer->loadPointCloud(cloudPath, error), "restore metric cloud");
+    reconstruct->trigger();
+    require(viewer->loadPointCloud(cloudPath, error), "replace cloud with identical file while worker is pending");
+    waitForCad(window);
+    require(model->revision() == editedRevision && status->text().contains("未应用"),
+            "cloud revision invalidates same-file replacement");
+
+    reconstruct->trigger();
+    window.findChild<ReconstructionController*>()->finished(cloudPath, 600, "fixed", false);
+    waitForCad(window, true);
+    require(model->revision() == editedRevision && viewer->pointCloudSelection().regions().size() == 6,
+            "new photo reconstruction defers automatic analysis until the old CAD job drains");
+
+    reconstruct->trigger();
+    viewer->setBodyShape(BRepPrimAPI_MakeBox(2, 3, 4).Shape());
+    const auto importedRevision = viewer->bodyRevision();
+    waitForCad(window);
+    require(model->revision() == editedRevision && viewer->bodyRevision() == importedRevision
+            && status->text().contains("未应用"), "imported display model is protected independently of feature history");
+
+    reconstruct->trigger();
+    action(window, "Close Model")->trigger();
+    waitForCad(window);
+    require(model->revision() == editedRevision && status->text().contains("已取消"),
+            "closing model cancels pending CAD replacement");
+
+    reconstruct->trigger();
+    viewer->clearPointCloud();
+    waitForCad(window);
+    require(!reconstruct->isEnabled() && !cancel->isEnabled() && model->revision() == editedRevision,
+            "clearing cloud prevents model commit and leaves reconstruction disabled");
+
+    // Confirming unknown scale uses a nested event loop. A document replacement
+    // inside that dialog must not pair old observations with the new revision.
+    require(viewer->loadPointCloud(cloudPath, error), "load scale-dialog fixture");
+    QFile metadata(QFileInfo(cloudPath).dir().filePath(QFileInfo(cloudPath).completeBaseName() + ".json"));
+    require(metadata.open(QIODevice::WriteOnly | QIODevice::Truncate), "remove metric scale for modal test");
+    metadata.write("{\"unit\":\"arbitrary\"}"); metadata.close();
+    bool declined = false;
+    QTimer::singleShot(0, &window, [&] {
+        auto* box = window.findChild<QMessageBox*>();
+        if (!box) return;
+        box->setAttribute(Qt::WA_DontShowOnScreen);
+        declined = true;
+        box->button(QMessageBox::No)->click();
+    });
+    reconstruct->trigger();
+    require(declined && !task->isRunning() && reconstruct->isEnabled() && model->revision() == editedRevision,
+            "declining unknown scale starts no work and restores controls");
+    bool confirmed = false;
+    bool replaced = false;
+    QTimer::singleShot(0, &window, [&] {
+        auto* box = window.findChild<QMessageBox*>();
+        if (!box) return;
+        box->setAttribute(Qt::WA_DontShowOnScreen);
+        replaced = viewer->loadPointCloud(cloudPath, error);
+        workspace->reconstructCad();
+        confirmed = true;
+        box->button(QMessageBox::Yes)->click();
+    });
+    reconstruct->trigger();
+    require(confirmed && replaced && !task->isRunning() && reconstruct->isEnabled()
+            && status->text().contains("请重新启动"), "nested scale dialog cannot launch stale or duplicate snapshot");
+    require(metadata.open(QIODevice::WriteOnly | QIODevice::Truncate), "restore metric metadata");
+    metadata.write("{\"unit\":\"mm\"}"); metadata.close();
+    QObject::disconnect(started);
+    QObject::disconnect(rebuilt);
+
+    auto closing = std::make_unique<MainWindow>();
+    require(closing->findChild<VTKViewer*>()->loadPointCloud(cloudPath, error), "load CAD shutdown fixture");
+    action(*closing, "Reconstruct CAD")->trigger();
+    require(closing->findChild<CadReconstructionTask*>()->isRunning(), "worker running when window is destroyed");
+    closing.reset();
+    QCoreApplication::processEvents();
 }
 }
 
@@ -206,8 +356,29 @@ int main(int argc, char** argv)
         cloud.close();
         auto* reconstruction = window.findChild<ReconstructionController*>();
         reconstruction->finished(cloudPath, 100, "estimated", false);
-        require(viewer->hasPointCloud() && action(window, "Reconstruct CAD")->isEnabled()
+        require(viewer->hasPointCloud()
                 && console->toPlainText().contains("Point Cloud loaded: 100 points"), "reconstruction completion loads cloud and preserves automation log");
+        waitForCad(window, true);
+
+        const QString cadCloudPath = temp.filePath("cad-box.ply");
+        QFile cadCloud(cadCloudPath);
+        require(cadCloud.open(QIODevice::WriteOnly), "create closed CAD cloud");
+        cadCloud.write("ply\nformat ascii 1.0\nelement vertex 600\nproperty float x\nproperty float y\nproperty float z\n"
+                       "property float nx\nproperty float ny\nproperty float nz\nend_header\n");
+        for (int axis = 0; axis < 3; ++axis) for (float sign : {-1.0F, 1.0F})
+            for (int i = 0; i < 10; ++i) for (int j = 0; j < 10; ++j) {
+                float p[3]{}, n[3]{};
+                p[axis] = 3 * sign; n[axis] = sign;
+                p[(axis + 1) % 3] = -3 + (i + 0.5F) * 0.6F;
+                p[(axis + 2) % 3] = -3 + (j + 0.5F) * 0.6F;
+                cadCloud.write(QStringLiteral("%1 %2 %3 %4 %5 %6\n")
+                    .arg(p[0]).arg(p[1]).arg(p[2]).arg(n[0]).arg(n[1]).arg(n[2]).toUtf8());
+            }
+        cadCloud.close();
+        QFile units(temp.filePath("cad-box.json"));
+        require(units.open(QIODevice::WriteOnly), "create metric unit sidecar");
+        units.write("{\"unit\":\"mm\"}"); units.close();
+        testCadReconstruction(window, cadCloudPath);
 
         // Start analysis and destroy the window immediately, before queued results
         // are delivered. This verifies the workspace's worker/view lifetime boundary.

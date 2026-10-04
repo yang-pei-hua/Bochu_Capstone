@@ -97,5 +97,6 @@ private:
     QAction* m_captureToolAction = nullptr;
     QAction* m_reconstructToolAction = nullptr;
     QAction* m_reconstructCadAction = nullptr;
+    QAction* m_cancelCadAction = nullptr;
 
 };

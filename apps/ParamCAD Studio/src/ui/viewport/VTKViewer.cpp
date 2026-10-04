@@ -155,12 +155,14 @@ CameraParameters VTKViewer::cameraParameters() const
 void VTKViewer::setBodyShape(const TopoDS_Shape& shape)
 {
     m_bodyActor.setShape(shape);
+    ++m_bodyRevision;
     m_renderer->ResetCameraClippingRange();
 }
 
 void VTKViewer::clearBody()
 {
     m_bodyActor.clear();
+    ++m_bodyRevision;
     m_renderer->ResetCameraClippingRange();
 }
 

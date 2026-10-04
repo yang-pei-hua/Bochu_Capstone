@@ -218,6 +218,11 @@ const QString& ModelingController::lastError() const noexcept
     return m_lastError;
 }
 
+modeling::ModelRevision ModelingController::revision() const noexcept
+{
+    return m_core->revision();
+}
+
 bool ModelingController::addFeatureCommand(const modeling::FeatureParams& params,
                                            modeling::FeatureId& createdId)
 {

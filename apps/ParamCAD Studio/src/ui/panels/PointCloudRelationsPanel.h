@@ -19,6 +19,7 @@ public:
     void setDocument(const PointCloudSelection& document, bool available);
     void updateSelection();
     void setBusy(bool busy);
+    void setCadReconstructionBusy(bool busy, bool cancellable);
     void setStatus(const QString& text);
     void setDefaultTolerances(double diagonal);
     double surfaceTolerance() const;
@@ -27,6 +28,7 @@ public:
 
 signals:
     void detectRequested();
+    void cancelCadRequested();
     void inferRequested();
     void refitRequested(int id);
     void regionSelected(int id);
@@ -66,6 +68,7 @@ private:
     QDoubleSpinBox* m_relationTolerance;
     QDoubleSpinBox* m_angleTolerance;
     QPushButton* m_detect;
+    QPushButton* m_cancelCad;
     QPushButton* m_infer;
     QPushButton* m_refit;
     QPushButton* m_editRegion;

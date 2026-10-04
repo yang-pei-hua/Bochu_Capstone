@@ -1,4 +1,5 @@
 #include "app/PointCloudWorkspaceController.h"
+#include "app/CadReconstructionTask.h"
 #include "app/ModelingController.h"
 #include "app/ProjectPaths.h"
 #include "app/ReconstructionController.h"
@@ -12,9 +13,6 @@
 #include "ui/panels/ScenePanel.h"
 #include "ui/viewport/VTKViewer.h"
 
-#include <reconstruction/BoxRecognizer.h>
-#include <reconstruction/ThroughHoleRecognizer.h>
-
 #include <QAction>
 #include <QDir>
 #include <QFileDialog>
@@ -23,6 +21,7 @@
 #include <QJsonObject>
 #include <QMessageBox>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QTabWidget>
 #include <QThread>
 #include <algorithm>
@@ -31,18 +30,44 @@
 #include <string>
 #include <type_traits>
 #include <variant>
+#include <utility>
 
 PointCloudWorkspaceController::PointCloudWorkspaceController(
     ModelingController* modelingController, ReconstructionController* reconstructionController,
     const PointCloudWorkspaceUi& ui, QWidget* dialogParent, QObject* parent)
     : WorkspaceController(dialogParent, parent), m_modelingController(modelingController),
-      m_reconstructionController(reconstructionController), m_ui(ui)
+      m_reconstructionController(reconstructionController), m_ui(ui),
+      m_cadTask(new CadReconstructionTask(this))
 {
+    connect(m_cadTask, &CadReconstructionTask::runningChanged, this, [this](bool running) {
+        updateCadActions();
+        if (!running && std::exchange(m_analyseAfterCad, false)) startPointCloudAnalysis();
+    });
+    connect(m_cadTask, &CadReconstructionTask::stageChanged, this,
+        [this](CadReconstructionTask::Stage stage) {
+            QString message;
+            switch (stage) {
+            case CadReconstructionTask::Stage::Preprocessing:
+                message = workspaceTr("正在后台预处理点云…"); break;
+            case CadReconstructionTask::Stage::Recognizing:
+                message = workspaceTr("正在后台识别 CAD 实体…"); break;
+            case CadReconstructionTask::Stage::Cancelling:
+                message = workspaceTr("已请求取消 CAD 重建，等待当前计算步骤结束…"); break;
+            }
+            m_ui.relationsPanel->setStatus(message);
+            m_ui.modelingPanel->setStatusText(message);
+            emit statusMessage(message, 0);
+            updateCadActions();
+        });
+    connect(m_cadTask, &CadReconstructionTask::finished,
+            this, &PointCloudWorkspaceController::onCadReconstructionFinished);
 }
 
 PointCloudWorkspaceController::~PointCloudWorkspaceController()
 {
-    // Join before the window destroys the views used by completion callbacks.
+    // Join both workers before the window destroys borrowed views.
+    disconnect(m_cadTask, nullptr, this, nullptr);
+    delete m_cadTask;
     if (m_analysisThread) {
         disconnect(m_analysisThread, nullptr, this, nullptr);
         m_analysisThread->requestInterruption();
@@ -113,7 +138,7 @@ void PointCloudWorkspaceController::connectUi()
     refreshCloudPanel();
     const auto refreshRelationships = [this] {
         m_ui.relationsPanel->setDocument(m_ui.viewer->pointCloudSelection(), m_ui.viewer->hasPointCloud());
-        m_ui.reconstructCadAction->setEnabled(m_ui.viewer->hasPointCloud() && m_ui.viewer->pointCloudPointCount() > 0);
+        updateCadActions();
         if (m_ui.viewer->hasPointCloud()) m_ui.scenePanel->updateNodeLabel(SceneNodeType::PointCloud,
             workspaceTr("%1 (%2 有效点)").arg(QFileInfo(m_ui.viewer->pointCloudSourcePath()).fileName()).arg(m_ui.viewer->pointCloudPointCount()));
     };
@@ -143,6 +168,8 @@ void PointCloudWorkspaceController::connectUi()
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::removeRelationRequested, m_ui.viewer, &VTKViewer::removePointCloudRelation);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::undoRequested, m_ui.viewer, &VTKViewer::undoPointCloudEdit);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::detectRequested, this, [this] { startPointCloudAnalysis(); });
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::cancelCadRequested,
+            m_ui.cancelCadAction, &QAction::trigger);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::refitRequested, this, &PointCloudWorkspaceController::startPointCloudAnalysis);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::inferRequested, this, [this] {
         m_ui.viewer->inferPointCloudRelations(m_ui.relationsPanel->relationTolerance(), m_ui.relationsPanel->angleTolerance());
@@ -241,7 +268,7 @@ void PointCloudWorkspaceController::onReconstructionFinished(const QString& poin
 
     // The freshly built cloud is now what the recognized-model entry works on.
     m_pointCloudPath = pointCloudPath;
-    m_ui.reconstructCadAction->setEnabled(true);
+    updateCadActions();
     m_ui.viewer->resetCameraToPointCloud();
     emit sceneFramed();
     m_ui.scenePanel->updateNodeLabel(
@@ -259,7 +286,8 @@ void PointCloudWorkspaceController::onReconstructionFinished(const QString& poin
                       "scale is arbitrary until a reconstruction with capture "
                       "metadata is available."));
     }
-    startPointCloudAnalysis();
+    if (m_cadTask->isRunning() || m_startingCad) m_analyseAfterCad = true;
+    else startPointCloudAnalysis();
 }
 
 void PointCloudWorkspaceController::openPointCloud()
@@ -284,7 +312,7 @@ void PointCloudWorkspaceController::openPointCloud()
     // A cloud is now in the viewport, so the recognized-model entry becomes
     // usable and works on this file.
     m_pointCloudPath = filePath;
-    m_ui.reconstructCadAction->setEnabled(true);
+    updateCadActions();
     m_ui.viewer->resetCameraToPointCloud();
     emit sceneFramed();
     m_ui.scenePanel->updateNodeLabel(
@@ -299,20 +327,33 @@ void PointCloudWorkspaceController::openPointCloud()
 
 void PointCloudWorkspaceController::reconstructCad()
 {
+    if (m_cadTask->isRunning() || m_startingCad || m_analysisThread) return;
     if (m_pointCloudPath.isEmpty()) {
         emit logWarning(workspaceTr("Load a point cloud before reconstructing a model."));
         emit statusMessage(workspaceTr("No point cloud is loaded"), 3500);
         return;
     }
 
-    const PlyCloud cloud = m_ui.viewer->workingPointCloud();
+    m_startingCad = true;
+    const auto resetStarting = qScopeGuard([this] {
+        m_startingCad = false;
+        updateCadActions();
+        if (!m_cadTask->isRunning() && std::exchange(m_analyseAfterCad, false))
+            startPointCloudAnalysis();
+    });
+    updateCadActions();
+    m_cadCloudRevision = m_ui.viewer->pointCloudSelection().revision();
+    m_cadModelRevision = m_modelingController->revision();
+    m_cadBodyRevision = m_ui.viewer->bodyRevision();
+    m_cadSourcePath = m_pointCloudPath;
+    PlyCloud cloud = m_ui.viewer->workingPointCloud();
     if (cloud.positions.empty()) {
         m_ui.relationsPanel->setStatus(workspaceTr("当前工作点云为空，无法重建 CAD。"));
         return;
     }
 
     reconstruction::LengthUnit sourceUnit =
-        PointCloudAdapter::lengthUnitFor(m_pointCloudPath);
+        PointCloudAdapter::lengthUnitFor(m_cadSourcePath);
     if (sourceUnit == reconstruction::LengthUnit::Arbitrary) {
         const QMessageBox::StandardButton choice = QMessageBox::warning(m_dialogParent,
             workspaceTr("Unknown point-cloud scale"),
@@ -329,50 +370,84 @@ void PointCloudWorkspaceController::reconstructCad()
         sourceUnit = reconstruction::LengthUnit::Millimeter;
     }
 
-    const reconstruction::PointStore sourcePoints =
-        PointCloudAdapter::toPointStore(cloud, sourceUnit);
-    reconstruction::PointStore points({}, sourceUnit);
-    reconstruction::PointCloudPreprocessingReport preprocessingReport;
-    std::string preprocessingFailure;
-    if (!reconstruction::preprocessPointCloud(
-            sourcePoints,
-            PointCloudAdapter::preprocessingOptionsFor(cloud),
-            points,
-            preprocessingReport,
-            preprocessingFailure)) {
-        const QString message = workspaceTr("Point-cloud preprocessing failed: %1")
-                                    .arg(QString::fromStdString(preprocessingFailure));
-        emit logError(message);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Reconstruct CAD"), message);
+    // A scale confirmation runs a nested event loop; verify the snapshot again
+    // before launching in case an import/edit occurred while it was open.
+    if (m_ui.viewer->pointCloudSelection().revision() != m_cadCloudRevision
+        || m_modelingController->revision() != m_cadModelRevision
+        || m_ui.viewer->bodyRevision() != m_cadBodyRevision) {
+        m_ui.relationsPanel->setStatus(workspaceTr("点云或模型已修改，请重新启动 CAD 重建。"));
         return;
     }
-    emit logInfo(workspaceTr("Point-cloud preprocessing: %1 → %2 points, removed %3 voxel "
-               "duplicates and %4 outliers, estimated %5 normals")
+    m_analyseAfterCad = false;
+    m_cadTask->start(std::move(cloud), sourceUnit);
+}
+
+void PointCloudWorkspaceController::cancelCadReconstruction()
+{
+    m_cadTask->cancel();
+}
+
+void PointCloudWorkspaceController::updateCadActions()
+{
+    const bool running = m_cadTask->isRunning();
+    const bool busy = running || m_startingCad || m_analysisThread;
+    m_ui.reconstructCadAction->setEnabled(!busy && m_ui.viewer->hasPointCloud()
+                                         && m_ui.viewer->pointCloudPointCount() > 0);
+    m_ui.cancelCadAction->setEnabled(running && !m_cadTask->isCancellationRequested());
+    m_ui.relationsPanel->setBusy(busy);
+    m_ui.relationsPanel->setCadReconstructionBusy(running, m_ui.cancelCadAction->isEnabled());
+}
+
+void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconstructionResult& result)
+{
+    const auto reportStatus = [this](const QString& message) {
+        m_ui.relationsPanel->setStatus(message);
+        m_ui.modelingPanel->setStatusText(message);
+        emit statusMessage(message, 5000);
+    };
+    if (m_ui.viewer->pointCloudSelection().revision() != m_cadCloudRevision
+        || m_modelingController->revision() != m_cadModelRevision
+        || m_ui.viewer->bodyRevision() != m_cadBodyRevision) {
+        const QString message = workspaceTr("点云或模型已修改，本轮 CAD 重建结果未应用；可重新重建。");
+        reportStatus(message);
+        emit logWarning(message);
+        return;
+    }
+    if (result.outcome == CadReconstructionResult::Outcome::Cancelled) {
+        reportStatus(workspaceTr("CAD 重建已取消，模型保持原状。"));
+        emit logInfo(workspaceTr("CAD reconstruction cancelled"));
+        return;
+    }
+    if (result.preprocessingComplete) {
+        const auto& preprocessingReport = result.preprocessing;
+        emit logInfo(workspaceTr("Point-cloud preprocessing: %1 → %2 points, removed %3 voxel "
+                   "duplicates and %4 outliers, estimated %5 normals")
                 .arg(preprocessingReport.inputPointCount)
                 .arg(preprocessingReport.outputPointCount)
                 .arg(preprocessingReport.removedByVoxel)
                 .arg(preprocessingReport.removedAsOutliers)
                 .arg(preprocessingReport.normalsEstimated));
-
-    reconstruction::CompoundCandidate candidate;
-    std::string failure;
-    if (!reconstruction::reconstructParametricSolid(
-            points,
-            PointCloudAdapter::planeOptionsFor(points),
-            PointCloudAdapter::cylinderOptionsFor(points),
-            candidate,
-            failure)) {
+    }
+    if (result.outcome == CadReconstructionResult::Outcome::Unsupported) {
         const QString message = workspaceTr("No supported solid could be reconstructed in %1: %2")
-                                    .arg(QFileInfo(m_pointCloudPath).fileName(),
-                                         QString::fromStdString(failure));
+                                    .arg(QFileInfo(m_cadSourcePath).fileName(), result.error);
+        reportStatus(message);
         emit logWarning(message);
-        m_ui.modelingPanel->setStatusText(message);
-        emit statusMessage(message, 5000);
         return;
     }
-
+    if (result.outcome != CadReconstructionResult::Outcome::Success) {
+        const QString message = result.outcome == CadReconstructionResult::Outcome::PreprocessingFailed
+            ? workspaceTr("Point-cloud preprocessing failed: %1").arg(result.error)
+            : workspaceTr("CAD reconstruction failed: %1").arg(result.error);
+        reportStatus(message);
+        emit logError(message);
+        QMessageBox::warning(m_dialogParent, workspaceTr("Reconstruct CAD"), message);
+        return;
+    }
+    const auto& candidate = result.candidate;
     if (!m_modelingController->commitReconstructedCompound(candidate)) {
         const QString message = m_modelingController->lastError();
+        reportStatus(message);
         emit logError(message);
         QMessageBox::warning(m_dialogParent, workspaceTr("Reconstruct CAD"), message);
         return;
@@ -402,12 +477,13 @@ void PointCloudWorkspaceController::reconstructCad()
                                .arg(m_ui.viewer->cameraParameters().parallelProjection
                                          ? workspaceTr("Orthographic") : workspaceTr("Perspective")) :
                           workspaceTr("Ready | Model: %1 | Camera: %2").arg(curvedName).arg(m_ui.viewer->cameraParameters().parallelProjection ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
-    if (m_ui.viewer->pointCloudSelection().regionPointCount(0) >= 20) startPointCloudAnalysis();
+    reportStatus(workspaceTr("CAD 重建完成，已更新参数化模型。"));
+    m_analyseAfterCad = m_ui.viewer->pointCloudSelection().regionPointCount(0) >= 20;
 }
 
 void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId)
 {
-    if (m_analysisThread || !m_ui.viewer->hasPointCloud()) return;
+    if (m_analysisThread || m_startingCad || m_cadTask->isRunning() || !m_ui.viewer->hasPointCloud()) return;
     std::vector<vtkIdType> ids;
     const auto cloud = m_ui.viewer->workingPointCloud(&ids, regionId == 0, regionId == 0 ? -1 : regionId);
     const auto* region = m_ui.viewer->pointCloudSelection().region(regionId);
@@ -417,7 +493,6 @@ void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId)
     const quint64 revision = m_ui.viewer->pointCloudSelection().revision();
     const double tolerance = m_ui.relationsPanel->surfaceTolerance();
     auto result = std::make_shared<PointCloudAnalysisResult>();
-    m_ui.relationsPanel->setBusy(true);
     m_ui.relationsPanel->setStatus(regionId ? workspaceTr("正在后台重拟合集合…") : workspaceTr("正在后台识别表面，并映射回原始点…"));
     m_analysisThread = QThread::create([cloud, ids, geometry, tolerance, result] {
         try { *result = analysePointCloud(cloud, ids, tolerance, geometry); }
@@ -425,9 +500,10 @@ void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId)
     });
     auto* thread = m_analysisThread;
     thread->setParent(this);
+    updateCadActions();
     connect(thread, &QThread::finished, this, [this, result, revision, regionId, count = cloud.positions.size()] {
         m_analysisThread = nullptr;
-        m_ui.relationsPanel->setBusy(false);
+        updateCadActions();
         if (m_ui.viewer->pointCloudSelection().revision() != revision) {
             m_ui.relationsPanel->setStatus(workspaceTr("工作点云或关系已被修改，本轮识别结果未应用；可重新识别。")); return;
         }

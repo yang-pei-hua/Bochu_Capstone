@@ -70,6 +70,7 @@ public:
 
     const TopoDS_Shape& bodyShape() const;
     const std::vector<modeling::Feature>& features() const;
+    modeling::ModelRevision revision() const noexcept;
     const QString& lastError() const noexcept;
 
 signals:

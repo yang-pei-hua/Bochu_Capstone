@@ -100,7 +100,7 @@ and feature-specific signal connections live in the following controllers:
 | Controller | Responsibility |
 | --- | --- |
 | `SketchWorkspaceController` | Plane selection, sketch session/drafts, entity edits, extrude/cut, feature deletion, rebuild feedback and camera restoration |
-| `PointCloudWorkspaceController` | Cloud loading, selection/annotations/relationships, asynchronous fitting, photo reconstruction UI and CAD reconstruction |
+| `PointCloudWorkspaceController` | Cloud loading, selection/annotations/relationships, asynchronous fitting, photo reconstruction UI and guarded CAD candidate commits |
 | `CaptureWorkspaceController` | Screenshot/photo/orbit intents, capture output settings, shot list, batch feedback and capture distance synchronization |
 | `ModelViewController` | Imported B-Rep lifetime, STEP import, model visibility, texture controls and performance capture entry |
 
@@ -122,10 +122,35 @@ for its analysis worker before destruction. Worker results still require the
 same document revision before they can be applied. `CapturePlan.h` provides the
 shared 62-view plan for interactive and validation captures.
 
+`CadReconstructionTask` owns a point-cloud snapshot and runs preprocessing and
+solid recognition on a worker thread. Its progress and results are delivered on
+the GUI thread; it never accesses widgets or the modeling document. The workspace
+checks cloud, modeling-core and displayed-body revisions before committing, so
+point edits, reloads, sketch changes and STEP imports invalidate pending results.
+Surface analysis and CAD recognition are serialized within a workspace.
+
+While CAD reconstruction runs, **File → Cancel CAD Reconstruction** and the
+relationship panel's **取消 CAD 重建** button cancel the task. Cancellation takes
+effect between calculation stages and before result delivery; it does not abort
+a geometry-library call midway. The model stays unchanged by cancelled or stale
+results, and window destruction joins the worker before destroying its views.
+
 With `CAD_CLIENT_BUILD_TESTS=ON`, `workspace_interaction_test` drives the actual
 window's sketch/extrude/cut, import/texture and capture connections, checks the
 validation output and exercises destruction while analysis is pending. The
 existing `point_cloud_interaction_test` covers cloud edits and stale results.
+`cad_reconstruction_task_test` covers worker results, dimensional accuracy,
+duplicate requests, cancellation (including queued completion), failure paths
+and destruction. Workspace interaction also covers cancellation and invalidation
+by cloud/model edits, STEP body replacement and edits during scale confirmation.
+When metric validation clouds are available, the task test also accepts PLY paths
+to replay them through the worker (from this directory):
+
+```powershell
+& "./build/msvc-debug/Release/cad_reconstruction_task_test.exe" `
+  "../../outputs/performance-validation-box-through-hole/dense_cloud.ply" `
+  "../../outputs/performance-validation-l-bracket-gusset/dense_cloud.ply"
+```
 
 ## Current scope
 

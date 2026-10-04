@@ -1,8 +1,11 @@
 #pragma once
 
 #include "app/WorkspaceController.h"
+#include <modeling/ModelPatch.h>
 
 class QAction;
+class CadReconstructionTask;
+struct CadReconstructionResult;
 class ModelingController;
 class ModelingPanel;
 class PointCloudRelationsPanel;
@@ -23,6 +26,7 @@ struct PointCloudWorkspaceUi
     ScenePanel* scenePanel;
     PropertyPanel* propertyPanel;
     QAction* reconstructCadAction;
+    QAction* cancelCadAction;
     QAction* reconstructToolAction;
 };
 
@@ -39,8 +43,11 @@ public:
     void connectUi();
     void openPointCloud();
     void reconstructCad();
+    void cancelCadReconstruction();
 
 private:
+    void updateCadActions();
+    void onCadReconstructionFinished(const CadReconstructionResult& result);
     void startPointCloudAnalysis(int regionId = 0);
     void startReconstruction(const ReconstructRequest& request);
     void onReconstructionFinished(const QString& pointCloudPath, int pointCount,
@@ -51,4 +58,11 @@ private:
     const PointCloudWorkspaceUi m_ui;
     QString m_pointCloudPath;
     QThread* m_analysisThread = nullptr;
+    CadReconstructionTask* m_cadTask;
+    bool m_startingCad = false;
+    bool m_analyseAfterCad = false;
+    quint64 m_cadCloudRevision = 0;
+    quint64 m_cadBodyRevision = 0;
+    modeling::ModelRevision m_cadModelRevision = 0;
+    QString m_cadSourcePath;
 };
