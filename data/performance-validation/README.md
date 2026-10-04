@@ -172,8 +172,10 @@ The fitter preserves outward input normals, uses a common orthogonal frame and
 observed empty cells, and minimizes the number of admissible covering boxes.
 `compound_recognition` reports box/prism counts, surface agreement, occupancy
 error, search nodes and whether minimum box count was proven for that grid.
-Curved-feature fitting still uses the specialized box/hole path, with a complete
-boundary agreement check. Partial scans or unrelated axis frames remain unsupported.
+The box/hole fallback retains its complete-boundary agreement check. Independent
+spheres, capped cylinders, cones/frusta and ring tori now have a separate complete
+curved-solid recognizer. Partial scans or independently oriented box components
+remain unsupported.
 
 Direct analytic point clouds provide inexpensive regression independent of
 capture and COLMAP:
@@ -198,3 +200,56 @@ Wilson upper bound instead of a negative or whole-body boolean result; acceptanc
 also requires this independent upper bound to meet the 5% threshold. The report
 explicitly states the method and raw boolean result. This does not widen the
 0.5 mm dimension tolerance or 5% volume tolerance.
+
+## Independent curved solids
+
+Four additional source fixtures are checked in alongside the original two:
+
+| Case | Dimensions (mm) |
+| --- | --- |
+| `sphere` | radius 15, diameter 30 |
+| `cylinder` | radius 12, height 30; both planar end caps |
+| `cone` | base radius 12, height 30; apex radius 0 |
+| `torus` | major radius 25, tube radius 6; outer diameter 62, inner diameter 38 |
+
+Each folder contains `case.json`, independent source `model.step`, a verified
+generation report and dimensions/placement documentation. The test suite also
+includes a frustum (base radius 12, top radius 5, height 30). Source construction
+and analytic surface sampling are independent of the reconstruction algorithm.
+
+```powershell
+python tools/generate_curved_test_clouds.py --standard-definitions
+python tools/generate_standard_models.py --cases sphere cylinder cone torus
+python tools/run_curved_fit_tests.py --output outputs/curved-fit-exact
+python tools/run_curved_fit_tests.py --noise 0.02 --output outputs/curved-fit-noisy
+python tools/run_curved_fit_tests.py --rotated --noise 0.02 --seed 0 --seed-sweep 5 --output outputs/curved-fit-rotated-seeds
+python tools/run_curved_fit_tests.py --rotated --noise 0.02 --incomplete --output outputs/curved-fit-incomplete-rotated
+python -m unittest discover -s tools/tests -p test_curved_fit.py -v
+```
+
+Reports explicitly include `curved_solids` (type, dimensions, position/axis,
+surface and boundary coverage), parameter errors and STEP validity/round trip.
+The runner writes a bounded diagnostic per case, stores full JSON under each
+output case, and never reads engine logs. Direct-cloud cases have replay manifests
+for the existing stability tool, e.g.:
+
+```powershell
+python tools/check_cad_validation_stability.py --case outputs/curved-fit-noisy/torus-seed-4500 --runs 5 --output outputs/curved-torus-repeat.json
+python tools/diagnose_performance_validation.py outputs/curved-fit-exact/sphere-seed-4500 --brief
+```
+
+Analytic-source validation uses 32,768 independent membership samples for curved
+primitives, plus 128 source-boundary samples measured against the **actual CAD
+faces**. This verifies construction as well as reported parameters. Raw OCCT
+boolean differences and classifier sampling are retained: nearly coincident
+curved solids, including rotated tori, can produce numerically inconsistent
+booleans/classification. Untrusted booleans use the independent sampling upper
+bound. Curved cases require parameter errors ≤ 0.1 mm, dimensions and source
+boundary distance ≤ 0.2 mm, and symmetric difference/independent upper bound ≤ 3%.
+
+All five shapes passed exact and 0.02 mm position-noise cases. Rotated noisy
+shapes passed seeds 0–4 (25/25). Hemispheres, missing-cap cylinders/cones and
+partial rings are rejected. Fixed-seed runs reproduce geometry for all five
+shapes. Modeling-core tests verify semantic feature types, dimension editing and
+atomic rollback. This validates the direct-cloud CAD path; no new photo/COLMAP
+run is claimed for these fixtures.

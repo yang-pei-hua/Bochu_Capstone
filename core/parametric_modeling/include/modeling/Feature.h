@@ -13,6 +13,10 @@ enum class FeatureType {
     Cut,
     BoxPrimitive,
     ThroughHolePrimitive,
+    SpherePrimitive,
+    CylinderPrimitive,
+    ConePrimitive,
+    TorusPrimitive,
 };
 
 inline FeatureType featureTypeOf(const FeatureParams& params) {
@@ -28,7 +32,11 @@ inline FeatureType featureTypeOf(const FeatureParams& params) {
     if (std::holds_alternative<BoxPrimitiveParams>(params)) {
         return FeatureType::BoxPrimitive;
     }
-    return FeatureType::ThroughHolePrimitive;
+    if (std::holds_alternative<ThroughHolePrimitiveParams>(params)) return FeatureType::ThroughHolePrimitive;
+    if (std::holds_alternative<SpherePrimitiveParams>(params)) return FeatureType::SpherePrimitive;
+    if (std::holds_alternative<CylinderPrimitiveParams>(params)) return FeatureType::CylinderPrimitive;
+    if (std::holds_alternative<ConePrimitiveParams>(params)) return FeatureType::ConePrimitive;
+    return FeatureType::TorusPrimitive;
 }
 
 struct Feature {

@@ -549,12 +549,26 @@ bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOp
     if (reconstructCompound(points, options, output, error))
         return true;
     const auto compoundError = error;
+    auto tryCurved = [&](std::string previous) {
+        CurvedSolidRecognitionOptions curvedOptions;
+        curvedOptions.distanceTolerance = planes.distanceThreshold;
+        curvedOptions.randomSeed = planes.randomSeed;
+        CurvedSolidCandidate curved;
+        output = {};
+        if (!reconstructCurvedSolid(points, curvedOptions, curved, error)) {
+            error = compoundError + "; box/hole: " + previous + "; curved solid: " + error;
+            return false;
+        }
+        output.curvedSolids.push_back(curved);
+        output.surfaceCoverage = curved.surfaceCoverage;
+        output.confidence = curved.surfaceCoverage;
+        error.clear();
+        return true;
+    };
     BoxWithThroughHolesCandidate legacy;
     if (!reconstructBoxWithThroughHoles(points, planes, cylinders, BoxRecognitionOptions{},
                                         ThroughHoleRecognitionOptions{}, legacy, error)) {
-        error = compoundError + "; curved-feature fallback: " + error;
-        output = {};
-        return false;
+        return tryCurved(error);
     }
     const auto &box = legacy.box.primitive;
     const auto x = math3::normalized(box.pose.xDirection),
@@ -584,10 +598,7 @@ bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOp
     // Curved fused scan normals have larger boundary uncertainty than planar
     // normals. Still require the whole-body hypothesis to explain most points.
     if (coverage < 0.80) {
-        error = compoundError + "; single-box fallback rejected: complete surface coverage=" +
-                std::to_string(coverage);
-        output = {};
-        return false;
+        return tryCurved("single-box boundary coverage=" + std::to_string(coverage));
     }
     output = {};
     output.boxes.push_back(legacy.box);

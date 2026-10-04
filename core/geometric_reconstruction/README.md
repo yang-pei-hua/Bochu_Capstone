@@ -58,6 +58,28 @@ both opposing exterior faces. Accepted evidence becomes a semantic
 short cylinders are deliberately left unclassified rather than mislabeled as
 through holes.
 
+`CurvedSolidRecognizer` completes independent spheres, capped cylinders, cones,
+conical frusta and non-self-intersecting ring tori. The shared entry point keeps
+the compound and box/hole paths, then tries curved completion. Each curved
+family is proposed independently, avoiding consumption of valid observations
+by a competing nearly degenerate cone/torus. Complete-solid scoring chooses
+the accepted family. Sphere centre/radius and cone/torus parameters undergo
+robust nonlinear least squares in stable source-PointId order.
+
+Cylinder and cone extents come from observed, outward-facing planar cap groups,
+not support extrema. A pointed cone also requires observations near its apex.
+Acceptance requires at least 90% outward-normal boundary agreement and 90%
+angular/cap-bin coverage. Sphere uses 12 azimuth × 6 equal-height bins; torus
+uses 24 major × 12 minor angular bins; capped bodies use 24 azimuth × 6 axial
+side bins and 8 azimuth × 2 radial bins on each nonzero-radius cap. These tests
+reject hemispheres, partial rings and missing end caps; they are a bounded
+coverage check rather than proof that every arbitrarily small gap was observed.
+
+Accepted solids retain typed Sphere/Cylinder/Cone/Torus feature parameters and
+can be edited through `EditFeatureCommand` in an atomic patch. They are new
+independent solids; curved boolean combinations, trimmed patches and automatic
+completion of occluded surfaces are outside this first implementation.
+
 `reconstructParametricSolid()` is now the shared Studio/validator entry point.
 It first reconstructs a common orthogonal frame from dominant normal families,
 refines it from planar position covariance, and builds a plane-boundary grid.
@@ -84,11 +106,12 @@ for each prism in one atomic patch, including correct IDs in nonempty documents.
 `AxisAlignedBoxRecognizer` and `reconstructBoxWithThroughHoles()` remain available
 as specialized lower-level APIs. None depends on Qt, VTK, PCL or client state.
 
-Supported inputs are closed, millimetre-scale surfaces with outward normals and
-a shared orthogonal frame, optionally with a few planar prism faces. Normal
+The compound path supports closed, millimetre-scale surfaces with outward normals
+and a shared orthogonal frame, optionally with a few planar prism faces. Complete
+independent curved primitives may have any axis direction. Normal
 orientation from the input is preserved during preprocessing. Missing-normal
 PCA estimates alone do not establish a consistent outward orientation. Partial
-visibility, arbitrary independent orientations, curved multi-body parts and
+visibility, independently oriented box components, curved multi-body parts and
 fine features below the sampling/tolerance resolution remain outside this path.
 
 Before detection, `preprocessPointCloud()` provides the scale-aware input path:

@@ -2,6 +2,7 @@
 #include "modeling/FeatureParams.h"
 #include "reconstruction/PrimitiveDetector.h"
 #include "reconstruction/ReconstructionCandidate.h"
+#include "reconstruction/CurvedSolidRecognizer.h"
 #include <string>
 
 namespace reconstruction {
@@ -21,6 +22,7 @@ struct CompoundCandidate {
     std::vector<BoxCandidate> boxes;
     std::vector<PrismCandidate> prisms;
     std::vector<ThroughHoleCandidate> throughHoles;
+    std::vector<CurvedSolidCandidate> curvedSolids;
     double occupancyError = 0;
     double surfaceCoverage = 0;
     double confidence = 0;

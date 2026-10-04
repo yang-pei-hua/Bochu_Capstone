@@ -40,6 +40,10 @@ using FeatureParams = std::variant<
     ExtrudeFeatureParams,
     CutFeatureParams,
     BoxPrimitiveParams,
-    ThroughHolePrimitiveParams>;
+    ThroughHolePrimitiveParams,
+    SpherePrimitiveParams,
+    CylinderPrimitiveParams,
+    ConePrimitiveParams,
+    TorusPrimitiveParams>;
 
 }  // namespace modeling

@@ -1,0 +1,22 @@
+{
+  "analytic_volume_mm3": 4523.893421169302,
+  "bounding_box_mm": [
+    24,
+    24,
+    29.999999999999996
+  ],
+  "brep_valid": true,
+  "case_id": "cone",
+  "edges": 3,
+  "elapsed_seconds": 0.013,
+  "faces": 2,
+  "schema": "paramcad.cad-validation",
+  "solids": 1,
+  "stage": "completed",
+  "status": "generated_and_round_trip_verified",
+  "unit": "mm",
+  "version": 1,
+  "vertices": 2,
+  "volume_mm3": 4523.89342117409,
+  "model_sha256": "1fa280d0a508be3706a50e442d9626e3875c43718a6b614f745908bc5dc1e80d"
+}

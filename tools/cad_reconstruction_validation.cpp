@@ -9,11 +9,18 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
+#include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
@@ -32,6 +39,7 @@
 #include <cstdint>
 #include <gp_Ax2.hxx>
 #include <iostream>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <modeling/StepExporter.h>
@@ -123,7 +131,9 @@ double volume(const TopoDS_Shape &shape) {
     return props.Mass();
 }
 QJsonObject sampledDifference(const TopoDS_Shape &reference, const TopoDS_Shape &actual,
-                              double referenceVolume) {
+                              double referenceVolume,
+                              const std::function<bool(const gp_Pnt &)> &referenceInside = {},
+                              const std::function<bool(const gp_Pnt &)> &actualInside = {}) {
     Bnd_Box box;
     BRepBndLib::AddOptimal(reference, box, false, false);
     BRepBndLib::AddOptimal(actual, box, false, false);
@@ -153,7 +163,8 @@ QJsonObject sampledDifference(const TopoDS_Shape &reference, const TopoDS_Shape 
         gp_Pnt p(lo[0] + (hi[0] - lo[0]) * uniform(engine),
                  lo[1] + (hi[1] - lo[1]) * uniform(engine),
                  lo[2] + (hi[2] - lo[2]) * uniform(engine));
-        mismatches += inside(first, p) != inside(second, p);
+        mismatches += (referenceInside ? referenceInside(p) : inside(first, p)) !=
+                      (actualInside ? actualInside(p) : inside(second, p));
     }
     const double ratio = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]) / referenceVolume;
     const double probability = double(mismatches) / samples, z = 3.0;
@@ -169,6 +180,160 @@ QJsonObject sampledDifference(const TopoDS_Shape &reference, const TopoDS_Shape 
             {"confidence_z", z}};
 }
 QJsonArray vector(const modeling::Vec3 &v) { return {v.x, v.y, v.z}; }
+std::function<bool(const gp_Pnt &)> analyticInside(const modeling::CurvedPrimitiveParams &params) {
+    return [params](const gp_Pnt &point) {
+        return std::visit(
+            [&](const auto &p) {
+                using P = std::decay_t<decltype(p)>;
+                if constexpr (std::is_same_v<P, modeling::SpherePrimitiveParams>)
+                    return point.SquareDistance(gp_Pnt(p.center.x, p.center.y, p.center.z)) <=
+                           p.radius * p.radius;
+                else {
+                    modeling::Vec3 center;
+                    if constexpr (std::is_same_v<P, modeling::TorusPrimitiveParams>)
+                        center = p.center;
+                    else
+                        center = p.baseCenter;
+                    const gp_Vec axis(
+                        gp_Dir(p.axisDirection.x, p.axisDirection.y, p.axisDirection.z));
+                    const gp_Vec d(gp_Pnt(center.x, center.y, center.z), point);
+                    const double z = d.Dot(axis), rho2 = std::max(0.0, d.SquareMagnitude() - z * z);
+                    if constexpr (std::is_same_v<P, modeling::TorusPrimitiveParams>)
+                        return std::pow(std::sqrt(rho2) - p.majorRadius, 2) + z * z <=
+                               p.minorRadius * p.minorRadius;
+                    else {
+                        double radius;
+                        if constexpr (std::is_same_v<P, modeling::CylinderPrimitiveParams>)
+                            radius = p.radius;
+                        else
+                            radius = p.baseRadius + (p.topRadius - p.baseRadius) * z / p.height;
+                        return z >= 0 && z <= p.height && rho2 <= radius * radius;
+                    }
+                }
+            },
+            params);
+    };
+}
+modeling::CurvedPrimitiveParams referencePrimitive(const QJsonObject &definition) {
+    const auto p = definition["parameters"].toObject();
+    const auto a = p["axis"].toArray();
+    const modeling::Vec3 axis =
+        a.size() == 3 ? modeling::Vec3{a[0].toDouble(), a[1].toDouble(), a[2].toDouble()}
+                      : modeling::Vec3{0, 0, 1};
+    const auto geometry = definition["geometry"].toString();
+    if (geometry == "sphere")
+        return modeling::SpherePrimitiveParams{{}, p["radius"].toDouble()};
+    if (geometry == "torus")
+        return modeling::TorusPrimitiveParams{
+            {}, axis, p["major_radius"].toDouble(), p["minor_radius"].toDouble()};
+    const double h = p["height"].toDouble();
+    double offset = h / 2;
+    if (geometry == "cone") {
+        const double r0 = p["base_radius"].toDouble(), r1 = p["top_radius"].toDouble();
+        offset = h * (r0 * r0 + 2 * r0 * r1 + 3 * r1 * r1) / (4 * (r0 * r0 + r0 * r1 + r1 * r1));
+        return modeling::ConePrimitiveParams{
+            {-axis.x * offset, -axis.y * offset, -axis.z * offset}, axis, r0, r1, h};
+    }
+    return modeling::CylinderPrimitiveParams{
+        {-axis.x * offset, -axis.y * offset, -axis.z * offset}, axis, p["radius"].toDouble(), h};
+}
+// Independently sample the source primitive's boundary and measure distance to
+// actual CAD faces. This checks the builder, not just reported fitted parameters.
+double sourceBoundaryDistance(const modeling::CurvedPrimitiveParams &params,
+                              const TopoDS_Shape &target) {
+    BRep_Builder builder;
+    TopoDS_Compound faces;
+    builder.MakeCompound(faces);
+    for (TopExp_Explorer it(target, TopAbs_FACE); it.More(); it.Next())
+        builder.Add(faces, it.Current());
+    double maximum = 0;
+    std::mt19937 random(9221);
+    std::uniform_real_distribution<double> uniform(0, 1);
+    for (int i = 0; i < 128; ++i) {
+        const double u = uniform(random), v = uniform(random), phi = 2 * std::acos(-1.0) * u;
+        const auto point = std::visit(
+            [&](const auto &p) -> gp_Pnt {
+                using P = std::decay_t<decltype(p)>;
+                if constexpr (std::is_same_v<P, modeling::SpherePrimitiveParams>) {
+                    const double z = 2 * v - 1, r = std::sqrt(1 - z * z);
+                    return gp_Pnt(p.center.x + p.radius * r * std::cos(phi),
+                                  p.center.y + p.radius * r * std::sin(phi),
+                                  p.center.z + p.radius * z);
+                } else {
+                    modeling::Vec3 center;
+                    if constexpr (std::is_same_v<P, modeling::TorusPrimitiveParams>)
+                        center = p.center;
+                    else
+                        center = p.baseCenter;
+                    const gp_Ax2 frame(
+                        gp_Pnt(center.x, center.y, center.z),
+                        gp_Dir(p.axisDirection.x, p.axisDirection.y, p.axisDirection.z));
+                    double radius, z;
+                    if constexpr (std::is_same_v<P, modeling::TorusPrimitiveParams>) {
+                        const double theta = 2 * std::acos(-1.0) * v;
+                        radius = p.majorRadius + p.minorRadius * std::cos(theta);
+                        z = p.minorRadius * std::sin(theta);
+                    } else {
+                        double r0, r1;
+                        if constexpr (std::is_same_v<P, modeling::CylinderPrimitiveParams>)
+                            r0 = r1 = p.radius;
+                        else {
+                            r0 = p.baseRadius;
+                            r1 = p.topRadius;
+                        }
+                        z = v * p.height;
+                        radius = r0 + (r1 - r0) * v;
+                        if (i % 3 == 1) {
+                            z = 0;
+                            radius = r0 * std::sqrt(v);
+                        } else if (i % 3 == 2) {
+                            z = p.height;
+                            radius = r1 * std::sqrt(v);
+                        }
+                    }
+                    return frame.Location().Translated(
+                        gp_Vec(frame.XDirection()) * (radius * std::cos(phi)) +
+                        gp_Vec(frame.YDirection()) * (radius * std::sin(phi)) +
+                        gp_Vec(frame.Direction()) * z);
+                }
+            },
+            params);
+        BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(point).Vertex(), faces);
+        require(distance.IsDone(), "CAD boundary distance verification failed");
+        maximum = std::max(maximum, distance.Value());
+    }
+    return maximum;
+}
+QJsonObject curvedParameters(const modeling::CurvedPrimitiveParams &params) {
+    return std::visit(
+        [](const auto &p) -> QJsonObject {
+            using P = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<P, modeling::SpherePrimitiveParams>)
+                return {
+                    {"kind", "sphere"}, {"center_mm", vector(p.center)}, {"radius_mm", p.radius}};
+            else if constexpr (std::is_same_v<P, modeling::TorusPrimitiveParams>)
+                return {{"kind", "torus"},
+                        {"center_mm", vector(p.center)},
+                        {"axis_direction", vector(p.axisDirection)},
+                        {"major_radius_mm", p.majorRadius},
+                        {"minor_radius_mm", p.minorRadius}};
+            else {
+                QJsonObject result{{"base_center_mm", vector(p.baseCenter)},
+                                   {"axis_direction", vector(p.axisDirection)},
+                                   {"height_mm", p.height}};
+                if constexpr (std::is_same_v<P, modeling::CylinderPrimitiveParams>) {
+                    result["kind"] = "cylinder";
+                    result["radius_mm"] = p.radius;
+                } else {
+                    result["kind"] = "cone";
+                    result["base_radius_mm"] = p.baseRadius;
+                    result["top_radius_mm"] = p.topRadius;
+                }
+                return result;
+            }
+        },
+        params);
+}
 QJsonObject cloudBounds(const reconstruction::PointStore &cloud) {
     if (cloud.empty())
         return {};
@@ -253,6 +418,42 @@ void generate(const QStringList &args, QJsonObject &report) {
                 .Shape();
         shape = fuse(fuse(base, upright), rib);
         analyticVolume = w * d * b + w * t * h + 0.5 * r * run * rise;
+    } else if (definition["geometry"] == "sphere" || definition["geometry"] == "cylinder" ||
+               definition["geometry"] == "cone" || definition["geometry"] == "torus") {
+        const auto center = p["center"].toArray(), direction = p["axis"].toArray();
+        const gp_Pnt origin(center[0].toDouble(), center[1].toDouble(), center[2].toDouble());
+        const gp_Dir axis =
+            direction.size() == 3
+                ? gp_Dir(direction[0].toDouble(), direction[1].toDouble(), direction[2].toDouble())
+                : gp_Dir(0, 0, 1);
+        const double pi = std::acos(-1.0);
+        const auto geometry = definition["geometry"].toString();
+        if (geometry == "sphere") {
+            const double r = number("radius");
+            shape = BRepPrimAPI_MakeSphere(origin, r).Shape();
+            analyticVolume = 4 * pi * r * r * r / 3;
+        } else if (geometry == "torus") {
+            const double R = number("major_radius"), r = number("minor_radius");
+            require(R > r, "Ring torus requires R > r");
+            shape = BRepPrimAPI_MakeTorus(gp_Ax2(origin, axis), R, r).Shape();
+            analyticVolume = 2 * pi * pi * R * r * r;
+        } else {
+            const double h = number("height");
+            double offset = h / 2;
+            if (geometry == "cone") {
+                const double a = p["base_radius"].toDouble(), b = p["top_radius"].toDouble();
+                require(a >= 0 && b >= 0 && std::max(a, b) > 0 && a != b, "Invalid cone radii");
+                offset = h * (a * a + 2 * a * b + 3 * b * b) / (4 * (a * a + a * b + b * b));
+                auto base = origin.Translated(gp_Vec(axis) * (-offset));
+                shape = BRepPrimAPI_MakeCone(gp_Ax2(base, axis), a, b, h).Shape();
+                analyticVolume = pi * h * (a * a + a * b + b * b) / 3;
+            } else {
+                const double r = number("radius");
+                auto base = origin.Translated(gp_Vec(axis) * (-offset));
+                shape = BRepPrimAPI_MakeCylinder(gp_Ax2(base, axis), r, h).Shape();
+                analyticVolume = pi * r * r * h;
+            }
+        }
     } else if (definition["geometry"] == "box_union") {
         for (const auto value : p["boxes"].toArray()) {
             const auto box = value.toObject();
@@ -436,6 +637,7 @@ void fit(const QStringList &args, QJsonObject &report) {
         QJsonObject{{"recognized", compoundRecognized},
                     {"boxes", int(compound.boxes.size())},
                     {"prisms", int(compound.prisms.size())},
+                    {"curved_solids", int(compound.curvedSolids.size())},
                     {"occupancy_error", compound.occupancyError},
                     {"grid_cells", int(compound.gridCells)},
                     {"surface_coverage", compound.surfaceCoverage},
@@ -447,10 +649,7 @@ void fit(const QStringList &args, QJsonObject &report) {
         {"recognized", recognized},
         {"reason", recognized ? QJsonValue() : QJsonValue(QString::fromStdString(text))}};
     if (!recognized) {
-        const bool detectionFailed = text.rfind("CGAL", 0) == 0;
-        recognition["failure_stage"] =
-            boxRecognized ? (detectionFailed ? "cylinder_detection" : "through_hole_recognition")
-                          : (detectionFailed ? "plane_detection" : "box_recognition");
+        recognition["failure_stage"] = "solid_recognition";
     }
     report["recognition"] = recognition;
     report["box_recognition"] = QJsonObject{{"recognized", boxRecognized}};
@@ -472,6 +671,15 @@ void fit(const QStringList &args, QJsonObject &report) {
                                  {"axis_direction", vector(hole.primitive.axisDirection)},
                                  {"confidence", hole.confidence}});
     report["through_holes"] = holes;
+    QJsonArray curved;
+    for (const auto &solid : compound.curvedSolids) {
+        auto item = curvedParameters(solid.primitive);
+        item["surface_coverage"] = solid.surfaceCoverage;
+        item["boundary_coverage"] = solid.boundaryCoverage;
+        item["mean_residual_mm"] = solid.meanResidual;
+        curved.append(item);
+    }
+    report["curved_solids"] = curved;
     modeling::ModelingCore core;
     checkpoint("model_patch");
     const auto commit =
@@ -519,7 +727,19 @@ void fit(const QStringList &args, QJsonObject &report) {
         const auto removed = cut(reference.shape, core.bodyShape(), comparisonTolerance);
         const auto added = cut(core.bodyShape(), reference.shape, comparisonTolerance);
         const double rawDifference = (volume(removed) + volume(added)) / referenceVolume;
-        const auto sampling = sampledDifference(reference.shape, core.bodyShape(), referenceVolume);
+        const auto occtSampling =
+            sampledDifference(reference.shape, core.bodyShape(), referenceVolume);
+        auto sampling = occtSampling;
+        double boundaryDistance = 0;
+        const bool analytic = expected.contains("curved_kind") && compound.curvedSolids.size() == 1;
+        if (analytic) {
+            const auto sourcePrimitive = referencePrimitive(definition);
+            boundaryDistance = sourceBoundaryDistance(sourcePrimitive, core.bodyShape());
+            sampling = sampledDifference(reference.shape, core.bodyShape(), referenceVolume,
+                                         analyticInside(sourcePrimitive),
+                                         analyticInside(compound.curvedSolids.front().primitive));
+            sampling["method"] = "independent_analytic_membership";
+        }
         const bool booleanTrusted =
             BRepCheck_Analyzer(removed).IsValid() && BRepCheck_Analyzer(added).IsValid() &&
             rawDifference >= 0 && std::abs(rawDifference - sampling["estimate"].toDouble()) < 0.02;
@@ -550,8 +770,33 @@ void fit(const QStringList &args, QJsonObject &report) {
             diameterErrors.append(value);
             holesPass &= value <= acceptance["hole_diameter_tolerance_mm"].toDouble();
         }
+        bool primitivePass = true;
+        QJsonObject primitiveErrors;
+        if (expected.contains("curved_kind")) {
+            primitivePass =
+                curved.size() == 1 && curved[0].toObject()["kind"] == expected["curved_kind"];
+            auto actual = curved.isEmpty() ? QJsonObject{} : curved[0].toObject();
+            if (actual["kind"] == "cone") {
+                actual["small_radius_mm"] = std::min(actual["base_radius_mm"].toDouble(),
+                                                     actual["top_radius_mm"].toDouble());
+                actual["large_radius_mm"] = std::max(actual["base_radius_mm"].toDouble(),
+                                                     actual["top_radius_mm"].toDouble());
+            }
+            const auto targets = expected["curved_dimensions_mm"].toObject();
+            for (auto it = targets.begin(); it != targets.end(); ++it) {
+                const double value = std::abs(actual[it.key()].toDouble() - it.value().toDouble());
+                primitiveErrors[it.key()] = value;
+                primitivePass &= actual.contains(it.key()) &&
+                                 value <= acceptance["primitive_dimension_tolerance_mm"].toDouble();
+            }
+        }
         report["accuracy"] =
             QJsonObject{{"dimension_errors_mm", dimensionErrors},
+                        {"primitive_dimension_errors_mm", primitiveErrors},
+                        {"primitive_dimensions_pass", primitivePass},
+                        {"source_boundary_distance_max_mm",
+                         analytic ? QJsonValue(boundaryDistance) : QJsonValue()},
+                        {"occt_volume_sampling", occtSampling},
                         {"dimensions_pass", dimensionsPass},
                         {"hole_diameter_errors_mm", diameterErrors},
                         {"holes_pass", holesPass},
@@ -565,8 +810,10 @@ void fit(const QStringList &args, QJsonObject &report) {
                                                              : "sampling_upper_confidence_bound"},
                         {"independent_volume_sampling", sampling}};
         const double tolerance = acceptance["symmetric_difference_volume_fraction"].toDouble();
-        const bool passed = dimensionsPass && holesPass && difference <= tolerance &&
-                            sampling["upper_confidence_bound"].toDouble() <= tolerance;
+        const bool passed =
+            dimensionsPass && holesPass && primitivePass && difference <= tolerance &&
+            sampling["upper_confidence_bound"].toDouble() <= tolerance &&
+            (!analytic || boundaryDistance <= acceptance["dimension_tolerance_mm"].toDouble());
         report["complete_cad_fit"] = passed;
         report["status"] = passed ? "cad_accuracy_passed" : "cad_accuracy_failed";
     }

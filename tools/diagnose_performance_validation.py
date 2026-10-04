@@ -46,6 +46,8 @@ def diagnose(case: Path, log_tail: int = 0) -> dict:
     if fit:
         result["fitting"] = {key: fit.get(key) for key in ("status", "stage", "exit_code", "ransac_seed", "complete_cad_fit", "recognition", "compound_recognition", "preprocessing", "processed_bounds_mm", "detection_options", "primitive_proposals", "box_recognition", "through_holes", "accuracy", "elapsed_seconds", "error") if key in fit}
         result["step_exported"] = (case / "reconstructed.step").is_file()
+    if fit.get("curved_solids"):
+        result["fitting"]["curved_solids"] = fit["curved_solids"]
     crash = read(case / "fitting_report.json.native-crash.json")
     if crash and fit.get("complete_cad_fit") is not True:
         result["native_crash"] = {"exception_code": crash.get("exception_code"),

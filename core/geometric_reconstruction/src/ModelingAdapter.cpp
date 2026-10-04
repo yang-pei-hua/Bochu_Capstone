@@ -42,6 +42,10 @@ modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &cand
     }
     for (const auto &hole : candidate.throughHoles)
         append(hole.primitive);
+    for (const auto& solid : candidate.curvedSolids) {
+        const auto added = std::visit([&](const auto& params) { return append(params); }, solid.primitive);
+        if (!added.success) return {false, core.revision(), {}, added.error};
+    }
     return core.apply(patch);
 }
 

@@ -1,0 +1,22 @@
+{
+  "analytic_volume_mm3": 17765.287921960844,
+  "bounding_box_mm": [
+    62.0000002,
+    62.0000002,
+    12.0000002
+  ],
+  "brep_valid": true,
+  "case_id": "torus",
+  "edges": 2,
+  "elapsed_seconds": 0.015,
+  "faces": 1,
+  "schema": "paramcad.cad-validation",
+  "solids": 1,
+  "stage": "completed",
+  "status": "generated_and_round_trip_verified",
+  "unit": "mm",
+  "version": 1,
+  "vertices": 1,
+  "volume_mm3": 17765.287921961535,
+  "model_sha256": "d56d3fce2b1edef023445a752fecba1b9d99de243ce1efd3819dd346ffe040b4"
+}

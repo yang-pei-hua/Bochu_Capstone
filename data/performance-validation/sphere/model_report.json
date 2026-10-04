@@ -1,0 +1,22 @@
+{
+  "analytic_volume_mm3": 14137.16694115407,
+  "bounding_box_mm": [
+    30,
+    30,
+    30
+  ],
+  "brep_valid": true,
+  "case_id": "sphere",
+  "edges": 3,
+  "elapsed_seconds": 0.01,
+  "faces": 1,
+  "schema": "paramcad.cad-validation",
+  "solids": 1,
+  "stage": "completed",
+  "status": "generated_and_round_trip_verified",
+  "unit": "mm",
+  "version": 1,
+  "vertices": 2,
+  "volume_mm3": 14137.16694115407,
+  "model_sha256": "37d6ce1a53e76013a5eb61152aac72a6e08ff61c80325a6a95f386dce9909ed2"
+}

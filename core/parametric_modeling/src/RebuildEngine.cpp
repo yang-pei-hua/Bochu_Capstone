@@ -354,6 +354,26 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
             currentBody = cut;
             continue;
         }
+        case FeatureType::SpherePrimitive:
+        case FeatureType::CylinderPrimitive:
+        case FeatureType::ConePrimitive:
+        case FeatureType::TorusPrimitive: {
+            TopoDS_Shape solid;
+            const bool built = std::visit([&](const auto& params) {
+                using P = std::decay_t<decltype(params)>;
+                if constexpr (std::is_same_v<P, SpherePrimitiveParams> ||
+                              std::is_same_v<P, CylinderPrimitiveParams> ||
+                              std::is_same_v<P, ConePrimitiveParams> ||
+                              std::is_same_v<P, TorusPrimitiveParams>) {
+                    return occt::buildCurvedPrimitive(CurvedPrimitiveParams{params}, solid, error);
+                }
+                error = "Feature parameter type does not match curved solid";
+                return false;
+            }, feature.params);
+            if (!built) break;
+            appendIndependentSolid(solid, currentBody);
+            continue;
+        }
         }
 
         feature.valid = false;

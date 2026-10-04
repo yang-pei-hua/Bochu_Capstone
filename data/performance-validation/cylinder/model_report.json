@@ -1,0 +1,22 @@
+{
+  "analytic_volume_mm3": 13571.680263507906,
+  "bounding_box_mm": [
+    24,
+    24,
+    30
+  ],
+  "brep_valid": true,
+  "case_id": "cylinder",
+  "edges": 3,
+  "elapsed_seconds": 0.011,
+  "faces": 3,
+  "schema": "paramcad.cad-validation",
+  "solids": 1,
+  "stage": "completed",
+  "status": "generated_and_round_trip_verified",
+  "unit": "mm",
+  "version": 1,
+  "vertices": 2,
+  "volume_mm3": 13571.680263507908,
+  "model_sha256": "f0cef2914dfcdcf8ba0d10fc6e0d794a36a4e7da47e3b104d8e0bbde7d82c609"
+}

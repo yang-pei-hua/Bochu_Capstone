@@ -1624,19 +1624,30 @@ void MainWindow::reconstructCad()
         return;
     }
 
-    logInfo(tr("Reconstructed solid: %1 boxes, %2 polygonal prisms, %3 through holes, surface coverage %4")
+    logInfo(tr("Reconstructed solid: %1 boxes, %2 polygonal prisms, %3 through holes, surface coverage %4, %5 curved solids")
                 .arg(candidate.boxes.size()).arg(candidate.prisms.size())
-                .arg(candidate.throughHoles.size()).arg(candidate.surfaceCoverage, 0, 'f', 3));
+                .arg(candidate.throughHoles.size()).arg(candidate.surfaceCoverage, 0, 'f', 3).arg(candidate.curvedSolids.size()));
+    QString curvedName;
+    if (!candidate.curvedSolids.empty()) {
+        curvedName=std::visit([&](const auto& params)->QString {
+            using P=std::decay_t<decltype(params)>;
+            if constexpr(std::is_same_v<P,modeling::SpherePrimitiveParams>)return tr("Sphere");
+            else if constexpr(std::is_same_v<P,modeling::CylinderPrimitiveParams>)return tr("Cylinder");
+            else if constexpr(std::is_same_v<P,modeling::ConePrimitiveParams>)return tr("Cone / Frustum");
+            else return tr("Torus");
+        },candidate.curvedSolids.front().primitive);
+    }
     for (const reconstruction::ThroughHoleCandidate& hole : candidate.throughHoles) {
         logInfo(tr("Recognized through hole: diameter %1, thickness %2, confidence %3")
                     .arg(hole.primitive.radius * 2.0, 0, 'f', 3)
                     .arg(hole.bodyThickness, 0, 'f', 3)
                     .arg(hole.confidence, 0, 'f', 3));
     }
-    m_statusLabel->setText(tr("Ready | Model: Reconstructed Solid (%1 boxes, %2 prisms) | Camera: %3")
+    m_statusLabel->setText(curvedName.isEmpty() ? tr("Ready | Model: Reconstructed Solid (%1 boxes, %2 prisms) | Camera: %3")
                                .arg(candidate.boxes.size()).arg(candidate.prisms.size())
                                .arg(m_viewer->cameraParameters().parallelProjection
-                                        ? tr("Orthographic") : tr("Perspective")));
+                                         ? tr("Orthographic") : tr("Perspective")) :
+                          tr("Ready | Model: %1 | Camera: %2").arg(curvedName).arg(m_viewer->cameraParameters().parallelProjection ? tr("Orthographic") : tr("Perspective")));
     if (m_viewer->pointCloudSelection().regionPointCount(0) >= 20) startPointCloudAnalysis();
 }
 

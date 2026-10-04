@@ -1,0 +1,41 @@
+{
+  "id": "torus",
+  "unit": "mm",
+  "geometry": "torus",
+  "parameters": {
+    "center": [
+      0,
+      0,
+      0
+    ],
+    "axis": [
+      0,
+      0,
+      1
+    ],
+    "major_radius": 25,
+    "minor_radius": 6
+  },
+  "expected": {
+    "bounding_box_mm": [
+      62.0,
+      62.0,
+      12.0
+    ],
+    "volume_mm3": 17765.287921960844,
+    "solids": 1,
+    "through_holes": 0,
+    "hole_diameters_mm": [],
+    "curved_kind": "torus",
+    "curved_dimensions_mm": {
+      "major_radius_mm": 25,
+      "minor_radius_mm": 6
+    }
+  },
+  "acceptance": {
+    "dimension_tolerance_mm": 0.2,
+    "primitive_dimension_tolerance_mm": 0.1,
+    "hole_diameter_tolerance_mm": 0.2,
+    "symmetric_difference_volume_fraction": 0.03
+  }
+}

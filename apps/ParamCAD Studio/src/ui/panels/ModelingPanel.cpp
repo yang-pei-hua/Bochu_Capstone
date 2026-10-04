@@ -24,6 +24,10 @@ QString featureTypeLabel(modeling::FeatureType type)
         return QStringLiteral("Box");
     case modeling::FeatureType::ThroughHolePrimitive:
         return QStringLiteral("Through Hole");
+    case modeling::FeatureType::SpherePrimitive: return QStringLiteral("Sphere");
+    case modeling::FeatureType::CylinderPrimitive: return QStringLiteral("Cylinder");
+    case modeling::FeatureType::ConePrimitive: return QStringLiteral("Cone / Frustum");
+    case modeling::FeatureType::TorusPrimitive: return QStringLiteral("Torus");
     }
     return QStringLiteral("Unknown");
 }

@@ -1,0 +1,41 @@
+{
+  "id": "cylinder",
+  "unit": "mm",
+  "geometry": "cylinder",
+  "parameters": {
+    "center": [
+      0,
+      0,
+      0
+    ],
+    "axis": [
+      0,
+      0,
+      1
+    ],
+    "height": 30,
+    "radius": 12
+  },
+  "expected": {
+    "bounding_box_mm": [
+      24.0,
+      24.0,
+      30.0
+    ],
+    "volume_mm3": 13571.680263507906,
+    "solids": 1,
+    "through_holes": 0,
+    "hole_diameters_mm": [],
+    "curved_kind": "cylinder",
+    "curved_dimensions_mm": {
+      "radius_mm": 12,
+      "height_mm": 30
+    }
+  },
+  "acceptance": {
+    "dimension_tolerance_mm": 0.2,
+    "primitive_dimension_tolerance_mm": 0.1,
+    "hole_diameter_tolerance_mm": 0.2,
+    "symmetric_difference_volume_fraction": 0.03
+  }
+}

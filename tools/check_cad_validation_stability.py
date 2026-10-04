@@ -35,6 +35,9 @@ def geometry_parameters(report: dict) -> dict:
         "cad_volume_mm3": cad.get("volume_mm3"),
         "boxes": compound.get("boxes"),
         "prisms": compound.get("prisms"),
+        "curved_solids": [{key:value for key,value in item.items() if key not in
+                          ("surface_coverage","boundary_coverage","mean_residual_mm")}
+                          for item in report.get("curved_solids", [])],
     }
 
 

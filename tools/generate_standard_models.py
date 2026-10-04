@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recreate and verify the two dimensioned STEP fixtures and a seeded texture."""
+"""Recreate and verify the six dimensioned STEP fixtures and a seeded texture."""
 from __future__ import annotations
 
 import argparse
@@ -15,7 +15,7 @@ import zlib
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "performance-validation"
 EXECUTABLE = ROOT / "apps" / "ParamCAD Studio" / "build" / "msvc-debug" / "Release" / "cad_reconstruction_validation.exe"
-CASES = ("box-through-hole", "l-bracket-gusset")
+CASES = ("box-through-hole", "l-bracket-gusset", "sphere", "cylinder", "cone", "torus")
 
 
 def create_texture(path: Path, seed: int = 4500, size: int = 1024) -> None:
@@ -45,10 +45,11 @@ def create_texture(path: Path, seed: int = 4500, size: int = 1024) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, default=EXECUTABLE)
+    parser.add_argument("--cases", nargs="+", choices=CASES, default=CASES)
     args = parser.parse_args()
     if not args.executable.is_file():
         parser.error("Build with -DCAD_CLIENT_BUILD_VALIDATION_TOOLS=ON first")
-    for name in CASES:
+    for name in args.cases:
         directory = DATA / name
         model = directory / "model.step"
         report = directory / "model_report.json"

@@ -24,6 +24,10 @@ std::string featurePrefix(FeatureType type) {
         return "Box";
     case FeatureType::ThroughHolePrimitive:
         return "ThroughHole";
+    case FeatureType::SpherePrimitive: return "Sphere";
+    case FeatureType::CylinderPrimitive: return "Cylinder";
+    case FeatureType::ConePrimitive: return "Cone";
+    case FeatureType::TorusPrimitive: return "Torus";
     }
     return "Feature";
 }
@@ -58,6 +62,19 @@ bool validateSketchEntityIds(
 }
 
 bool validateFeatureParams(const FeatureParams& params, std::string& error) {
+    bool curved = false;
+    const bool curvedValid = std::visit([&](const auto& p) {
+        using P = std::decay_t<decltype(p)>;
+        if constexpr (std::is_same_v<P, SpherePrimitiveParams> ||
+                      std::is_same_v<P, CylinderPrimitiveParams> ||
+                      std::is_same_v<P, ConePrimitiveParams> ||
+                      std::is_same_v<P, TorusPrimitiveParams>) {
+            curved = true;
+            return validateCurvedPrimitiveParams(CurvedPrimitiveParams{p}, error);
+        }
+        return true;
+    }, params);
+    if (curved) return curvedValid;
     if (const auto* sketch = std::get_if<SketchFeatureParams>(&params)) {
         return validateSketchEntityIds(*sketch, error);
     }
