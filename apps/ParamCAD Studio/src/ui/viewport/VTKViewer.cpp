@@ -165,6 +165,7 @@ void VTKViewer::setBodyShape(const TopoDS_Shape& shape)
     m_bodyActor.setShape(shape);
     ++m_bodyRevision;
     m_renderer->ResetCameraClippingRange();
+    emit bodyShapeChanged(shape);
 }
 
 void VTKViewer::clearBody()
@@ -172,6 +173,7 @@ void VTKViewer::clearBody()
     m_bodyActor.clear();
     ++m_bodyRevision;
     m_renderer->ResetCameraClippingRange();
+    emit bodyShapeChanged(TopoDS_Shape{});
 }
 
 bool VTKViewer::hasBody() const noexcept

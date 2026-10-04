@@ -148,6 +148,8 @@ public slots:
     void setPointCloudPointSize(double size);
 
 signals:
+    // Native geometry publication; consumers retain their own OCCT handle.
+    void bodyShapeChanged(const TopoDS_Shape& shape);
     void pointCloudSelectionChanged();
     void pointCloudLoaded();
     void cameraChanged(const CameraParameters& parameters);

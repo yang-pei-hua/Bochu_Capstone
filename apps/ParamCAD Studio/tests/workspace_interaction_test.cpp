@@ -3,6 +3,8 @@
 #include "app/CaptureController.h"
 #include "app/PointCloudWorkspaceController.h"
 #include "app/ModelingController.h"
+#include "app/ModelViewController.h"
+#include "io/StepModelLoader.h"
 #include "app/ReconstructionController.h"
 #include "ui/panels/CapturePanel.h"
 #include "ui/panels/PointCloudRelationsPanel.h"
@@ -13,6 +15,9 @@
 #include "ui/viewport/VTKViewer.h"
 
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <STEPControl_Writer.hxx>
 
 #include <QAction>
@@ -81,6 +86,32 @@ bool sameVector(const double first[3], const double second[3])
     return true;
 }
 
+double volume(const TopoDS_Shape& shape)
+{
+    GProp_GProps properties;
+    BRepGProp::VolumeProperties(shape, properties);
+    return properties.Mass();
+}
+
+void verifyExport(MainWindow& window, const QString& chosenPath,
+                  const QString& outputPath, const TopoDS_Shape& expected)
+{
+    auto* viewer = window.findChild<VTKViewer*>();
+    auto* model = window.findChild<ModelingController*>();
+    const auto revision = model->revision();
+    const auto displayedRevision = viewer->bodyRevision();
+    chooseFile(window, action(window, "Export STEP..."), chosenPath);
+    StepModelLoader loader;
+    LoadedModel loaded;
+    QString error;
+    require(loader.load(outputPath, loaded, error), "UI export produces importable STEP");
+    require(BRepCheck_Analyzer(loaded.shape).IsValid() && loaded.solidCount == 1
+            && std::abs(volume(loaded.shape) - volume(expected)) < 1.0e-5,
+            "UI export retains current solid, cut geometry and millimetre scale");
+    require(model->revision() == revision && viewer->bodyRevision() == displayedRevision,
+            "export preserves model history and displayed body");
+}
+
 void waitForCad(MainWindow& window, bool includeAnalysis = false)
 {
     auto* task = window.findChild<CadReconstructionTask*>();
@@ -123,6 +154,8 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
     require(model->revision() > initialRevision && viewer->hasBody() && commitsOnOwner,
             "background candidate commits to model on GUI thread");
     require(!cancel->isEnabled() && cancelButton->isHidden(), "completion restores controls");
+    const QString exportPath = QFileInfo(cloudPath).dir().filePath("reconstructed.step");
+    verifyExport(window, exportPath, exportPath, model->bodyShape());
 
     const auto completedRevision = model->revision();
     reconstruct->trigger();
@@ -243,6 +276,8 @@ int main(int argc, char** argv)
         auto* properties = window.findChild<PropertyPanel*>();
         auto* console = window.findChild<QPlainTextEdit*>("console");
         require(viewer && model && sketch && palette && properties && console, "workspace views and command controller");
+        auto* exportStep = action(window, "Export STEP...");
+        require(!exportStep->isEnabled(), "empty model disables STEP export");
 
         auto* newSketch = action(window, "New Sketch");
         require(!newSketch->isEnabled() && model->features().empty(), "empty scene requires a plane before sketching");
@@ -251,7 +286,8 @@ int main(int argc, char** argv)
         require(newSketch->isEnabled(), "plane pick enables sketch action");
         newSketch->trigger();
         require(sketch->hasSketch() && !palette->isHidden() && !newSketch->isEnabled()
-                && viewer->cameraParameters().parallelProjection, "sketch entry shows workspace and aligns camera");
+                && viewer->cameraParameters().parallelProjection && !exportStep->isEnabled(),
+                "sketch entry shows workspace and keeps export disabled before a body exists");
         const auto sketchId = model->features().back().id;
         palette->toolChanged(ViewportTool::Rectangle);
         viewer->sketchPointRequested({-5, -5});
@@ -271,6 +307,8 @@ int main(int argc, char** argv)
                 && sameVector(cameraBefore.target, cameraAfter.target)
                 && cameraBefore.parallelProjection == cameraAfter.parallelProjection,
                 "sketch exit restores camera and hides tools");
+        require(exportStep->isEnabled(), "extrude enables STEP export");
+        verifyExport(window, temp.filePath("extruded"), temp.filePath("extruded.step"), model->bodyShape());
 
         viewer->datumPlanePicked(modeling::DatumPlane::XY);
         newSketch->trigger();
@@ -280,6 +318,8 @@ int main(int argc, char** argv)
         sketch->cutRequested(4, true, true);
         require(model->features().size() == 4 && model->lastError().isEmpty(), "circle sketch can cut through extruded body");
         palette->exitSketchRequested();
+
+        verifyExport(window, temp.filePath("cut.step"), temp.filePath("cut.step"), model->bodyShape());
 
         // Deleting the currently edited sketch must close its UI synchronously.
         viewer->datumPlanePicked(modeling::DatumPlane::YZ);
@@ -302,6 +342,47 @@ int main(int argc, char** argv)
         chooseFile(window, action(window, "Open Model"), modelPath);
         require(viewer->hasBody() && model->features().size() == 4
                 && console->toPlainText().contains("STEP model loaded from box.step"), "model import action retains document behavior");
+        viewer->setObjectTransform(100, 0, 0, 0, 0, 0, 2, 2, 2);
+        verifyExport(window, temp.filePath("imported.STP"), temp.filePath("imported.STP"),
+                     BRepPrimAPI_MakeBox(10, 8, 6).Shape());
+        viewer->setObjectTransform(0, 0, 0, 0, 0, 0, 1, 1, 1);
+
+        // Cancellation has no file or success log; the existing body stays active.
+        const QString beforeCancel = console->toPlainText();
+        bool cancelled = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto* dialog = window.findChild<QFileDialog*>();
+            if (!dialog) return;
+            cancelled = true;
+            dialog->reject();
+        });
+        exportStep->trigger();
+        require(cancelled && console->toPlainText() == beforeCancel && exportStep->isEnabled(),
+                "cancelled export preserves body and feedback");
+
+        // A replacement while the modal chooser is open must not export a different body.
+        const QString stalePath = temp.filePath("stale.step");
+        bool replaced = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto* dialog = window.findChild<QFileDialog*>();
+            if (!dialog) return;
+            replaced = true;
+            viewer->setBodyShape(BRepPrimAPI_MakeBox(2, 3, 4).Shape());
+            dialog->selectFile(stalePath);
+            QMetaObject::invokeMethod(dialog, "accept", Qt::QueuedConnection);
+        });
+        exportStep->trigger();
+        require(replaced && !QFile::exists(stalePath) && console->toPlainText().contains("model changed"),
+                "modal model replacement prevents stale export");
+        verifyExport(window, temp.filePath("replaced.step"), temp.filePath("replaced.step"),
+                     BRepPrimAPI_MakeBox(2, 3, 4).Shape());
+        action(window, "Close Model")->trigger();
+        require(!exportStep->isEnabled(), "closing a model disables export despite retained render cache");
+        QString closedError;
+        require(!window.findChild<ModelViewController*>()->exportStepTo(temp.filePath("closed.step"), closedError)
+                && !QFile::exists(temp.filePath("closed.step")), "closed body cannot be exported through controller");
+        chooseFile(window, action(window, "Open Model"), modelPath);
+        require(exportStep->isEnabled(), "new import reenables STEP export");
 
         QImage texture(32, 32, QImage::Format_RGB32);
         texture.fill(Qt::cyan);

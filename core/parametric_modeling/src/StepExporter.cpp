@@ -9,8 +9,32 @@
 #include <Standard_Failure.hxx>
 
 #include <system_error>
+#include <ostream>
 
 namespace modeling {
+
+namespace {
+template<class Write>
+bool writeStep(const TopoDS_Shape& shape, Write write, std::string* errorText) {
+    const auto fail = [errorText](const std::string& message) {
+        if (errorText != nullptr) *errorText = message;
+        return false;
+    };
+    if (shape.IsNull()) return fail("Cannot export a null shape");
+    try {
+        Interface_Static::SetCVal("write.step.schema", "AP214IS");
+        STEPControl_Writer writer;
+        if (writer.Transfer(shape, STEPControl_AsIs) != IFSelect_RetDone)
+            return fail("OpenCASCADE could not transfer the shape to STEP");
+        if (!write(writer)) return fail("OpenCASCADE could not write the STEP file");
+        if (errorText != nullptr) errorText->clear();
+        return true;
+    } catch (const Standard_Failure& failure) {
+        return fail(std::string("OpenCASCADE STEP export failure: ") +
+                    occt::failureMessage(failure));
+    }
+}
+}  // namespace
 
 bool exportStep(
     const TopoDS_Shape& shape,
@@ -38,23 +62,20 @@ bool exportStep(
             }
         }
 
-        Interface_Static::SetCVal("write.step.schema", "AP214IS");
-        STEPControl_Writer writer;
-        if (writer.Transfer(shape, STEPControl_AsIs) != IFSelect_RetDone) {
-            return fail("OpenCASCADE could not transfer the shape to STEP");
-        }
         const std::string nativePath = outputPath.string();
-        if (writer.Write(nativePath.c_str()) != IFSelect_RetDone) {
-            return fail("OpenCASCADE could not write the STEP file");
-        }
-        if (errorText != nullptr) {
-            errorText->clear();
-        }
-        return true;
+        return writeStep(shape, [&nativePath](STEPControl_Writer& writer) {
+            return writer.Write(nativePath.c_str()) == IFSelect_RetDone;
+        }, errorText);
     } catch (const Standard_Failure& failure) {
         return fail(std::string("OpenCASCADE STEP export failure: ") +
             occt::failureMessage(failure));
     }
+}
+
+bool exportStep(const TopoDS_Shape& shape, std::ostream& output, std::string* errorText) {
+    return writeStep(shape, [&output](STEPControl_Writer& writer) {
+        return writer.WriteStream(output) == IFSelect_RetDone && output.good();
+    }, errorText);
 }
 
 }  // namespace modeling

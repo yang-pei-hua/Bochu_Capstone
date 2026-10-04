@@ -104,6 +104,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/io/PointCloudAnalysis.cpp
     src/io/StepModelLoader.h
     src/io/StepModelLoader.cpp
+    src/io/StepModelExporter.h
+    src/io/StepModelExporter.cpp
     src/io/PlyReader.h
     src/io/PlyReader.cpp
     src/io/CameraInfoBuilder.h
@@ -241,6 +243,18 @@ endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(step_model_exporter_test tests/step_model_exporter_test.cpp
+        src/io/StepModelExporter.cpp src/io/StepModelLoader.cpp)
+    target_include_directories(step_model_exporter_test PRIVATE src)
+    target_link_directories(step_model_exporter_test PRIVATE ${OpenCASCADE_LIBRARY_DIR})
+    target_link_libraries(step_model_exporter_test PRIVATE
+        Qt6::Core CadModelCore::CadModelCore TKDE TKXSBase TKDESTEP)
+    if(MSVC)
+        target_compile_options(step_model_exporter_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME step_model_exporter_test COMMAND step_model_exporter_test)
+    set_tests_properties(step_model_exporter_test PROPERTIES TIMEOUT 60
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(point_cloud_document_test tests/point_cloud_document_test.cpp
         src/core/PointCloudDocument.h src/core/PointCloudDocument.cpp
         src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp

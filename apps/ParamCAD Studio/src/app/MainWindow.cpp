@@ -104,7 +104,7 @@ void MainWindow::createWorkspaceControllers()
         {m_viewer, m_modelingPanel, m_relationsPanel, m_structureTabs, m_scenePanel,
          m_propertyPanel, m_reconstructCadAction, m_cancelCadAction, m_reconstructToolAction}, this, this);
     m_modelViewController = new ModelViewController(capture,
-        {m_viewer, m_propertyPanel, m_scenePanel}, this, this);
+        {m_viewer, m_propertyPanel, m_scenePanel, m_exportStepAction}, this, this);
 
     WorkspaceController* workspaces[] = {
         m_sketchWorkspace, m_captureWorkspace, m_pointCloudWorkspace, m_modelViewController};
@@ -170,6 +170,10 @@ void MainWindow::createActions()
     m_closeAction = new QAction(tr("Close Model"), this);
     m_saveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Save"), this);
     m_saveAction->setShortcut(QKeySequence::Save);
+    m_exportStepAction = new QAction(tr("Export STEP..."), this);
+    m_exportStepAction->setObjectName(QStringLiteral("exportStepAction"));
+    m_exportStepAction->setToolTip(tr("Export the current CAD geometry in millimetres"));
+    m_exportStepAction->setEnabled(false);
     m_exitAction = new QAction(tr("Exit"), this);
     m_exitAction->setShortcut(QKeySequence::Quit);
 
@@ -208,6 +212,7 @@ void MainWindow::createMenus()
     fileMenu->addAction(m_closeAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_saveAction);
+    fileMenu->addAction(m_exportStepAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_exitAction);
 
@@ -363,6 +368,7 @@ void MainWindow::connectUi()
     connect(m_closeAction, &QAction::triggered,
             m_pointCloudWorkspace, &PointCloudWorkspaceController::cancelCadReconstruction);
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::saveProject);
+    connect(m_exportStepAction, &QAction::triggered, m_modelViewController, &ModelViewController::exportModel);
     connect(m_exitAction, &QAction::triggered, qApp, &QApplication::closeAllWindows);
 
     connect(m_resetCameraAction, &QAction::triggered, this, [this]() {

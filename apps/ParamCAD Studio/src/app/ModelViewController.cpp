@@ -3,12 +3,14 @@
 #include "app/ProjectPaths.h"
 #include "io/CameraInfoBuilder.h"
 #include "io/StepModelLoader.h"
+#include "io/StepModelExporter.h"
 #include "ui/panels/PropertyPanel.h"
 #include "ui/panels/RenderPanel.h"
 #include "ui/panels/ScenePanel.h"
 #include "ui/viewport/VTKViewer.h"
 
 #include <QApplication>
+#include <QAction>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -27,6 +29,13 @@ ModelViewController::ModelViewController(
     QWidget* dialogParent, QObject* parent)
     : WorkspaceController(dialogParent, parent), m_captureController(captureController), m_ui(ui)
 {
+    m_ui.exportStepAction->setEnabled(false);
+    connect(m_ui.viewer, &VTKViewer::bodyShapeChanged, this, [this](const TopoDS_Shape& shape) {
+        // Both STEP import and modeling rebuild publish here. Keep the exact
+        // native body currently presented, without rebuilding from render data.
+        m_currentBody = shape;
+        m_ui.exportStepAction->setEnabled(!shape.IsNull() && m_ui.viewer->hasBody());
+    });
 }
 
 void ModelViewController::connectUi()
@@ -146,10 +155,53 @@ void ModelViewController::clearTexture()
 void ModelViewController::closeModel()
 {
     m_ui.viewer->setObjectVisible(false);
+    m_currentBody.Nullify();
+    m_ui.exportStepAction->setEnabled(false);
     emit statusTextChanged(workspaceTr("Ready | Model: None | Camera: %1")
                                .arg(m_ui.viewer->cameraParameters().parallelProjection
                                         ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
     emit logInfo(workspaceTr("Model closed"));
+}
+
+bool ModelViewController::exportStepTo(const QString& path, QString& error) const
+{
+    return StepModelExporter::write(m_currentBody, path, error);
+}
+
+void ModelViewController::exportModel()
+{
+    if (m_currentBody.IsNull()) {
+        emit logWarning(workspaceTr("Create or import a CAD model before exporting STEP."));
+        emit statusMessage(workspaceTr("No CAD model to export"), 3500);
+        return;
+    }
+    const quint64 revision = m_ui.viewer->bodyRevision();
+    QString path = QFileDialog::getSaveFileName(m_dialogParent, workspaceTr("Export STEP"),
+        QDir(ProjectPaths::outputsRoot()).filePath(QStringLiteral("model.step")),
+        workspaceTr("STEP Files (*.step *.stp)"));
+    if (path.isEmpty()) return;
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix != QStringLiteral("step") && suffix != QStringLiteral("stp")) path += QStringLiteral(".step");
+
+    // The save dialog runs a nested event loop: imports, close and a background
+    // CAD completion must not silently change which body the user is exporting.
+    if (revision != m_ui.viewer->bodyRevision() || m_currentBody.IsNull()) {
+        const QString message = workspaceTr("The model changed while choosing a file. Export STEP again.");
+        emit logWarning(message);
+        emit statusMessage(message, 5000);
+        return;
+    }
+    QString error;
+    if (!exportStepTo(path, error)) {
+        const QString message = workspaceTr("Could not export STEP to %1: %2").arg(path, error);
+        emit logError(message);
+        emit statusMessage(message, 5000);
+        QMessageBox::warning(m_dialogParent, workspaceTr("Export STEP"), message);
+        return;
+    }
+    const QString message = workspaceTr("STEP model exported to %1").arg(QFileInfo(path).absoluteFilePath());
+    emit logInfo(message);
+    emit statusMessage(message, 5000);
 }
 
 bool ModelViewController::runPerformanceCapture(const QString& modelPath,

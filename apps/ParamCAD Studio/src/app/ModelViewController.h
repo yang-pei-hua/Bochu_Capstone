@@ -4,6 +4,7 @@
 #include "io/ModelLoader.h"
 
 class CaptureController;
+class QAction;
 class PropertyPanel;
 class ScenePanel;
 class VTKViewer;
@@ -13,9 +14,11 @@ struct ModelViewUi
     VTKViewer* viewer;
     PropertyPanel* propertyPanel;
     ScenePanel* scenePanel;
+    QAction* exportStepAction;
 };
 
-// Keeps imported B-Rep ownership, model presentation and validation capture here.
+// Owns the current native B-Rep for STEP export, import metadata, presentation
+// controls and validation capture.
 class ModelViewController final : public WorkspaceController
 {
     Q_OBJECT
@@ -25,6 +28,8 @@ public:
     void connectUi();
     void openModel();
     void closeModel();
+    void exportModel();
+    bool exportStepTo(const QString& path, QString& error) const;
     void chooseTexture();
     void clearTexture();
     bool runPerformanceCapture(const QString& modelPath, const QString& outputDirectory,
@@ -34,4 +39,5 @@ private:
     CaptureController* const m_captureController;
     const ModelViewUi m_ui;
     LoadedModel m_loadedModel;
+    TopoDS_Shape m_currentBody;
 };

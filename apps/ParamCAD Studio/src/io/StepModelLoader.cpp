@@ -16,10 +16,11 @@
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
-#include <QFile>
 #include <QFileInfo>
 
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -135,10 +136,12 @@ bool StepModelLoader::load(const QString& filePath, LoadedModel& model,
     try {
         STEPControl_Reader reader;
 
-        // OCCT opens the path with the process' native encoding, so the name is
-        // converted rather than passed as UTF-16.
-        const QByteArray nativePath = QFile::encodeName(info.absoluteFilePath());
-        if (reader.ReadFile(nativePath.constData()) != IFSelect_RetDone) {
+        // Let the C++ filesystem stream open the Unicode path (UTF-16 on
+        // Windows). Passing UTF-8 bytes to OCCT's narrow fopen loses names.
+        const auto path = std::filesystem::u8path(info.absoluteFilePath().toUtf8().toStdString());
+        std::ifstream input(path, std::ios::binary);
+        const QByteArray name = info.fileName().toUtf8();
+        if (!input || reader.ReadStream(name.constData(), input) != IFSelect_RetDone) {
             errorMessage = stepError(
                 fileName,
                 QStringLiteral("OpenCASCADE could not read it; the file is "

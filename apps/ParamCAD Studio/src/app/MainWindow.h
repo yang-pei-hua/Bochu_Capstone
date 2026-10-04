@@ -83,6 +83,7 @@ private:
     QAction* m_textureAction = nullptr;
     QAction* m_closeAction = nullptr;
     QAction* m_saveAction = nullptr;
+    QAction* m_exportStepAction = nullptr;
     QAction* m_exitAction = nullptr;
     QAction* m_resetCameraAction = nullptr;
     QAction* m_frontViewAction = nullptr;

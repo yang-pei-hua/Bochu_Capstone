@@ -102,7 +102,7 @@ and feature-specific signal connections live in the following controllers:
 | `SketchWorkspaceController` | Plane selection, sketch session/drafts, entity edits, extrude/cut, feature deletion, rebuild feedback and camera restoration |
 | `PointCloudWorkspaceController` | Routes panel intents to the cloud document, coordinates asynchronous fitting and photo reconstruction, and guards CAD candidate commits |
 | `CaptureWorkspaceController` | Screenshot/photo/orbit intents, capture output settings, shot list, batch feedback and capture distance synchronization |
-| `ModelViewController` | Imported B-Rep lifetime, STEP import, model visibility, texture controls and performance capture entry |
+| `ModelViewController` | Imported/current B-Rep lifetime, STEP import/export, model visibility, texture controls and performance capture entry |
 
 Each workspace receives a small `*Ui` aggregate of borrowed view pointers and the
 command controllers it needs. Workspaces do not depend on `MainWindow` or each
@@ -152,6 +152,23 @@ effect between calculation stages and before result delivery; it does not abort
 a geometry-library call midway. The model stays unchanged by cancelled or stale
 results, and window destruction joins the worker before destroying its views.
 
+**File → Export STEP...** writes the current native CAD geometry in model
+coordinates (millimetres), from sketch/extrude/cut, point-cloud reconstruction
+or STEP import. The entry is disabled until a body exists and after **Close
+Model**. `.step` and `.stp` are accepted, with `.step` added when needed. The
+save dialog supplies the standard overwrite confirmation; cancelling leaves
+files and the model untouched. If the body changes while choosing a file,
+the export is rejected and can be restarted for the new model.
+
+`ModelViewController` retains an OCCT handle from `VTKViewer::bodyShapeChanged`,
+so STEP import cannot accidentally export an older body in the modeling core.
+The viewport remains a render cache. `io/StepModelExporter` adapts the core's
+stream-based AP214 STEP serializer to `QSaveFile`, supporting Unicode paths and
+atomic replacement even when writing or committing fails. STEP import also uses
+a Unicode-aware input stream. Export contains CAD geometry; camera/display
+transforms, textures, point-cloud annotations and editable feature history are
+not serialized into STEP. Project persistence remains a separate operation.
+
 With `CAD_CLIENT_BUILD_TESTS=ON`, `workspace_interaction_test` drives the actual
 window's sketch/extrude/cut, import/texture and capture connections, checks the
 validation output and exercises destruction while analysis is pending. The
@@ -160,6 +177,10 @@ attaching/destroying a view around an independently edited document.
 `point_cloud_document_test` exercises the document without a render window:
 source identity, signals, snapshots and original IDs, annotation/PLY round trips,
 undo, failed loads and revision invalidation on replacement/clear.
+`step_model_exporter_test` checks stream failures, Chinese paths, solid/through-hole
+round trips and preservation of an existing file when replacement is blocked.
+Workspace interaction drives the export menu/dialog for modeled, imported and
+reconstructed bodies, extension handling, cancellation and stale/closed models.
 `cad_reconstruction_task_test` covers worker results, dimensional accuracy,
 duplicate requests, cancellation (including queued completion), failure paths
 and destruction. Workspace interaction also covers cancellation and invalidation
@@ -181,6 +202,7 @@ to replay them through the worker (from this directory):
   OpenCASCADE → VTK tessellation adapter
 - Modeling panel that edits sketch/extrude/cut parameters and rebuilds the body
 - VTK viewport with trackball interaction and orientation axes
+- STEP export of the current native CAD model with Unicode paths and atomic replacement
 - Object transform/display controls with live actor updates
 - Editable VTK camera parameters and six standard views
 - Perspective/orthographic switching
@@ -337,7 +359,6 @@ across the interactive `captures/` and `reconstructions/` roots.
 - Interactive sketching, face picking, and SolidWorks-style mouse and keyboard
   mapping
 - Undo/redo and a persistent feature tree with in-place editing
-- STEP export from the client
 - Real OBJ/PLY mesh parsing and persistent project save/load
 - Point-cloud meshing, CAD alignment, and AI editing
 - Production scene graph, selection, task progress, FPS, and mesh stats
