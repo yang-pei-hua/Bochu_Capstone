@@ -6,6 +6,12 @@
 #include <QSize>
 
 #include <vtkActor.h>
+#include <vtkBoxWidget2.h>
+#include <vtkBoxRepresentation.h>
+#include <vtkWidgetEventTranslator.h>
+#include <vtkPlanes.h>
+#include <vtkPointPicker.h>
+#include <vtkProperty.h>
 #include <vtkAxesActor.h>
 #include <vtkCallbackCommand.h>
 #include <vtkCamera.h>
@@ -96,6 +102,21 @@ VTKViewer::VTKViewer(QWidget* parent)
         onKeyPressed(keySym);
     };
     m_renderWindow->GetInteractor()->SetInteractorStyle(m_interactorStyle);
+    m_pointBox = vtkSmartPointer<vtkBoxWidget2>::New();
+    m_pointBoxRepresentation = vtkSmartPointer<vtkBoxRepresentation>::New();
+    m_pointBox->SetRepresentation(m_pointBoxRepresentation);
+    m_pointBox->SetInteractor(m_renderWindow->GetInteractor());
+    m_pointBox->SetDefaultRenderer(m_renderer);
+    m_pointBox->KeyPressActivationOff();
+    // Preserve the client's middle-orbit / right-pan camera bindings while
+    // the box is active. Box manipulation uses left-button gestures only.
+    for (unsigned long event : {vtkCommand::MiddleButtonPressEvent, vtkCommand::MiddleButtonReleaseEvent,
+                                vtkCommand::RightButtonPressEvent, vtkCommand::RightButtonReleaseEvent}) {
+        m_pointBox->GetEventTranslator()->RemoveTranslation(event);
+    }
+    m_pointBoxRepresentation->SetPlaceFactor(0.5);
+    m_pointBoxRepresentation->GetOutlineProperty()->SetColor(1.0, 0.65, 0.15);
+    m_pointBoxRepresentation->GetSelectedOutlineProperty()->SetColor(1.0, 0.85, 0.35);
 
     m_renderer->AddActor(m_bodyActor.surfaceActor());
     m_renderer->AddActor(m_bodyActor.edgeActor());
@@ -119,6 +140,8 @@ VTKViewer::VTKViewer(QWidget* parent)
 }
 VTKViewer::~VTKViewer()
 {
+    m_pointBox->SetEnabled(0);
+    m_pointBox->SetInteractor(nullptr);
     if (m_renderer && m_renderer->GetActiveCamera() && m_cameraObserverTag != 0) {
         m_renderer->GetActiveCamera()->RemoveObserver(m_cameraObserverTag);
     }
@@ -186,6 +209,7 @@ ViewportTool VTKViewer::viewportTool() const noexcept
 
 void VTKViewer::setSketchInteractionEnabled(bool enabled)
 {
+    if (enabled) setPointCloudSelectionMode(0);
     m_sketchInteraction = enabled;
     if (!enabled) {
         clearSketchDraft();
@@ -536,6 +560,23 @@ bool VTKViewer::pickSketchEntityAt(int x, int y, modeling::SketchEntityId& entit
 
 void VTKViewer::onLeftButtonPressed(int x, int y)
 {
+    if (!m_sketchInteraction && m_pointSelectionMode != 0) {
+        if (m_pointSelectionMode == 1 && hasPointCloud() && m_pointCloudVisible) {
+            vtkNew<vtkPointPicker> picker;
+            picker->UseCellsOn(); // Deleted observations have no render cells.
+            picker->PickFromListOn();
+            picker->AddPickList(m_pointCloudActor.actor());
+            picker->SetTolerance(0.008);
+            picker->Pick(x, y, 0.0, m_renderer);
+            const vtkIdType id = picker->GetPointId();
+            const bool add = m_renderWindow->GetInteractor()->GetControlKey()
+                || m_renderWindow->GetInteractor()->GetShiftKey();
+            if (add) m_pointSelection.toggle(id);
+            else m_pointSelection.select(id >= 0 ? std::vector<vtkIdType>{id} : std::vector<vtkIdType>{});
+            refreshPointCloudSelection();
+        }
+        return;
+    }
     if (m_sketchInteraction) {
         if (m_tool == ViewportTool::Select) {
             modeling::SketchEntityId entityId = modeling::kInvalidSketchEntityId;
@@ -612,6 +653,10 @@ void VTKViewer::onMouseMoved(int x, int y)
 
 void VTKViewer::onCancelRequested()
 {
+    if (m_pointSelectionMode != 0) {
+        setPointCloudSelectionMode(0);
+        return;
+    }
     clearSketchDraft();
     renderNow();
     emit sketchCancelled();
@@ -619,6 +664,10 @@ void VTKViewer::onCancelRequested()
 
 void VTKViewer::onKeyPressed(const std::string& keySym)
 {
+    if (m_pointSelectionMode != 0 && keySym == "Escape") {
+        setPointCloudSelectionMode(0);
+        return;
+    }
     // Outside a sketch the Delete key means nothing here, so it stays unclaimed
     // for whatever widget owns the focus.
     if (!m_sketchInteraction) {
@@ -641,6 +690,9 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     // usable as reconstruction input whatever the editor was showing.
     const bool datumPlanesWereVisible = m_datumPlanesVisible;
     const int highlightedFace = m_highlightedFace;
+    const bool boxWasVisible = m_pointBox->GetEnabled() != 0;
+    m_pointBox->SetEnabled(0);
+    m_pointCloudActor.setAnnotations(nullptr);
     m_datumPlanes.setVisible(false);
     m_bodyActor.clearHighlight();
     if (m_orientationWidget) {
@@ -669,6 +721,8 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     const bool written = writer->GetErrorCode() == 0;
 
     m_datumPlanes.setVisible(datumPlanesWereVisible);
+    m_pointBox->SetEnabled(boxWasVisible ? 1 : 0);
+    m_pointCloudActor.setAnnotations(&m_pointSelection);
     if (highlightedFace >= 0) {
         m_bodyActor.highlightFace(highlightedFace);
     }
@@ -695,10 +749,23 @@ bool VTKViewer::loadPointCloud(const QString& plyPath, QString& error)
     if (!PlyReader::read(plyPath, cloud, error)) {
         return false;
     }
+    if (cloud.positions.empty()) {
+        error = tr("Point cloud is empty: %1").arg(plyPath);
+        return false;
+    }
     if (!m_pointCloudActor.setCloud(cloud)) {
         error = QStringLiteral("point cloud is empty: %1").arg(plyPath);
         return false;
     }
+    m_pointSelection.setCloud(cloud);
+    m_pointCloudActor.setPointMask(m_pointSelection.deleted());
+    m_pointCloudSourcePath = plyPath;
+    m_pointCloudVisible = true;
+    m_pointCloudActor.setVisible(true);
+    resetPointCloudBox();
+    setPointCloudSelectionMode(m_sketchInteraction ? 0 : 1);
+    emit pointCloudLoaded();
+    emit pointCloudDocumentChanged();
     m_renderer->ResetCameraClippingRange();
     renderNow();
     return true;
@@ -706,7 +773,12 @@ bool VTKViewer::loadPointCloud(const QString& plyPath, QString& error)
 
 void VTKViewer::clearPointCloud()
 {
+    m_pointSelection.setCloud(PlyCloud{});
+    m_pointCloudSourcePath.clear();
+    setPointCloudSelectionMode(0);
     m_pointCloudActor.clear();
+    emit pointCloudDocumentChanged();
+    emit pointCloudSelectionChanged();
     m_renderer->ResetCameraClippingRange();
     renderNow();
 }
@@ -774,8 +846,168 @@ int VTKViewer::textureProjection() const noexcept
 
 void VTKViewer::setPointCloudVisible(bool visible)
 {
+    m_pointCloudVisible = visible;
+    if (!visible) setPointCloudSelectionMode(0);
     m_pointCloudActor.setVisible(visible);
     renderNow();
+}
+
+void VTKViewer::setPointCloudSelectionMode(int mode)
+{
+    m_pointSelectionMode = hasPointCloud() && m_pointCloudVisible && !m_sketchInteraction
+        ? std::clamp(mode, 0, 2) : 0;
+    m_pointBox->SetEnabled(m_pointSelectionMode == 2 ? 1 : 0);
+    emit pointCloudSelectionChanged();
+    renderNow();
+}
+
+double VTKViewer::suggestedPointCloudRadius() const
+{
+    double bounds[6];
+    m_pointCloudActor.bounds(bounds);
+    return std::max(0.000001, std::hypot(std::hypot(bounds[1] - bounds[0],
+        bounds[3] - bounds[2]), bounds[5] - bounds[4]) * 0.02);
+}
+
+void VTKViewer::resetPointCloudBox()
+{
+    if (!hasPointCloud()) return;
+    double bounds[6];
+    m_pointCloudActor.bounds(bounds);
+    const double span = std::max({bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4], 1.0e-6});
+    // Planar and single-point clouds still need non-degenerate box handles.
+    for (int axis = 0; axis < 3; ++axis) {
+        if (bounds[axis * 2 + 1] - bounds[axis * 2] < span * 0.01) {
+            bounds[axis * 2] -= span * 0.01;
+            bounds[axis * 2 + 1] += span * 0.01;
+        }
+    }
+    m_pointBoxRepresentation->PlaceWidget(bounds);
+    renderNow();
+}
+
+void VTKViewer::selectPointCloudBox(bool add)
+{
+    if (m_pointSelectionMode != 2) return;
+    vtkNew<vtkPlanes> planes;
+    m_pointBoxRepresentation->GetPlanes(planes);
+    m_pointSelection.selectBox(planes, add);
+    refreshPointCloudSelection();
+}
+
+void VTKViewer::refreshPointCloudSelection(bool documentChanged)
+{
+    if (documentChanged) {
+        m_pointCloudActor.setPointMask(m_pointSelection.deleted());
+        m_renderer->ResetCameraClippingRange();
+        emit pointCloudDocumentChanged();
+    }
+    m_pointCloudActor.setAnnotations(&m_pointSelection);
+    emit pointCloudSelectionChanged();
+    renderNow();
+}
+
+void VTKViewer::expandPointCloudSelection(double radius)
+{
+    m_pointSelection.expand(radius);
+    refreshPointCloudSelection();
+}
+void VTKViewer::clearPointCloudSelection()
+{
+    m_pointSelection.select({});
+    refreshPointCloudSelection();
+}
+void VTKViewer::assignPointCloudRegion(const QString& geometry, const QString& name, int regionId)
+{
+    m_pointSelection.assign(geometry, name, regionId);
+    refreshPointCloudSelection(true);
+}
+void VTKViewer::selectPointCloudRegion(int regionId)
+{
+    m_pointSelection.selectRegion(regionId);
+    refreshPointCloudSelection();
+}
+void VTKViewer::removePointCloudRegion(int regionId)
+{
+    m_pointSelection.removeRegion(regionId);
+    refreshPointCloudSelection(true);
+}
+void VTKViewer::unassignPointCloudSelection()
+{
+    m_pointSelection.unassign();
+    refreshPointCloudSelection(true);
+}
+bool VTKViewer::savePointCloudAnnotations(const QString& path, QString& error) const
+{
+    return m_pointSelection.save(path, m_pointCloudSourcePath, error);
+}
+bool VTKViewer::loadPointCloudAnnotations(const QString& path, QString& error)
+{
+    if (!m_pointSelection.load(path, error)) return false;
+    refreshPointCloudSelection(true);
+    return true;
+}
+
+PlyCloud VTKViewer::workingPointCloud(std::vector<vtkIdType>* ids, bool unassignedOnly, int regionId) const
+{
+    return m_pointSelection.workingCloud(ids, unassignedOnly, regionId);
+}
+void VTKViewer::replacePointCloudRegionPoints(int id)
+{
+    m_pointSelection.replaceRegionPoints(id); refreshPointCloudSelection(true);
+}
+void VTKViewer::updatePointCloudRegionFit(int id, const PointCloudRegion& fitted)
+{
+    m_pointSelection.updateRegionFit(id, fitted); refreshPointCloudSelection(true);
+}
+void VTKViewer::editPointCloudRegion(int id, const QString& name, const QString& geometry)
+{
+    m_pointSelection.editRegion(id, name, geometry); refreshPointCloudSelection(true);
+}
+void VTKViewer::deletePointCloudRegionPoints(int id)
+{
+    m_pointSelection.deleteRegionPoints(id); refreshPointCloudSelection(true);
+}
+void VTKViewer::deleteSelectedPointCloudPoints()
+{
+    m_pointSelection.deleteSelectedPoints(); refreshPointCloudSelection(true);
+}
+void VTKViewer::selectUnassignedPointCloudPoints()
+{
+    m_pointSelection.selectUnassigned(); refreshPointCloudSelection();
+}
+void VTKViewer::selectPointCloudPoint(vtkIdType id)
+{
+    m_pointSelection.select({id}); refreshPointCloudSelection();
+}
+void VTKViewer::selectPointCloudRelation(int id)
+{
+    m_pointSelection.selectRelation(id); refreshPointCloudSelection();
+}
+int VTKViewer::setPointCloudRelation(int id, int first, int second, const QString& type)
+{
+    const int result = m_pointSelection.setRelation(id, first, second, type);
+    refreshPointCloudSelection(true); return result;
+}
+void VTKViewer::removePointCloudRelation(int id)
+{
+    m_pointSelection.removeRelation(id); refreshPointCloudSelection(true);
+}
+void VTKViewer::inferPointCloudRelations(double distanceTolerance, double angleDegrees)
+{
+    m_pointSelection.inferRelations(distanceTolerance, angleDegrees); refreshPointCloudSelection(true);
+}
+void VTKViewer::addPointCloudSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces)
+{
+    m_pointSelection.addSurfaces(surfaces); refreshPointCloudSelection(true);
+}
+void VTKViewer::undoPointCloudEdit()
+{
+    if (m_pointSelection.undo()) refreshPointCloudSelection(true);
+}
+bool VTKViewer::exportPointCloud(const QString& path, QString& error) const
+{
+    return m_pointSelection.exportCloud(path, error);
 }
 
 void VTKViewer::setPointCloudPointSize(double size)

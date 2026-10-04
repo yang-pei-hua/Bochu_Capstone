@@ -24,6 +24,8 @@ class SketchPanel;
 class SketchToolPalette;
 class QTabWidget;
 class VTKViewer;
+class QThread;
+class PointCloudRelationsPanel;
 
 class MainWindow final : public QMainWindow
 {
@@ -31,6 +33,7 @@ class MainWindow final : public QMainWindow
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
 
     // Runs the deterministic render half of the performance-validation flow.
     // The caller owns the case directory; this method writes images/, camera
@@ -110,6 +113,7 @@ private:
     void openPointCloud();
     // Recognizes a box in the loaded cloud and commits it to the model.
     void reconstructCad();
+    void startPointCloudAnalysis(int regionId = 0);
     void chooseTexture();
     void clearTexture();
     void closeModel();
@@ -130,6 +134,9 @@ private:
     CaptureController* m_captureController = nullptr;
     ReconstructionController* m_reconstructionController = nullptr;
     ModelingPanel* m_modelingPanel = nullptr;
+    PointCloudRelationsPanel* m_relationsPanel = nullptr;
+    QTabWidget* m_structureTabs = nullptr;
+    QThread* m_analysisThread = nullptr;
     ScenePanel* m_scenePanel = nullptr;
     PropertyPanel* m_propertyPanel = nullptr;
     SketchPanel* m_sketchPanel = nullptr;

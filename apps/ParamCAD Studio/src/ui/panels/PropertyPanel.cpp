@@ -5,6 +5,7 @@
 #include "ui/panels/ReconstructPanel.h"
 #include "ui/panels/RenderPanel.h"
 #include "ui/panels/SketchEntityPanel.h"
+#include "ui/panels/PointCloudPanel.h"
 
 #include <QCheckBox>
 #include <QColorDialog>
@@ -53,6 +54,7 @@ PropertyPanel::PropertyPanel(QWidget* parent)
     , m_capturePanel(new CapturePanel(this))
     , m_reconstructPanel(new ReconstructPanel(this))
     , m_sketchEntityPanel(new SketchEntityPanel(this))
+    , m_pointCloudPanel(new PointCloudPanel(this))
 {
     // The sketch editor is built detached from the tab widget, so it has to stay
     // hidden until showSketchEntityPanel() inserts it. A child widget that is
@@ -68,6 +70,7 @@ PropertyPanel::PropertyPanel(QWidget* parent)
     m_objectTab->hide();
     m_tabs->addTab(m_cameraPanel, tr("Camera"));
     m_tabs->addTab(m_renderPanel, tr("Render"));
+    m_tabs->addTab(m_pointCloudPanel, tr("点云"));
     // Capture and Reconstruct are tools, not permanent tabs: they are inserted
     // on demand.
 
@@ -80,6 +83,9 @@ CameraPanel* PropertyPanel::cameraPanel() const
 {
     return m_cameraPanel;
 }
+
+PointCloudPanel* PropertyPanel::pointCloudPanel() const { return m_pointCloudPanel; }
+void PropertyPanel::showPointCloudProperties() { m_tabs->setCurrentWidget(m_pointCloudPanel); }
 
 RenderPanel* PropertyPanel::renderPanel() const
 {

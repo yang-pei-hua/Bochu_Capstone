@@ -15,6 +15,7 @@ class QTabWidget;
 class ReconstructPanel;
 class RenderPanel;
 class SketchEntityPanel;
+class PointCloudPanel;
 
 class PropertyPanel final : public QWidget
 {
@@ -28,6 +29,8 @@ public:
     CapturePanel* capturePanel() const;
     ReconstructPanel* reconstructPanel() const;
     SketchEntityPanel* sketchEntityPanel() const;
+    PointCloudPanel* pointCloudPanel() const;
+    void showPointCloudProperties();
 
     void showCapturePanel(bool visible);
     bool isCapturePanelVisible() const;
@@ -62,6 +65,7 @@ private:
     CapturePanel* m_capturePanel = nullptr;
     ReconstructPanel* m_reconstructPanel = nullptr;
     SketchEntityPanel* m_sketchEntityPanel = nullptr;
+    PointCloudPanel* m_pointCloudPanel = nullptr;
 
     std::array<QDoubleSpinBox*, 3> m_position{};
     std::array<QDoubleSpinBox*, 3> m_rotation{};

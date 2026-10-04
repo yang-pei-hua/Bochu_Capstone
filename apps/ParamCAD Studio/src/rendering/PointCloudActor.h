@@ -10,6 +10,7 @@ class vtkPoints;
 class vtkPolyData;
 class vtkPolyDataMapper;
 class vtkUnsignedCharArray;
+class PointCloudSelection;
 
 // Owns the VTK pipeline that draws one reconstructed point cloud. Like
 // BodyActor it is a display cache: the cloud on disk stays the source of truth.
@@ -25,6 +26,8 @@ public:
 
     void setVisible(bool visible);
     void setPointSize(double size);
+    void setAnnotations(const PointCloudSelection* selection);
+    void setPointMask(const std::vector<unsigned char>& deleted);
 
     // Bounds of the loaded cloud, or six zeroes when there is none.
     void bounds(double out[6]) const;
@@ -40,4 +43,6 @@ private:
     vtkSmartPointer<vtkActor> m_actor;
     bool m_hasCloud = false;
     bool m_visible = true;
+    std::vector<std::array<unsigned char, 3>> m_sourceColors;
+    std::vector<unsigned char> m_deleted;
 };

@@ -126,6 +126,88 @@ vertical focal lengths. Per-image `shot_NNN.json` sidecars are still written for
 backwards compatibility. Reconstruction prefers manifest v2 and falls back to
 the sidecars for older capture folders.
 
+## Point-cloud selection and template annotations
+
+Open a PLY with **File → Open Point Cloud**, then use **Properties → 点云**
+(also opened by selecting the Point Cloud scene node).
+
+- **单点选择**: left click picks a point; Ctrl/Shift + left click adds or removes
+  individual points. A plain click replaces the selection.
+- **三维框选**: drag the face handles to resize the box, drag a face to rotate it,
+  or Shift + left drag to translate it. Click **选取框内点** to select points inside
+  the actual 3D volume, including its depth. **框选追加到现有选区** keeps previous
+  points; **重置选择框** restores the initial box around the cloud centre.
+- Set **邻域半径（点云单位）**, then click **选取附近点 / 向外扩展一轮**. Each press
+  unions the Euclidean-radius neighbourhoods of all points selected before that
+  press. Newly added points become seeds on the next press. The radius uses the
+  original PLY coordinate units; its initial value is 2% of the bounding diagonal.
+- Choose a cuboid, sphere, cylinder, cone, plane, or ring template and an optional group
+  name, then click **将选中点归入此分组**. Choose an existing group to append points,
+  recall its selection, or delete it. Each point has one group; assigning it again
+  replaces its previous membership. Selection is orange; groups use distinct
+  palette colours. Manual template assignment creates a named point collection;
+  fitting its surface is a separate operation in the relationship page.
+- **保存标注… / 载入标注…** writes/reads a JSON sidecar with original point indices,
+  named groups, fitted parameters, relationships, deletion states, and a SHA-256
+  fingerprint of the point positions. Version 2 also remembers deleted automatic
+  relationships so updating the graph does not recreate them; version 1 group
+  annotations remain readable.
+  Import verifies coordinates and ordering before replacing the current labels.
+  Labels reset when a new cloud is loaded; save them before changing clouds.
+
+Middle drag rotates the view, right drag pans, and the wheel zooms in both
+selection modes. Escape or a right click without dragging returns to model
+interaction. Sketch editing also exits point-cloud selection. Capture excludes
+the selection box and annotation colours, then restores the editing state.
+
+## Editable point-cloud relationships
+
+The left **结构** dock has two pages: **点云关系** for source point collections and
+surface evidence, and **CAD 特征** for the existing parametric modeling history.
+Selecting a collection highlights its points; selecting a relationship highlights
+both endpoint collections. Expand a collection to see its fitted parameters,
+residual, confidence, paginated original point IDs and relationships. The point
+lookup field accepts a zero-based ID from the original PLY, including after edits.
+
+- On an imported PLY, click **识别未归属点** to detect plane, sphere, cylinder, cone
+  and torus surfaces in the background and map their support back to the original
+  points. Photo reconstruction starts this analysis automatically; CAD fitting
+  also starts it when at least 20 points remain unassigned. Existing collections
+  are preserved, and unknown points remain under **未归属点**. Results are discarded
+  if the document changes during analysis. A cuboid collection remains a manual
+  whole-object label; its individual faces can be identified as plane collections.
+- Under **集合**, edit a name/template, append the current selection, replace a
+  collection with the selection, or **重拟合此集合**. Changing memberships marks the
+  fit stale and invalidates automatic relationships; a successful refit updates
+  parameters while keeping the collection and its point IDs. Refitting requires
+  at least 20 points and a supported surface covering at least 70% of the group.
+- Under **关系**, add, edit or remove parallel, perpendicular, nearby/adjacent,
+  intersecting, coaxial, tangent, equal-radius and coplanar relationships. Inferred
+  relationships are geometric evidence under the current tolerances, rather than
+  exact CAD boundary topology or constraints that move geometry. Nearby/adjacent
+  means sampled point sets are within the distance tolerance. Manual relationships
+  remain explicit annotations even when the surface fit changes.
+- **分析设置** controls fit distance, relationship distance and angular tolerances.
+  Distances use the original PLY coordinate units. Click **更新关系** after adjusting
+  settings; previously deleted relationships remain suppressed.
+- **删除关系** keeps both collections and their points. **删除集合** removes its
+  relationships and releases its points to the unassigned collection.
+  **删除集合内所有点** and **删除当前选中的点** remove observations from the working
+  cloud: rendering, picking, box selection, expansion, subsequent surface/CAD
+  fitting and export all exclude them. These edits support **撤销** (20 steps).
+- **保存关系…** saves the same version 2 sidecar as Properties. To restore an edit
+  session, open the original PLY and load this sidecar. **导出当前工作点云…** writes a
+  separate binary PLY containing only active points, preserving normals/colours
+  and writing a unit metadata sidecar. Export compacts IDs and does not replace
+  the original PLY; relationship sidecars belong to the original cloud.
+
+With `CAD_CLIENT_BUILD_TESTS=ON`, `point_cloud_selection_test` covers selection and
+annotations, `point_cloud_relations_test` covers edits/persistence/deletions,
+`point_cloud_analysis_test` covers fitting and original point support after voxel
+downsampling, and `point_cloud_interaction_test` exercises the actual window,
+point picking, Properties, relationship actions, background results, camera
+gestures and capture using a hidden Qt/VTK window (requires working OpenGL).
+
 ## Outputs
 
 Everything the client writes stays inside the repository's `outputs/` folder,

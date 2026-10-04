@@ -73,6 +73,10 @@ qt_add_executable(CadPointCloudClient WIN32
     src/app/ReconstructionController.cpp
     src/core/Scene.h
     src/core/Scene.cpp
+    src/core/PointCloudSelection.h
+    src/core/PointCloudSelection.cpp
+    src/core/PointCloudEdits.cpp
+    src/core/PointCloudRelations.cpp
     src/core/CameraController.h
     src/core/CameraController.cpp
     src/core/OrbitCamera.h
@@ -82,6 +86,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/io/ModelLoader.h
     src/io/PointCloudAdapter.h
     src/io/PointCloudAdapter.cpp
+    src/io/PointCloudAnalysis.h
+    src/io/PointCloudAnalysis.cpp
     src/io/StepModelLoader.h
     src/io/StepModelLoader.cpp
     src/io/PlyReader.h
@@ -109,6 +115,10 @@ qt_add_executable(CadPointCloudClient WIN32
     src/ui/panels/ScenePanel.cpp
     src/ui/panels/PropertyPanel.h
     src/ui/panels/PropertyPanel.cpp
+    src/ui/panels/PointCloudPanel.h
+    src/ui/panels/PointCloudPanel.cpp
+    src/ui/panels/PointCloudRelationsPanel.h
+    src/ui/panels/PointCloudRelationsPanel.cpp
     src/ui/panels/CameraPanel.h
     src/ui/panels/CameraPanel.cpp
     src/ui/panels/CapturePanel.h
@@ -217,6 +227,58 @@ endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(point_cloud_relations_test tests/point_cloud_relations_test.cpp
+        src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp src/core/PointCloudRelations.cpp src/io/PlyReader.cpp)
+    target_include_directories(point_cloud_relations_test PRIVATE src)
+    target_link_libraries(point_cloud_relations_test PRIVATE Qt6::Core VTK::CommonCore VTK::CommonDataModel)
+    add_test(NAME point_cloud_relations_test COMMAND point_cloud_relations_test)
+    add_executable(point_cloud_analysis_test tests/point_cloud_analysis_test.cpp
+        src/io/PointCloudAnalysis.cpp src/io/PointCloudAdapter.cpp src/io/PlyReader.cpp)
+    target_include_directories(point_cloud_analysis_test PRIVATE src)
+    target_link_libraries(point_cloud_analysis_test PRIVATE
+        Qt6::Core VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction)
+    add_test(NAME point_cloud_analysis_test COMMAND point_cloud_analysis_test)
+    if(MSVC)
+        target_compile_options(point_cloud_relations_test PRIVATE /W4 /permissive- /utf-8)
+        target_compile_options(point_cloud_analysis_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    set_tests_properties(point_cloud_relations_test point_cloud_analysis_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
+    add_executable(point_cloud_selection_test
+        tests/point_cloud_selection_test.cpp
+        src/core/PointCloudSelection.cpp
+        src/core/PointCloudEdits.cpp
+        src/core/PointCloudRelations.cpp
+    )
+    target_include_directories(point_cloud_selection_test PRIVATE src)
+    target_link_libraries(point_cloud_selection_test PRIVATE Qt6::Core VTK::CommonCore VTK::CommonDataModel)
+    if(MSVC)
+        target_compile_options(point_cloud_selection_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME point_cloud_selection_test COMMAND point_cloud_selection_test)
+    set_tests_properties(point_cloud_selection_test PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>"
+    )
+    # Exercise the actual window connections and VTK picking, not a second
+    # wiring of the same widgets maintained only for tests.
+    get_target_property(CAD_CLIENT_TEST_SOURCES CadPointCloudClient SOURCES)
+    list(REMOVE_ITEM CAD_CLIENT_TEST_SOURCES src/main.cpp)
+    add_executable(point_cloud_interaction_test
+        tests/point_cloud_interaction_test.cpp ${CAD_CLIENT_TEST_SOURCES})
+    target_include_directories(point_cloud_interaction_test PRIVATE src)
+    target_link_directories(point_cloud_interaction_test PRIVATE ${OpenCASCADE_LIBRARY_DIR})
+    target_link_libraries(point_cloud_interaction_test PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Widgets ${VTK_LIBRARIES}
+        CadModelCore::CadModelCore GeometricReconstruction::GeometricReconstruction
+        TKDE TKXSBase TKDESTEP TKMesh)
+    vtk_module_autoinit(TARGETS point_cloud_interaction_test MODULES ${VTK_LIBRARIES})
+    if(MSVC)
+        target_compile_options(point_cloud_interaction_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME point_cloud_interaction_test COMMAND point_cloud_interaction_test)
+    set_tests_properties(point_cloud_interaction_test PROPERTIES TIMEOUT 60
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(orbit_camera_test
         tests/orbit_camera_test.cpp
         src/core/OrbitCamera.cpp
