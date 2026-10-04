@@ -39,6 +39,7 @@ public:
                               const SketchWorkspaceUi& ui,
                               QWidget* dialogParent, QObject* parent = nullptr);
     void connectUi();
+    void resetForProject();
 
 private:
     void onModelRebuilt();

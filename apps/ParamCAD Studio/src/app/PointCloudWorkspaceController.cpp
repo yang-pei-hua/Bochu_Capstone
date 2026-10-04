@@ -387,6 +387,13 @@ void PointCloudWorkspaceController::cancelCadReconstruction()
     m_cadTask->cancel();
 }
 
+void PointCloudWorkspaceController::prepareProjectReplacement()
+{
+    m_analyseAfterCad = false;
+    cancelCadReconstruction();
+    if (m_analysisThread) m_analysisThread->requestInterruption();
+}
+
 void PointCloudWorkspaceController::updateCadActions()
 {
     const bool running = m_cadTask->isRunning();

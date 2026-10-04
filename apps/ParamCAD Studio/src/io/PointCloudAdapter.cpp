@@ -1,10 +1,6 @@
 #include "io/PointCloudAdapter.h"
 
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
+#include "io/PointCloudMetadata.h"
 
 #include <algorithm>
 #include <array>
@@ -71,29 +67,6 @@ double diagonalOf(const reconstruction::PointStore& cloud)
     return std::sqrt(x * x + y * y + z * z);
 }
 
-reconstruction::LengthUnit unitFromManifest(const QString& path)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return reconstruction::LengthUnit::Arbitrary;
-    }
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    if (!document.isObject()) {
-        return reconstruction::LengthUnit::Arbitrary;
-    }
-    const QString unit = document.object().value(QStringLiteral("unit"))
-                             .toString().trimmed().toLower();
-    if (unit == QLatin1String("mm") || unit == QLatin1String("millimeter")
-        || unit == QLatin1String("millimetre")) {
-        return reconstruction::LengthUnit::Millimeter;
-    }
-    if (unit == QLatin1String("m") || unit == QLatin1String("meter")
-        || unit == QLatin1String("metre")) {
-        return reconstruction::LengthUnit::Meter;
-    }
-    return reconstruction::LengthUnit::Arbitrary;
-}
-
 }  // namespace
 
 reconstruction::PointStore PointCloudAdapter::toPointStore(
@@ -131,18 +104,9 @@ reconstruction::PointStore PointCloudAdapter::toPointStore(
 reconstruction::LengthUnit PointCloudAdapter::lengthUnitFor(
     const QString& pointCloudPath)
 {
-    const QFileInfo cloudInfo(pointCloudPath);
-    const QDir directory = cloudInfo.dir();
-    const QStringList candidates{
-        directory.filePath(QStringLiteral("workspace/reconstruction.json")),
-        directory.filePath(QStringLiteral("reconstruction.json")),
-        directory.filePath(cloudInfo.completeBaseName() + QStringLiteral(".json")),
-    };
-    for (const QString& candidate : candidates) {
-        if (QFileInfo(candidate).isFile()) {
-            return unitFromManifest(candidate);
-        }
-    }
+    const auto unit = pointCloudUnitName(pointCloudPath);
+    if (unit == QLatin1String("mm")) return reconstruction::LengthUnit::Millimeter;
+    if (unit == QLatin1String("m")) return reconstruction::LengthUnit::Meter;
     return reconstruction::LengthUnit::Arbitrary;
 }
 

@@ -254,6 +254,13 @@ CameraParameters CameraPanel::parameters() const
     return result;
 }
 
+bool CameraPanel::originLocked() const { return m_lookAtOrigin->isChecked(); }
+void CameraPanel::setOriginLock(bool locked)
+{
+    const QSignalBlocker block(m_lookAtOrigin);
+    m_lookAtOrigin->setChecked(locked); updateEnabledState();
+}
+
 void CameraPanel::applyFields()
 {
     if (m_feedbackSuppressed || m_authoringOrbit || m_snapping) {

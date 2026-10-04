@@ -79,6 +79,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/app/ModelingController.cpp
     src/app/CaptureController.h
     src/app/CaptureController.cpp
+    src/app/ProjectController.h
+    src/app/ProjectController.cpp
     src/app/ProjectPaths.h
     src/app/ProjectPaths.cpp
     src/app/ReconstructionController.h
@@ -89,7 +91,7 @@ qt_add_executable(CadPointCloudClient WIN32
     src/core/PointCloudDocument.cpp
     src/core/PointCloudSelection.h
     src/core/PointCloudSelection.cpp
-    src/core/PointCloudEdits.cpp
+    src/core/PointCloudEdits.cpp src/io/PlyWriter.cpp
     src/core/PointCloudRelations.cpp
     src/core/CameraController.h
     src/core/CameraController.cpp
@@ -97,9 +99,15 @@ qt_add_executable(CadPointCloudClient WIN32
     src/core/OrbitCamera.cpp
     src/core/SketchFrame.h
     src/core/SketchFrame.cpp
+    src/io/FeatureCodec.h
+    src/io/FeatureCodec.cpp
+    src/io/ProjectStore.h
+    src/io/ProjectStore.cpp
+    src/core/PresentationState.h
     src/io/ModelLoader.h
     src/io/PointCloudAdapter.h
     src/io/PointCloudAdapter.cpp
+    src/io/PointCloudMetadata.h
     src/io/PointCloudAnalysis.h
     src/io/PointCloudAnalysis.cpp
     src/io/StepModelLoader.h
@@ -243,6 +251,21 @@ endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(project_store_test tests/project_store_test.cpp
+        src/io/ProjectStore.cpp src/io/FeatureCodec.cpp src/io/PlyWriter.cpp
+        src/io/PlyReader.cpp src/io/PointCloudAdapter.cpp
+        src/core/PointCloudDocument.h src/core/PointCloudDocument.cpp
+        src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp src/core/PointCloudRelations.cpp)
+    target_include_directories(project_store_test PRIVATE src)
+    target_link_libraries(project_store_test PRIVATE Qt6::Core Qt6::Gui
+        VTK::CommonCore VTK::CommonDataModel CadModelCore::CadModelCore
+        GeometricReconstruction::GeometricReconstruction)
+    if(MSVC)
+        target_compile_options(project_store_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME project_store_test COMMAND project_store_test)
+    set_tests_properties(project_store_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(step_model_exporter_test tests/step_model_exporter_test.cpp
         src/io/StepModelExporter.cpp src/io/StepModelLoader.cpp)
     target_include_directories(step_model_exporter_test PRIVATE src)
@@ -257,7 +280,7 @@ if(CAD_CLIENT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(point_cloud_document_test tests/point_cloud_document_test.cpp
         src/core/PointCloudDocument.h src/core/PointCloudDocument.cpp
-        src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp
+        src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp src/io/PlyWriter.cpp
         src/core/PointCloudRelations.cpp src/io/PlyReader.cpp)
     target_include_directories(point_cloud_document_test PRIVATE src)
     target_link_libraries(point_cloud_document_test PRIVATE
@@ -281,7 +304,7 @@ if(CAD_CLIENT_BUILD_TESTS)
     set_tests_properties(cad_reconstruction_task_test PROPERTIES TIMEOUT 120
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(point_cloud_relations_test tests/point_cloud_relations_test.cpp
-        src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp src/core/PointCloudRelations.cpp src/io/PlyReader.cpp)
+        src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp src/io/PlyWriter.cpp src/core/PointCloudRelations.cpp src/io/PlyReader.cpp)
     target_include_directories(point_cloud_relations_test PRIVATE src)
     target_link_libraries(point_cloud_relations_test PRIVATE Qt6::Core VTK::CommonCore VTK::CommonDataModel)
     add_test(NAME point_cloud_relations_test COMMAND point_cloud_relations_test)
@@ -300,7 +323,7 @@ if(CAD_CLIENT_BUILD_TESTS)
     add_executable(point_cloud_selection_test
         tests/point_cloud_selection_test.cpp
         src/core/PointCloudSelection.cpp
-        src/core/PointCloudEdits.cpp
+        src/core/PointCloudEdits.cpp src/io/PlyWriter.cpp
         src/core/PointCloudRelations.cpp
     )
     target_include_directories(point_cloud_selection_test PRIVATE src)
@@ -317,7 +340,7 @@ if(CAD_CLIENT_BUILD_TESTS)
     # wiring of the same widgets maintained only for tests.
     get_target_property(CAD_CLIENT_TEST_SOURCES CadPointCloudClient SOURCES)
     list(REMOVE_ITEM CAD_CLIENT_TEST_SOURCES src/main.cpp)
-    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test)
+    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test project_interaction_test)
         add_executable(${interaction_test}
             tests/${interaction_test}.cpp ${CAD_CLIENT_TEST_SOURCES})
         target_include_directories(${interaction_test} PRIVATE src)

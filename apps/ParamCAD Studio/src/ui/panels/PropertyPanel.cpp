@@ -1,4 +1,5 @@
 #include "ui/panels/PropertyPanel.h"
+#include <QSignalBlocker>
 
 #include "ui/panels/CameraPanel.h"
 #include "ui/panels/CapturePanel.h"
@@ -248,6 +249,22 @@ void PropertyPanel::emitTransform()
         m_position[0]->value(), m_position[1]->value(), m_position[2]->value(),
         m_rotation[0]->value(), m_rotation[1]->value(), m_rotation[2]->value(),
         m_scale[0]->value(), m_scale[1]->value(), m_scale[2]->value());
+}
+
+ObjectPresentation PropertyPanel::presentation() const
+{
+    ObjectPresentation state;
+    for (size_t i=0;i<3;++i) { state.position[i]=m_position[i]->value(); state.rotation[i]=m_rotation[i]->value(); state.scale[i]=m_scale[i]->value(); }
+    state.visible=m_visible->isChecked(); state.representation=m_representation->currentIndex();
+    state.opacity=m_opacity->value(); state.color=m_objectColor;
+    return state;
+}
+void PropertyPanel::setPresentation(const ObjectPresentation& state)
+{
+    const QSignalBlocker block(this);
+    for (size_t i=0;i<3;++i) { m_position[i]->setValue(state.position[i]); m_rotation[i]->setValue(state.rotation[i]); m_scale[i]->setValue(state.scale[i]); }
+    m_visible->setChecked(state.visible); m_representation->setCurrentIndex(state.representation);
+    m_opacity->setValue(state.opacity); m_objectColor=state.color; updateColorButton();
 }
 
 void PropertyPanel::chooseObjectColor()

@@ -186,6 +186,10 @@ void VTKViewer::renderNow()
     m_renderWindow->Render();
 }
 
+double VTKViewer::parallelScale() const { return m_renderer->GetActiveCamera()->GetParallelScale(); }
+void VTKViewer::setParallelScale(double scale) { m_renderer->GetActiveCamera()->SetParallelScale(scale); renderNow(); }
+double VTKViewer::pointCloudPointSize() const { return m_pointCloudActor.actor()->GetProperty()->GetPointSize(); }
+
 void VTKViewer::setSketch(const modeling::SketchFeatureParams& params,
                           const sketchapp::PlaneFrame& frame)
 {
@@ -793,13 +797,22 @@ bool VTKViewer::loadBodyTexture(const QString& imagePath, QString& error)
     if (!m_bodyActor.setTextureFromFile(imagePath, error)) {
         return false;
     }
+    m_bodyTexturePath = imagePath;
     renderNow();
     return true;
 }
 
 void VTKViewer::clearBodyTexture()
 {
+    m_bodyTexturePath.clear();
     m_bodyActor.clearTexture();
+    renderNow();
+}
+
+void VTKViewer::setBodyTextureData(vtkImageData* image, const QString& path)
+{
+    m_bodyActor.setTextureData(image);
+    m_bodyTexturePath = path;
     renderNow();
 }
 
@@ -984,6 +997,27 @@ void VTKViewer::setObjectOpacity(double opacity)
 void VTKViewer::setObjectColor(const QColor& color)
 {
     m_bodyActor.setColor(color);
+    renderNow();
+}
+
+QColor VTKViewer::backgroundColor() const
+{
+    const auto* c = m_renderer->GetBackground();
+    return QColor::fromRgbF(c[0], c[1], c[2]);
+}
+
+QColor VTKViewer::backgroundColor2() const
+{
+    const auto* c = m_renderer->GetBackground2();
+    return QColor::fromRgbF(c[0], c[1], c[2]);
+}
+
+bool VTKViewer::gradientBackground() const { return m_renderer->GetGradientBackground(); }
+
+void VTKViewer::setBackgroundGradient(bool enabled, const QColor& secondary)
+{
+    m_renderer->SetBackground2(secondary.redF(), secondary.greenF(), secondary.blueF());
+    m_renderer->SetGradientBackground(enabled);
     renderNow();
 }
 

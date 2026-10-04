@@ -25,6 +25,9 @@ public:
     const std::vector<Feature>& features() const noexcept;
     const TopoDS_Shape& bodyShape() const noexcept;
     const std::string& lastError() const noexcept;
+    bool restoreFeatures(const std::vector<Feature>& features);
+    // Adopt an independently validated project while invalidating pending jobs.
+    void adoptPrepared(ModelingCore&& prepared);
 
     // Compatibility escape hatch for the existing client. New integrations
     // should use execute/apply and the read-only accessors above.

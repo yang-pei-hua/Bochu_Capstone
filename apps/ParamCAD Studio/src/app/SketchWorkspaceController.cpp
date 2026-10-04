@@ -209,6 +209,19 @@ void SketchWorkspaceController::onEmptyPicked()
     clearPendingSelection();
 }
 
+void SketchWorkspaceController::resetForProject()
+{
+    m_sketchFeatureId = modeling::kInvalidFeatureId;
+    if (m_sketchMode) {
+        exitSketchMode();
+    }
+    m_hasSketchFrame = false;
+    m_hasDraftAnchor = false;
+    clearPendingSelection();
+    pushSketchState();
+    m_ui.viewer->clearSketch();
+}
+
 void SketchWorkspaceController::onNewSketchRequested()
 {
     if (!m_pendingSketchPlane.has_value()) {

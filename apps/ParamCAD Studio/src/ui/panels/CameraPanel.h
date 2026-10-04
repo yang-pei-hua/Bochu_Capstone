@@ -27,6 +27,8 @@ public:
     // to the origin on the next camera change, so a pan drops the pin instead of
     // being undone by it.
     void releaseOriginLock();
+    bool originLocked() const;
+    void setOriginLock(bool locked);
 
 signals:
     void applyRequested(const CameraParameters& parameters);

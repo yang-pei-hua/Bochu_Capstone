@@ -27,6 +27,7 @@ public:
 
     std::vector<FeatureId> dependentsOf(FeatureId id) const;
     void clear();
+    bool restoreFeatures(const std::vector<Feature>& features);
 
     bool rebuild();
 

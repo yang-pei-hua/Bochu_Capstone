@@ -72,6 +72,7 @@ public:
     const std::vector<modeling::Feature>& features() const;
     modeling::ModelRevision revision() const noexcept;
     const QString& lastError() const noexcept;
+    void adoptProject(modeling::ModelingCore&& prepared);
 
 signals:
     void modelRebuilt();

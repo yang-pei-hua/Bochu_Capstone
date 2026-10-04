@@ -119,6 +119,23 @@ int RenderPanel::textureProjection() const
     return m_textureAxis->currentIndex();
 }
 
+RenderPresentation RenderPanel::presentation() const
+{
+    RenderPresentation state;
+    state.background=m_backgroundColor; state.lighting=m_lighting->isChecked();
+    state.textureEnabled=m_textureEnabled->isChecked(); state.width=outputWidth(); state.height=outputHeight();
+    state.textureProjection=textureProjection(); state.texturePath=m_texturePath->toolTip();
+    return state;
+}
+void RenderPanel::setPresentation(const RenderPresentation& state)
+{
+    const QSignalBlocker block(this);
+    m_backgroundColor=state.background; updateColorButton(); m_lighting->setChecked(state.lighting);
+    m_width->setValue(state.width); m_height->setValue(state.height);
+    m_textureAxis->setCurrentIndex(state.textureProjection); setTextureEnabled(state.textureEnabled);
+    setTexturePath(state.texturePath);
+}
+
 void RenderPanel::chooseBackgroundColor()
 {
     const QColor color = QColorDialog::getColor(m_backgroundColor, this, tr("Viewport Background"));

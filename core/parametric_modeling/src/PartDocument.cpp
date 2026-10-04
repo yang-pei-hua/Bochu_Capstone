@@ -173,6 +173,57 @@ FeatureId PartDocument::addFeature(const FeatureParams& params) {
     return id;
 }
 
+bool PartDocument::restoreFeatures(const std::vector<Feature>& features) {
+    PartDocument prepared;
+    std::unordered_set<FeatureId> ids;
+    for (const auto& feature : features) {
+        if (feature.id == 0 || feature.id == std::numeric_limits<FeatureId>::max()
+            || !ids.insert(feature.id).second || feature.type != featureTypeOf(feature.params)) {
+            lastError_ = "Invalid or duplicate feature ID/type in project";
+            return false;
+        }
+        std::string error;
+        if (!validateFeatureParams(feature.params, error)) {
+            lastError_ = error;
+            return false;
+        }
+        Feature copy = feature;
+        copy.valid = true;
+        copy.errorText.clear();
+        prepared.features_.push_back(std::move(copy));
+        prepared.nextFeatureId_ = std::max(prepared.nextFeatureId_, feature.id + 1);
+    }
+    // References must resolve upstream, including suppressed features.
+    std::unordered_set<FeatureId> upstream;
+    for (const auto& feature : prepared.features_) {
+        FeatureId dependency = 0;
+        bool hasDependency = false;
+        if (const auto* sketch = std::get_if<SketchFeatureParams>(&feature.params)) {
+            if (const auto* face = std::get_if<FaceReference>(&sketch->plane)) {
+                hasDependency = true;
+                dependency = face->ownerFeature;
+            }
+        } else if (const auto* extrude = std::get_if<ExtrudeFeatureParams>(&feature.params)) {
+            hasDependency = true;
+            dependency = extrude->sketchId;
+        } else if (const auto* cut = std::get_if<CutFeatureParams>(&feature.params)) {
+            hasDependency = true;
+            dependency = cut->sketchId;
+        }
+        if (hasDependency && !upstream.count(dependency)) {
+            lastError_ = "Project feature references a missing or downstream feature";
+            return false;
+        }
+        upstream.insert(feature.id);
+    }
+    if (!prepared.rebuild()) {
+        lastError_ = prepared.lastError_;
+        return false;
+    }
+    *this = std::move(prepared);
+    return true;
+}
+
 bool PartDocument::editFeature(FeatureId id, const FeatureParams& params) {
     auto iterator = std::find_if(
         features_.begin(), features_.end(),

@@ -3,6 +3,7 @@
 #include "app/CaptureWorkspaceController.h"
 #include "app/ModelingController.h"
 #include "app/ModelViewController.h"
+#include "app/ProjectController.h"
 #include "app/PointCloudWorkspaceController.h"
 #include "app/ReconstructionController.h"
 #include "app/SketchWorkspaceController.h"
@@ -24,6 +25,7 @@
 #include <QApplication>
 #include <QDockWidget>
 #include <QHBoxLayout>
+#include <QFileInfo>
 #include <QLabel>
 #include <QKeySequence>
 #include <QMenu>
@@ -77,6 +79,7 @@ MainWindow::~MainWindow()
     // The view borrows the document; release it after workers and before data.
     delete m_viewer;
     delete m_pointCloudDocument;
+    delete m_projectController;
 }
 
 bool MainWindow::runPerformanceCapture(const QString& modelPath,
@@ -106,8 +109,20 @@ void MainWindow::createWorkspaceControllers()
     m_modelViewController = new ModelViewController(capture,
         {m_viewer, m_propertyPanel, m_scenePanel, m_exportStepAction}, this, this);
 
+    m_projectController = new ProjectController(modeling, m_pointCloudDocument, m_modelViewController,
+        reconstruction, {m_viewer, m_propertyPanel, m_scenePanel, m_openProjectAction, m_saveAction,
+        m_saveAsAction, m_datumPlanesAction}, this, this);
+    connect(m_projectController, &ProjectController::projectAboutToReplace,
+            m_sketchWorkspace, &SketchWorkspaceController::resetForProject);
+    connect(m_projectController, &ProjectController::projectAboutToReplace,
+            m_pointCloudWorkspace, &PointCloudWorkspaceController::prepareProjectReplacement);
+    connect(m_projectController, &ProjectController::projectPathChanged, this, [this](const QString& path) {
+        setWindowTitle(tr("CAD & Point Cloud Studio — %1").arg(QFileInfo(path).fileName()));
+    });
+    connect(capture, &CaptureController::batchStateChanged, m_projectController, &ProjectController::setCaptureBusy);
+
     WorkspaceController* workspaces[] = {
-        m_sketchWorkspace, m_captureWorkspace, m_pointCloudWorkspace, m_modelViewController};
+        m_sketchWorkspace, m_captureWorkspace, m_pointCloudWorkspace, m_modelViewController, m_projectController};
     for (auto* workspace : workspaces) {
         connect(workspace, &WorkspaceController::logInfo, this, &MainWindow::logInfo);
         connect(workspace, &WorkspaceController::logWarning, this, &MainWindow::logWarning);
@@ -170,6 +185,13 @@ void MainWindow::createActions()
     m_closeAction = new QAction(tr("Close Model"), this);
     m_saveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Save"), this);
     m_saveAction->setShortcut(QKeySequence::Save);
+    m_saveAction->setObjectName(QStringLiteral("saveProjectAction"));
+    m_openProjectAction = new QAction(tr("Open Project..."), this);
+    m_openProjectAction->setObjectName(QStringLiteral("openProjectAction"));
+    m_openProjectAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
+    m_saveAsAction = new QAction(tr("Save Project As..."), this);
+    m_saveAsAction->setObjectName(QStringLiteral("saveProjectAsAction"));
+    m_saveAsAction->setShortcut(QKeySequence::SaveAs);
     m_exportStepAction = new QAction(tr("Export STEP..."), this);
     m_exportStepAction->setObjectName(QStringLiteral("exportStepAction"));
     m_exportStepAction->setToolTip(tr("Export the current CAD geometry in millimetres"));
@@ -211,7 +233,9 @@ void MainWindow::createMenus()
     fileMenu->addAction(m_textureAction);
     fileMenu->addAction(m_closeAction);
     fileMenu->addSeparator();
+    fileMenu->addAction(m_openProjectAction);
     fileMenu->addAction(m_saveAction);
+    fileMenu->addAction(m_saveAsAction);
     fileMenu->addAction(m_exportStepAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_exitAction);
@@ -367,7 +391,6 @@ void MainWindow::connectUi()
     connect(m_closeAction, &QAction::triggered, m_modelViewController, &ModelViewController::closeModel);
     connect(m_closeAction, &QAction::triggered,
             m_pointCloudWorkspace, &PointCloudWorkspaceController::cancelCadReconstruction);
-    connect(m_saveAction, &QAction::triggered, this, &MainWindow::saveProject);
     connect(m_exportStepAction, &QAction::triggered, m_modelViewController, &ModelViewController::exportModel);
     connect(m_exitAction, &QAction::triggered, qApp, &QApplication::closeAllWindows);
 
@@ -458,12 +481,6 @@ void MainWindow::connectUi()
     m_captureWorkspace->connectUi();
     connect(m_propertyPanel->capturePanel(), &CapturePanel::baseDirectoryChanged,
             m_propertyPanel->reconstructPanel(), &ReconstructPanel::setCaptureBaseDirectory);
-}
-
-void MainWindow::saveProject()
-{
-    logWarning(tr("Save is reserved for the future project format."));
-    statusBar()->showMessage(tr("Save is not implemented in the UI skeleton."), 3500);
 }
 
 void MainWindow::showAbout()

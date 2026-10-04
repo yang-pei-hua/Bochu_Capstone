@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rendering/OcctShapeTessellator.h"
+#include "core/PresentationState.h"
 
 #include <vtkSmartPointer.h>
 
@@ -11,6 +12,8 @@ class TopoDS_Shape;
 class vtkActor;
 class vtkFeatureEdges;
 class vtkImageReader2;
+class vtkImageData;
+class QImage;
 class vtkPolyData;
 class vtkPolyDataMapper;
 class vtkTexture;
@@ -31,6 +34,8 @@ public:
     void clear();
 
     bool hasShape() const noexcept;
+    ObjectPresentation presentation() const;
+    bool textureEnabled() const { return m_textureEnabled; }
 
     void setVisible(bool visible);
     void setRepresentation(int representation);
@@ -45,6 +50,8 @@ public:
     // 4 projects every face from the direction that face looks at, which is
     // what keeps the picture square on every side of a box.
     bool setTextureFromFile(const QString& imagePath, QString& error);
+    static vtkSmartPointer<vtkImageData> prepareTexture(const QImage& image);
+    void setTextureData(vtkImageData* image);
     void setTextureEnabled(bool enabled);
     void setTextureProjection(int axis);
     void clearTexture();

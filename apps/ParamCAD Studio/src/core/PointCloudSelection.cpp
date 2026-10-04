@@ -73,6 +73,14 @@ void PointCloudSelection::select(const std::vector<vtkIdType>& ids, bool add)
     m_selected.erase(std::unique(m_selected.begin(), m_selected.end()), m_selected.end());
 }
 
+void PointCloudSelection::adoptProject(PointCloudSelection&& prepared)
+{
+    const auto nextRevision = m_revision + 1;
+    *this = std::move(prepared);
+    m_revision = nextRevision;
+    m_undo.clear();
+}
+
 void PointCloudSelection::toggle(vtkIdType id)
 {
     if (!active(id)) return;

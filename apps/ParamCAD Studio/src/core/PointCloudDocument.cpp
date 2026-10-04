@@ -1,4 +1,5 @@
 #include "core/PointCloudDocument.h"
+#include "io/PointCloudMetadata.h"
 
 #include <QCoreApplication>
 
@@ -14,6 +15,7 @@ bool PointCloudDocument::load(const QString& path, QString& error)
     }
     m_selection.setCloud(cloud);
     m_sourcePath = path;
+    m_sourceUnit = pointCloudUnitName(path);
     emit cloudChanged();
     notifyEdit();
     return true;
@@ -23,6 +25,16 @@ void PointCloudDocument::clear()
 {
     m_selection.setCloud(PlyCloud{});
     m_sourcePath.clear();
+    m_sourceUnit = QStringLiteral("arbitrary");
+    emit cloudChanged();
+    notifyEdit();
+}
+
+void PointCloudDocument::adoptProject(PointCloudDocument&& prepared)
+{
+    m_selection.adoptProject(std::move(prepared.m_selection));
+    m_sourcePath = std::move(prepared.m_sourcePath);
+    m_sourceUnit = std::move(prepared.m_sourceUnit);
     emit cloudChanged();
     notifyEdit();
 }

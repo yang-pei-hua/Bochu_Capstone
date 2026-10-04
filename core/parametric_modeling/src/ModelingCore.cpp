@@ -102,6 +102,17 @@ bool ModelingCore::rebuild() {
     return document_.rebuild();
 }
 
+bool ModelingCore::restoreFeatures(const std::vector<Feature>& features) {
+    if (!document_.restoreFeatures(features)) return false;
+    ++revision_;
+    return true;
+}
+
+void ModelingCore::adoptPrepared(ModelingCore&& prepared) {
+    document_ = std::move(prepared.document_);
+    ++revision_;
+}
+
 ModelRevision ModelingCore::revision() const noexcept {
     return revision_;
 }

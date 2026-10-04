@@ -39,6 +39,12 @@ public:
     ~VTKViewer() override;
 
     CameraParameters cameraParameters() const;
+    double parallelScale() const;
+    void setParallelScale(double scale);
+    bool pointCloudVisible() const { return m_pointCloudVisible; }
+    double pointCloudPointSize() const;
+    ObjectPresentation objectPresentation() const { return m_bodyActor.presentation(); }
+    bool bodyTextureEnabled() const { return m_bodyActor.textureEnabled(); }
     bool captureImage(const QString& filePath, int width, int height);
 
     // Pixel size of the render window that captureImage() resizes from. It
@@ -79,6 +85,8 @@ public:
     // without an authoring step. Axis 0 lets the body pick the direction, 1/2/3
     // pin it to X/Y/Z.
     bool loadBodyTexture(const QString& imagePath, QString& error);
+    void setBodyTextureData(vtkImageData* image, const QString& path);
+    QString bodyTexturePath() const { return m_bodyTexturePath; }
     void clearBodyTexture();
     void setBodyTextureEnabled(bool enabled);
     bool hasBodyTexture() const noexcept;
@@ -143,6 +151,10 @@ public slots:
     void setObjectOpacity(double opacity);
     void setObjectColor(const QColor& color);
     void setBackgroundColor(const QColor& color);
+    QColor backgroundColor() const;
+    QColor backgroundColor2() const;
+    bool gradientBackground() const;
+    void setBackgroundGradient(bool enabled, const QColor& secondary);
     void setLightingEnabled(bool enabled);
     void setPointCloudVisible(bool visible);
     void setPointCloudPointSize(double size);
@@ -210,6 +222,7 @@ private:
     vtkSmartPointer<vtkRenderer> m_renderer;
     vtkSmartPointer<SketchInteractorStyle> m_interactorStyle;
     BodyActor m_bodyActor;
+    QString m_bodyTexturePath;
     quint64 m_bodyRevision = 0;
     PointCloudActor m_pointCloudActor;
     PointCloudDocument* const m_pointCloudDocument;

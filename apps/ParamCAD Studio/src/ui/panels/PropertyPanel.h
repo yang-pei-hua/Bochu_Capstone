@@ -1,4 +1,5 @@
 #pragma once
+#include "core/PresentationState.h"
 
 #include <QColor>
 #include <QWidget>
@@ -31,6 +32,8 @@ public:
     SketchEntityPanel* sketchEntityPanel() const;
     PointCloudPanel* pointCloudPanel() const;
     void showPointCloudProperties();
+    ObjectPresentation presentation() const;
+    void setPresentation(const ObjectPresentation& state);
 
     void showCapturePanel(bool visible);
     bool isCapturePanelVisible() const;

@@ -30,6 +30,7 @@ public:
     void closeModel();
     void exportModel();
     bool exportStepTo(const QString& path, QString& error) const;
+    const TopoDS_Shape& currentBody() const { return m_currentBody; }
     void chooseTexture();
     void clearTexture();
     bool runPerformanceCapture(const QString& modelPath, const QString& outputDirectory,

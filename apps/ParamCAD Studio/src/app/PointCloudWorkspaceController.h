@@ -46,6 +46,7 @@ public:
     void openPointCloud();
     void reconstructCad();
     void cancelCadReconstruction();
+    void prepareProjectReplacement();
 
 private:
     void updateCadActions();

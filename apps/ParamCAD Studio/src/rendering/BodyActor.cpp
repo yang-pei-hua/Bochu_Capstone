@@ -21,6 +21,8 @@
 #include <cmath>
 #include <cstddef>
 #include <vector>
+#include <QImage>
+#include <cstring>
 
 namespace {
 
@@ -213,6 +215,32 @@ bool BodyActor::setTextureFromFile(const QString& imagePath, QString& error)
     return true;
 }
 
+vtkSmartPointer<vtkImageData> BodyActor::prepareTexture(const QImage& source)
+{
+    if (source.isNull()) return nullptr;
+    const auto image = source.convertToFormat(QImage::Format_RGBA8888);
+    auto data = vtkSmartPointer<vtkImageData>::New();
+    data->SetDimensions(image.width(), image.height(), 1);
+    data->AllocateScalars(VTK_UNSIGNED_CHAR, 4);
+    for (int y = 0; y < image.height(); ++y) {
+        // Match the bottom-up convention of VTK's image readers.
+        std::memcpy(data->GetScalarPointer(0, y, 0), image.constScanLine(image.height() - y - 1),
+                    static_cast<size_t>(image.width()) * 4);
+    }
+    return data;
+}
+
+void BodyActor::setTextureData(vtkImageData* image)
+{
+    m_textureReader = nullptr;
+    m_texture = vtkSmartPointer<vtkTexture>::New();
+    m_texture->SetInputData(image);
+    m_texture->InterpolateOn();
+    m_texture->RepeatOff();
+    m_textureEnabled = true;
+    refreshSurfaceInput();
+}
+
 void BodyActor::setTextureEnabled(bool enabled)
 {
     if (m_textureEnabled == enabled) {
@@ -398,6 +426,15 @@ void BodyActor::setTransform(double px, double py, double pz,
         actor->SetOrientation(rx, ry, rz);
         actor->SetScale(sx, sy, sz);
     }
+}
+
+ObjectPresentation BodyActor::presentation() const
+{
+    ObjectPresentation state;
+    m_surfaceActor->GetPosition(state.position.data()); m_surfaceActor->GetOrientation(state.rotation.data());
+    m_surfaceActor->GetScale(state.scale.data()); state.visible=m_visible; state.representation=m_representation;
+    state.opacity=m_surfaceActor->GetProperty()->GetOpacity(); state.color=m_color;
+    return state;
 }
 
 vtkActor* BodyActor::surfaceActor() const noexcept

@@ -218,6 +218,13 @@ const QString& ModelingController::lastError() const noexcept
     return m_lastError;
 }
 
+void ModelingController::adoptProject(modeling::ModelingCore&& prepared)
+{
+    m_core->adoptPrepared(std::move(prepared));
+    m_lastError.clear();
+    emit modelRebuilt();
+}
+
 modeling::ModelRevision ModelingController::revision() const noexcept
 {
     return m_core->revision();

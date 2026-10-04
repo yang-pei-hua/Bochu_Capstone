@@ -13,9 +13,11 @@ public:
     explicit PointCloudDocument(QObject* parent = nullptr);
     bool load(const QString& path, QString& error);
     void clear();
+    void adoptProject(PointCloudDocument&& prepared);
     bool hasCloud() const noexcept { return !sourceCloud().positions.empty(); }
     int pointCount() const noexcept { return m_selection.activePointCount(); }
     const QString& sourcePath() const noexcept { return m_sourcePath; }
+    const QString& sourceUnit() const noexcept { return m_sourceUnit; }
     const PlyCloud& sourceCloud() const noexcept { return m_selection.sourceCloud(); }
     const PointCloudSelection& selection() const noexcept { return m_selection; }
     quint64 revision() const noexcept { return m_selection.revision(); }
@@ -59,4 +61,5 @@ private:
     void notifyEdit();
     PointCloudSelection m_selection;
     QString m_sourcePath;
+    QString m_sourceUnit = QStringLiteral("arbitrary");
 };

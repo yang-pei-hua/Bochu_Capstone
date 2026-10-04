@@ -1,4 +1,5 @@
 #pragma once
+#include "core/PresentationState.h"
 
 #include <QColor>
 #include <QString>
@@ -26,6 +27,8 @@ public:
     void setTexturePath(const QString& path);
     void setTextureEnabled(bool enabled);
     int textureProjection() const;
+    RenderPresentation presentation() const;
+    void setPresentation(const RenderPresentation& state);
 
 signals:
     void backgroundColorChanged(const QColor& color);

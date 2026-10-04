@@ -47,6 +47,7 @@ class PointCloudSelection
 public:
     PointCloudSelection();
     void setCloud(const PlyCloud& cloud);
+    void adoptProject(PointCloudSelection&& prepared);
     void select(const std::vector<vtkIdType>& ids, bool add = false);
     void toggle(vtkIdType id);
     void selectBox(vtkPlanes* planes, bool add);

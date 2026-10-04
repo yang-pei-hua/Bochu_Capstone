@@ -103,6 +103,7 @@ and feature-specific signal connections live in the following controllers:
 | `PointCloudWorkspaceController` | Routes panel intents to the cloud document, coordinates asynchronous fitting and photo reconstruction, and guards CAD candidate commits |
 | `CaptureWorkspaceController` | Screenshot/photo/orbit intents, capture output settings, shot list, batch feedback and capture distance synchronization |
 | `ModelViewController` | Imported/current B-Rep lifetime, STEP import/export, model visibility, texture controls and performance capture entry |
+| `ProjectController` | Project actions, state snapshots, staged restoration, asset lifetime and project path |
 
 Each workspace receives a small `*Ui` aggregate of borrowed view pointers and the
 command controllers it needs. Workspaces do not depend on `MainWindow` or each
@@ -112,12 +113,13 @@ synchronization. Existing strings retain their `MainWindow` translation context.
 
 `ModelingController`, `CaptureController` and `ReconstructionController` remain
 the command/process layer. `core/` holds client document and camera state,
-`io/` handles adapters/readers, `rendering/` maps geometry to VTK actors, and
+`io/` handles adapters/readers/writers and the versioned project archive,
+`rendering/` maps geometry to VTK actors, and
 `ui/` contains views and viewport interaction. Geometry algorithms continue to
 live in the repository's core libraries.
 
 `MainWindow` also creates one `PointCloudDocument` and injects it into the
-point-cloud workspace and `VTKViewer`. The document owns the source path and,
+point-cloud workspace and `VTKViewer`. The document owns the source path, scale metadata and,
 through the existing `PointCloudSelection` spatial/edit engine, source
 observations, selection, deletion masks, regions, relationships, undo history
 and a monotonic revision. Callers receive read-only state or owned working-cloud
@@ -203,6 +205,8 @@ to replay them through the worker (from this directory):
 - Modeling panel that edits sketch/extrude/cut parameters and rebuilds the body
 - VTK viewport with trackball interaction and orientation axes
 - STEP export of the current native CAD model with Unicode paths and atomic replacement
+- Self-contained `.pcad` project save/load with editable feature history, native
+  body, original point cloud, annotations, texture and view state
 - Object transform/display controls with live actor updates
 - Editable VTK camera parameters and six standard views
 - Perspective/orthographic switching
@@ -230,6 +234,44 @@ stretched from, which lets reconstruction derive separate horizontal and
 vertical focal lengths. Per-image `shot_NNN.json` sidecars are still written for
 backwards compatibility. Reconstruction prefers manifest v2 and falls back to
 the sidecars for older capture folders.
+
+## Project save and restore
+
+Use **File → Save** (`Ctrl+S`) to create or update a `.pcad` project, **Save Project
+As...** (`Ctrl+Shift+S`) to choose a new destination, and **Open Project...**
+(`Ctrl+Shift+O`) to restore it. Opening replaces the current workspace.
+
+The project embeds the editable feature history (stable IDs, names, suppression,
+sketch planes/entities and all supported primitive parameters), the current
+native B-Rep, the original full cloud including deleted observations, point
+deletion masks, regions, relationships, selection, scale metadata and texture.
+Camera position/target/up, projection, orthographic scale, origin lock, object
+transform/display, cloud visibility/size/mode, datum visibility, background,
+lighting, texture projection and capture output size are also restored. The
+original source files can be moved or deleted after saving. Native B-Rep storage
+preserves placement and the independently imported/displayed body even when it
+differs from the feature graph.
+
+Undo history, pending sketch gestures and capture shot lists are transient. A
+successful open resets the sketch session and point edit undo. Save requires a
+feature history that can rebuild; fix invalid features before saving.
+
+`ProjectStore` stages assets in a temporary directory and writes through
+`QSaveFile`, so a failed save preserves the previous file. The version 1 archive
+contains an 8-byte `PCADPRJ1` signature, a big-endian 32-bit JSON manifest length,
+the manifest, then its ordered assets. Asset sizes and SHA-256 hashes are checked
+before decoding; unknown versions, truncated data, invalid geometry/history or
+annotations fail before touching live state. Texture decoding also completes
+before replacement. The controller retains extracted files for the workspace's
+lifetime, cancels pending CAD/surface work and advances both document revisions
+so old results cannot overwrite a loaded project. Opening is unavailable during
+capture or photo reconstruction.
+
+`project_store_test` covers portable round trips, original point IDs and scale,
+editable histories, independent native body placement, views/textures, failed
+save protection and malformed archives. `project_interaction_test` uses a hidden
+Qt/VTK window to exercise real Save/Save As/Open actions, continued editing,
+failed-load preservation, session reset, empty projects and stale CAD results.
 
 ## Point-cloud selection and template annotations
 
@@ -359,6 +401,6 @@ across the interactive `captures/` and `reconstructions/` roots.
 - Interactive sketching, face picking, and SolidWorks-style mouse and keyboard
   mapping
 - Undo/redo and a persistent feature tree with in-place editing
-- Real OBJ/PLY mesh parsing and persistent project save/load
+- Real OBJ/PLY mesh parsing
 - Point-cloud meshing, CAD alignment, and AI editing
 - Production scene graph, selection, task progress, FPS, and mesh stats

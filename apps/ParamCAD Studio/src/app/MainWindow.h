@@ -18,6 +18,7 @@ class SketchToolPalette;
 class VTKViewer;
 class CaptureWorkspaceController;
 class ModelViewController;
+class ProjectController;
 class PointCloudDocument;
 class PointCloudWorkspaceController;
 class SketchWorkspaceController;
@@ -54,7 +55,6 @@ private:
     void createWorkspaceControllers();
     void connectUi();
     void applyDarkTheme();
-    void saveProject();
     void showAbout();
     void updateCameraStatus(bool parallelProjection);
 
@@ -77,12 +77,15 @@ private:
     PointCloudWorkspaceController* m_pointCloudWorkspace = nullptr;
     CaptureWorkspaceController* m_captureWorkspace = nullptr;
     ModelViewController* m_modelViewController = nullptr;
+    ProjectController* m_projectController = nullptr;
 
     QAction* m_openAction = nullptr;
     QAction* m_openPointCloudAction = nullptr;
     QAction* m_textureAction = nullptr;
     QAction* m_closeAction = nullptr;
     QAction* m_saveAction = nullptr;
+    QAction* m_openProjectAction = nullptr;
+    QAction* m_saveAsAction = nullptr;
     QAction* m_exportStepAction = nullptr;
     QAction* m_exitAction = nullptr;
     QAction* m_resetCameraAction = nullptr;
