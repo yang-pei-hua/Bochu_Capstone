@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/PointCloudSelection.h"
+#include <reconstruction/GuidedSolidRecognizer.h>
 
 struct PointCloudAnalysisResult
 {
@@ -16,3 +17,4 @@ struct PointCloudAnalysisResult
 PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
     const std::vector<vtkIdType>& originalIds, double distanceTolerance,
     const QString& geometry = QString());
+PointCloudRegion describeTemplateFit(const reconstruction::TemplateFit& fit, double scaleToMillimeters);

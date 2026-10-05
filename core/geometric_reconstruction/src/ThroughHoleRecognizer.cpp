@@ -186,10 +186,13 @@ bool reconstructBoxWithThroughHoles(
     const BoxRecognitionOptions& boxOptions,
     const ThroughHoleRecognitionOptions& holeOptions,
     BoxWithThroughHolesCandidate& output,
-    std::string& error) {
+    std::string& error,
+    const std::vector<PrimitiveEvidence>& seeds) {
     output = {};
+    std::vector<PlaneEvidence> fixedPlanes;
+    for (const auto& seed : seeds) if (const auto* plane = std::get_if<PlaneEvidence>(&seed)) fixedPlanes.push_back(*plane);
     if (!reconstructBox(
-            points, planeOptions, boxOptions, output.box, error)) {
+            points, planeOptions, boxOptions, output.box, error, fixedPlanes)) {
         return false;
     }
 
@@ -211,6 +214,17 @@ bool reconstructBoxWithThroughHoles(
         if (const auto* cylinder = std::get_if<CylinderEvidence>(&evidence)) {
             cylinders.push_back(*cylinder);
         }
+    }
+    for (const auto& seed : seeds) if (const auto* fixed = std::get_if<CylinderEvidence>(&seed)) {
+        cylinders.erase(std::remove_if(cylinders.begin(),cylinders.end(),[&](const auto& c) {
+            const auto delta = math3::subtract(c.cylinder.axisPoint,fixed->cylinder.axisPoint);
+            const auto axis = fixed->cylinder.axisDirection;
+            const auto radial = math3::subtract(delta,math3::scale(axis,math3::dot(delta,axis)));
+            return std::abs(math3::dot(c.cylinder.axisDirection,axis)) > 0.99 &&
+                math3::length(radial) < cylinderOptions.distanceThreshold*3 &&
+                std::abs(c.cylinder.radius-fixed->cylinder.radius) < cylinderOptions.distanceThreshold*3;
+        }),cylinders.end());
+        cylinders.push_back(*fixed);
     }
     if (!recognizeThroughHoles(
             output.box, cylinders, holeOptions, output.throughHoles, error)) {

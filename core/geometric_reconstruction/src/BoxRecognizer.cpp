@@ -206,7 +206,8 @@ bool reconstructBox(
     const PlaneDetectionOptions& planeOptions,
     const BoxRecognitionOptions& boxOptions,
     BoxCandidate& output,
-    std::string& error) {
+    std::string& error,
+    const std::vector<PlaneEvidence>& seeds) {
     PrimitiveDetectionOptions detectionOptions;
     detectionOptions.detectPlanes = true;
     detectionOptions.detectCylinders = false;
@@ -226,6 +227,14 @@ bool reconstructBox(
         if (const auto* plane = std::get_if<PlaneEvidence>(&evidence)) {
             planes.push_back(*plane);
         }
+    }
+    for (const auto& seed : seeds) {
+        planes.erase(std::remove_if(planes.begin(),planes.end(),[&](const auto& p) {
+            const double alignment = math3::dot(p.plane.normal,seed.plane.normal);
+            return std::abs(alignment) > 0.99 &&
+                std::abs(p.plane.offset - (alignment < 0 ? -seed.plane.offset : seed.plane.offset)) < planeOptions.distanceThreshold*3;
+        }),planes.end());
+        planes.push_back(seed);
     }
     return recognizeBoxFromPlanes(points, planes, boxOptions, output, error);
 }

@@ -72,11 +72,11 @@ void PointCloudSelection::removeRelation(int id)
                                    [id](const auto& value) { return value.id == id; }), m_relations.end());
 }
 
-void PointCloudSelection::inferRelations(double tolerance, double angleDegrees)
+void PointCloudSelection::inferRelations(double tolerance, double angleDegrees, bool recordUndo)
 {
     if (!std::isfinite(tolerance) || tolerance <= 0 || !std::isfinite(angleDegrees)
         || angleDegrees <= 0 || angleDegrees > 30) return;
-    checkpoint();
+    checkpoint(recordUndo);
     std::map<QString, int> previousIds;
     for (const auto& r : m_relations) previousIds[key(r.first, r.second, r.type)] = r.id;
     m_relations.erase(std::remove_if(m_relations.begin(), m_relations.end(),

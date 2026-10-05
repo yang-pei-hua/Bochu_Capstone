@@ -50,8 +50,10 @@ public:
 
 private:
     void updateCadActions();
+    void requestGuidedReconstruction();
+    void startQueuedReconstruction();
     void onCadReconstructionFinished(const CadReconstructionResult& result);
-    void startPointCloudAnalysis(int regionId = 0);
+    void startPointCloudAnalysis(int regionId = 0, bool recordUndo = true);
     void startReconstruction(const ReconstructRequest& request);
     void onReconstructionFinished(const QString& pointCloudPath, int pointCount,
                                   const QString& cameraMode, bool dense);
@@ -64,6 +66,7 @@ private:
     CadReconstructionTask* m_cadTask;
     bool m_startingCad = false;
     bool m_analyseAfterCad = false;
+    bool m_guidedQueued = false;
     quint64 m_cadCloudRevision = 0;
     quint64 m_cadBodyRevision = 0;
     modeling::ModelRevision m_cadModelRevision = 0;

@@ -25,6 +25,8 @@
 #include <QScopeGuard>
 #include <QTabWidget>
 #include <QThread>
+#include <QTimer>
+#include <map>
 #include <algorithm>
 #include <exception>
 #include <memory>
@@ -32,6 +34,17 @@
 #include <type_traits>
 #include <variant>
 #include <utility>
+
+namespace {
+reconstruction::LengthUnit cloudUnit(const PointCloudDocument& document)
+{
+    if (QFileInfo::exists(document.sourcePath()))
+        return PointCloudAdapter::lengthUnitFor(document.sourcePath());
+    const auto& unit = document.sourceUnit();
+    return unit == "mm" ? reconstruction::LengthUnit::Millimeter
+        : unit == "m" ? reconstruction::LengthUnit::Meter : reconstruction::LengthUnit::Arbitrary;
+}
+}
 
 PointCloudWorkspaceController::PointCloudWorkspaceController(
     PointCloudDocument* document, ModelingController* modelingController,
@@ -44,7 +57,12 @@ PointCloudWorkspaceController::PointCloudWorkspaceController(
 {
     connect(m_cadTask, &CadReconstructionTask::runningChanged, this, [this](bool running) {
         updateCadActions();
-        if (!running && std::exchange(m_analyseAfterCad, false)) startPointCloudAnalysis();
+        if (!running && m_guidedQueued) {
+            m_analyseAfterCad = false;
+            QTimer::singleShot(0,this,&PointCloudWorkspaceController::startQueuedReconstruction);
+            return;
+        }
+        if (!running && std::exchange(m_analyseAfterCad, false)) startPointCloudAnalysis(0, false);
     });
     connect(m_cadTask, &CadReconstructionTask::stageChanged, this,
         [this](CadReconstructionTask::Stage stage) {
@@ -52,6 +70,8 @@ PointCloudWorkspaceController::PointCloudWorkspaceController(
             switch (stage) {
             case CadReconstructionTask::Stage::Preprocessing:
                 message = workspaceTr("正在后台预处理点云…"); break;
+            case CadReconstructionTask::Stage::FittingTemplates:
+                message = workspaceTr("正在拟合手动模板，并据此继续整体 CAD 重建…"); break;
             case CadReconstructionTask::Stage::Recognizing:
                 message = workspaceTr("正在后台识别 CAD 实体…"); break;
             case CadReconstructionTask::Stage::Cancelling:
@@ -80,6 +100,9 @@ PointCloudWorkspaceController::~PointCloudWorkspaceController()
 
 void PointCloudWorkspaceController::connectUi()
 {
+    connect(m_document, &PointCloudDocument::cloudChanged, this, [this] {
+        m_guidedQueued = false;
+    });
     PointCloudPanel* cloudPanel = m_ui.propertyPanel->pointCloudPanel();
     const auto refreshCloudPanel = [this, cloudPanel] {
         cloudPanel->refresh(m_document->selection(), m_document->hasCloud(),
@@ -105,15 +128,20 @@ void PointCloudWorkspaceController::connectUi()
     });
     connect(cloudPanel, &PointCloudPanel::clearRequested, m_document, &PointCloudDocument::clearSelection);
     connect(cloudPanel, &PointCloudPanel::assignRequested, this, [this, cloudPanel] {
-        m_document->assignRegion(cloudPanel->geometry(), cloudPanel->regionName(), cloudPanel->regionId());
+        const auto id=m_document->assignRegion(cloudPanel->geometry(), cloudPanel->regionName(), cloudPanel->regionId());
+        if(id) requestGuidedReconstruction();
     });
+    connect(cloudPanel,&PointCloudPanel::reconstructRequested,this,&PointCloudWorkspaceController::reconstructCad);
     connect(cloudPanel, &PointCloudPanel::recallRequested, this, [this, cloudPanel] {
         m_document->selectRegion(cloudPanel->regionId());
     });
     connect(cloudPanel, &PointCloudPanel::removeRegionRequested, this, [this, cloudPanel] {
         m_document->removeRegion(cloudPanel->regionId());
+        requestGuidedReconstruction();
     });
-    connect(cloudPanel, &PointCloudPanel::unassignRequested, m_document, &PointCloudDocument::unassignSelection);
+    connect(cloudPanel, &PointCloudPanel::unassignRequested,this,[this] {
+        m_document->unassignSelection(); requestGuidedReconstruction();
+    });
     connect(cloudPanel, &PointCloudPanel::saveRequested, this, [this] {
         QString path = QFileDialog::getSaveFileName(m_dialogParent, workspaceTr("保存点云标注"),
             m_document->sourcePath() + QStringLiteral(".regions.json"), workspaceTr("点云标注 (*.json)"));
@@ -136,6 +164,7 @@ void PointCloudWorkspaceController::connectUi()
             return;
         }
         emit logInfo(workspaceTr("点云标注已载入：%1").arg(path));
+        requestGuidedReconstruction();
     });
     refreshCloudPanel();
     const auto refreshRelationships = [this] {
@@ -153,26 +182,43 @@ void PointCloudWorkspaceController::connectUi()
     });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::relationSelected, m_document, &PointCloudDocument::selectRelation);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::pointSelected, m_document, &PointCloudDocument::selectPoint);
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::editRegionRequested, m_document, &PointCloudDocument::editRegion);
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::editRegionRequested,this,[this](int id,const QString& name,const QString& geometry) {
+        if(m_document->editRegion(id,name,geometry)) requestGuidedReconstruction();
+    });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::appendSelectionRequested, this, [this](int id) {
         const auto* region = m_document->selection().region(id);
-        if (region) m_document->assignRegion(region->geometry, region->name, id);
+        if (region && m_document->assignRegion(region->geometry, region->name, id)) requestGuidedReconstruction();
     });
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::replaceSelectionRequested, m_document, &PointCloudDocument::replaceRegionPoints);
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::removeRegionRequested, m_document, &PointCloudDocument::removeRegion);
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::deleteRegionPointsRequested, m_document, &PointCloudDocument::deleteRegionPoints);
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::deleteSelectedPointsRequested, m_document, &PointCloudDocument::deleteSelectedPoints);
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::replaceSelectionRequested,this,[this](int id) {
+        m_document->replaceRegionPoints(id); m_document->lockTemplate(id); requestGuidedReconstruction();
+    });
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::removeRegionRequested,this,[this](int id) {
+        m_document->removeRegion(id); requestGuidedReconstruction();
+    });
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::deleteRegionPointsRequested, this, [this](int id) {
+        m_document->deleteRegionPoints(id);
+        requestGuidedReconstruction();
+    });
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::deleteSelectedPointsRequested, this, [this] {
+        m_document->deleteSelectedPoints();
+        requestGuidedReconstruction();
+    });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::setRelationRequested, this,
         [this](int id, int first, int second, const QString& type) {
             if (!m_document->setRelation(id, first, second, type))
                 m_ui.relationsPanel->setStatus(workspaceTr("关系未保存：端点须为两个非空集合，且不能与现有关系重复。"));
         });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::removeRelationRequested, m_document, &PointCloudDocument::removeRelation);
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::undoRequested, m_document, &PointCloudDocument::undo);
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::undoRequested, this, [this] {
+        if (m_document->undo()) requestGuidedReconstruction();
+    });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::detectRequested, this, [this] { startPointCloudAnalysis(); });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::cancelCadRequested,
             m_ui.cancelCadAction, &QAction::trigger);
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::refitRequested, this, &PointCloudWorkspaceController::startPointCloudAnalysis);
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::refitRequested,this,[this](int id) {
+        if(!m_document->selection().region(id)) return;
+        m_document->lockTemplate(id); requestGuidedReconstruction();
+    });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::inferRequested, this, [this] {
         m_document->inferRelations(m_ui.relationsPanel->relationTolerance(), m_ui.relationsPanel->angleTolerance());
         m_ui.relationsPanel->setStatus(workspaceTr("已按当前容差更新自动关系。手动关系与已删除的关系记录保持有效。"));
@@ -346,14 +392,31 @@ void PointCloudWorkspaceController::reconstructCad()
     m_cadModelRevision = m_modelingController->revision();
     m_cadBodyRevision = m_ui.viewer->bodyRevision();
     m_cadSourcePath = m_document->sourcePath();
-    PlyCloud cloud = m_document->workingCloud();
+    std::vector<vtkIdType> ids;
+    PlyCloud cloud = m_document->workingCloud(&ids);
+    std::map<vtkIdType, reconstruction::PointId> pointIds;
+    for (size_t i = 0; i < ids.size(); ++i) pointIds[ids[i]] = i + 1;
+    std::vector<reconstruction::TemplateHint> hints;
+    for (const auto& region : m_document->selection().regions()) {
+        if (!region.templateLocked || m_document->selection().regionPointCount(region.id) == 0)
+            continue;
+        reconstruction::TemplateHint hint;
+        hint.regionId = region.id;
+        const auto& type = region.geometry;
+        using Kind = reconstruction::TemplateKind;
+        hint.kind = type == "cuboid" ? Kind::Box : type == "sphere" ? Kind::Sphere
+            : type == "cylinder" ? Kind::Cylinder : type == "cone" ? Kind::Cone
+            : type == "ring" ? Kind::Torus : Kind::Plane;
+        for (auto id : m_document->selection().regionPoints(region.id))
+            hint.points.push_back(pointIds.at(id));
+        hints.push_back(std::move(hint));
+    }
     if (cloud.positions.empty()) {
         m_ui.relationsPanel->setStatus(workspaceTr("当前工作点云为空，无法重建 CAD。"));
         return;
     }
 
-    reconstruction::LengthUnit sourceUnit =
-        PointCloudAdapter::lengthUnitFor(m_cadSourcePath);
+    auto sourceUnit = cloudUnit(*m_document);
     if (sourceUnit == reconstruction::LengthUnit::Arbitrary) {
         const QMessageBox::StandardButton choice = QMessageBox::warning(m_dialogParent,
             workspaceTr("Unknown point-cloud scale"),
@@ -379,11 +442,34 @@ void PointCloudWorkspaceController::reconstructCad()
         return;
     }
     m_analyseAfterCad = false;
-    m_cadTask->start(std::move(cloud), sourceUnit);
+    m_cadTask->start(std::move(cloud), sourceUnit, std::move(hints),
+                     m_ui.relationsPanel->surfaceTolerance());
+}
+
+void PointCloudWorkspaceController::requestGuidedReconstruction()
+{
+    m_analyseAfterCad = false;
+    if (m_cadTask->isRunning()) m_cadTask->cancel();
+    if (m_analysisThread) m_analysisThread->requestInterruption();
+    if (cloudUnit(*m_document) == reconstruction::LengthUnit::Arbitrary) {
+        m_guidedQueued = false;
+        m_ui.relationsPanel->setStatus(workspaceTr("模板已保存。点云尺度未知，请点击「按模板重建并继续整体重建」确认尺度后继续。"));
+        return;
+    }
+    m_guidedQueued = true;
+    startQueuedReconstruction();
+}
+
+void PointCloudWorkspaceController::startQueuedReconstruction()
+{
+    if (!m_guidedQueued || m_cadTask->isRunning() || m_analysisThread || m_startingCad) return;
+    m_guidedQueued = false;
+    if (m_document->hasCloud()) reconstructCad();
 }
 
 void PointCloudWorkspaceController::cancelCadReconstruction()
 {
+    m_guidedQueued = false;
     m_cadTask->cancel();
 }
 
@@ -402,6 +488,7 @@ void PointCloudWorkspaceController::updateCadActions()
                                          && m_document->pointCount() > 0);
     m_ui.cancelCadAction->setEnabled(running && !m_cadTask->isCancellationRequested());
     m_ui.relationsPanel->setBusy(busy);
+    m_ui.propertyPanel->pointCloudPanel()->setReconstructionBusy(busy);
     m_ui.relationsPanel->setCadReconstructionBusy(running, m_ui.cancelCadAction->isEnabled());
 }
 
@@ -436,8 +523,10 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
                 .arg(preprocessingReport.normalsEstimated));
     }
     if (result.outcome == CadReconstructionResult::Outcome::Unsupported) {
-        const QString message = workspaceTr("No supported solid could be reconstructed in %1: %2")
+        QString message = workspaceTr("No supported solid could be reconstructed in %1: %2")
                                     .arg(QFileInfo(m_cadSourcePath).fileName(), result.error);
+        if(const auto* region=m_document->selection().region(result.failedRegionId))
+            message=workspaceTr("模板「%1」重建失败，模型保持原状：%2").arg(region->name,result.error);
         reportStatus(message);
         emit logWarning(message);
         return;
@@ -458,6 +547,16 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
         emit logError(message);
         QMessageBox::warning(m_dialogParent, workspaceTr("Reconstruct CAD"), message);
         return;
+    }
+    // Derived results share the user's edit history instead of adding undo
+    // steps that an automatic reconstruction would immediately recreate.
+    for (const auto& fit : result.templateFits)
+        m_document->updateRegionFit(fit.regionId,
+            describeTemplateFit(fit, result.preprocessing.appliedScaleToMillimeters), false);
+    if (!result.templateFits.empty()) {
+        m_document->inferRelations(m_ui.relationsPanel->relationTolerance(),
+                                  m_ui.relationsPanel->angleTolerance(), false);
+        emit logInfo(workspaceTr("已按 %1 个手动模板约束完成整体重建。原始点归属保持不变。").arg(result.templateFits.size()));
     }
 
     emit logInfo(workspaceTr("Reconstructed solid: %1 boxes, %2 polygonal prisms, %3 through holes, surface coverage %4, %5 curved solids")
@@ -488,7 +587,7 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
     m_analyseAfterCad = m_document->selection().regionPointCount(0) >= 20;
 }
 
-void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId)
+void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId, bool recordUndo)
 {
     if (m_analysisThread || m_startingCad || m_cadTask->isRunning() || !m_document->hasCloud()) return;
     std::vector<vtkIdType> ids;
@@ -508,9 +607,10 @@ void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId)
     auto* thread = m_analysisThread;
     thread->setParent(this);
     updateCadActions();
-    connect(thread, &QThread::finished, this, [this, result, revision, regionId, count = cloud.positions.size()] {
+    connect(thread, &QThread::finished, this, [this, result, revision, regionId, recordUndo, count = cloud.positions.size()] {
         m_analysisThread = nullptr;
         updateCadActions();
+        if(m_guidedQueued) { startQueuedReconstruction(); return; }
         if (m_document->revision() != revision) {
             m_ui.relationsPanel->setStatus(workspaceTr("工作点云或关系已被修改，本轮识别结果未应用；可重新识别。")); return;
         }
@@ -524,9 +624,9 @@ void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId)
             if (best->points.size() < count * 0.7) {
                 m_ui.relationsPanel->setStatus(workspaceTr("拟合表面覆盖不足 70%，保留原集合；可修正点归属后重试。")); return;
             }
-            m_document->updateRegionFit(regionId, best->surface);
-        } else m_document->addSurfaces(result->surfaces);
-        m_document->inferRelations(m_ui.relationsPanel->relationTolerance(), m_ui.relationsPanel->angleTolerance());
+            m_document->updateRegionFit(regionId, best->surface, recordUndo);
+        } else m_document->addSurfaces(result->surfaces, recordUndo);
+        m_document->inferRelations(m_ui.relationsPanel->relationTolerance(), m_ui.relationsPanel->angleTolerance(), recordUndo);
         m_ui.relationsPanel->setStatus(workspaceTr("识别完成：%1 个表面，归属 %2 / %3 个原始点。未归属点已保留。")
             .arg(result->surfaces.size()).arg(result->assignedPoints).arg(count));
         emit logInfo(workspaceTr("Surface analysis completed: %1 surfaces, %2 source points assigned")

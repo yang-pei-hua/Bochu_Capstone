@@ -165,3 +165,26 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
     }
     return result;
 }
+
+PointCloudRegion describeTemplateFit(const reconstruction::TemplateFit& fit, double scale)
+{
+    PointCloudRegion region;
+    if (fit.surface) region=describe(*fit.surface,fit.regionId);
+    if (fit.box) {
+        const auto& p=fit.box->primitive;
+        region.geometry="cuboid"; region.confidence=fit.box->confidence;
+        region.parameters={{"origin",array(p.pose.origin)},{"x_direction",array(p.pose.xDirection)},
+            {"z_direction",array(p.pose.zDirection)},{"size_x",p.sizeX},{"size_y",p.sizeY},{"size_z",p.sizeZ}};
+    }
+    // Fits run in CAD millimetres; annotation equations stay in PLY units.
+    for (const auto& key : {"origin","center"}) if(region.parameters.contains(key)) {
+        auto values=region.parameters[key].toArray();
+        for(int i=0;i<values.size();++i) values[i]=values[i].toDouble()/scale;
+        region.parameters[key]=values;
+    }
+    for (const auto& key : {"offset","radius","major_radius","minor_radius","axial_min","axial_max",
+                           "size_x","size_y","size_z"}) if(region.parameters.contains(key))
+        region.parameters[key]=region.parameters[key].toDouble()/scale;
+    region.residual/=scale;
+    return region;
+}

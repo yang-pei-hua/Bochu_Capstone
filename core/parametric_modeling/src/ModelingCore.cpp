@@ -18,7 +18,7 @@ ModelResult ModelingCore::executeOne(const ModelCommand& command) {
         [this](const auto& concreteCommand) -> ModelResult {
             using Command = std::decay_t<decltype(concreteCommand)>;
             if constexpr (std::is_same_v<Command, AddFeatureCommand>) {
-                const FeatureId id = document_.addFeature(concreteCommand.params);
+                const FeatureId id = document_.addFeature(concreteCommand.params, concreteCommand.reconstructed);
                 const bool success = id != kInvalidFeatureId;
                 return {success, id, success ? std::string{} : document_.lastError()};
             } else if constexpr (std::is_same_v<Command, EditFeatureCommand>) {

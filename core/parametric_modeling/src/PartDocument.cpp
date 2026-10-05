@@ -151,7 +151,7 @@ bool dependsOn(const Feature& feature, FeatureId upstreamId) {
 
 }  // namespace
 
-FeatureId PartDocument::addFeature(const FeatureParams& params) {
+FeatureId PartDocument::addFeature(const FeatureParams& params, bool reconstructed) {
     std::string validationError;
     if (!validateFeatureParams(params, validationError)) {
         lastError_ = validationError;
@@ -168,6 +168,7 @@ FeatureId PartDocument::addFeature(const FeatureParams& params) {
         false,
         true,
         {},
+        reconstructed,
     });
     lastError_.clear();
     return id;

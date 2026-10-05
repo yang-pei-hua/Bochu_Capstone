@@ -144,6 +144,26 @@ count, dimensions, STEP readback, and symmetric difference. Independent solid
 classification sampling checks boolean comparison; invalid/inconsistent boolean
 volumes use the conservative recorded sampling upper confidence bound.
 
+## Guided reconstruction
+
+`reconstructGuidedSolid()` accepts original-point-ID template groups for planes,
+boxes, spheres, cylinders, cones and tori. It fits only the requested family,
+uses fixed plane equations/normals and primitive evidence to guide global
+recognition, retains complete observed curved components, and reconstructs the
+remaining points. Local patches complete only from observed global boundaries;
+unsupported caps or thicknesses are never inferred from a label alone. A detached
+OCCT model verifies that finite CAD faces explain at least 90% of every group
+before the candidate is delivered. Cancellation and conflicting groups produce
+no partially committed model.
+
+Preprocessing accepts `protectedPointIds` so every manual observation survives
+voxel/outlier filtering while the remaining scene continues to be downsampled
+and denoised. All output IDs still refer to original observations.
+
+`commitCompoundCandidate(..., replacePrevious=true)` atomically replaces features
+marked as reconstructed, preserving independently authored history and rejecting
+removal when authored dependents reference generated features.
+
 ## Build and test
 
 From the repository root:

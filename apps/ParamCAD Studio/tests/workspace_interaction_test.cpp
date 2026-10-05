@@ -5,9 +5,11 @@
 #include "app/ModelingController.h"
 #include "app/ModelViewController.h"
 #include "io/StepModelLoader.h"
+#include "io/ProjectStore.h"
 #include "app/ReconstructionController.h"
 #include "ui/panels/CapturePanel.h"
 #include "ui/panels/PointCloudRelationsPanel.h"
+#include "ui/panels/PointCloudPanel.h"
 #include "ui/panels/PropertyPanel.h"
 #include "ui/panels/RenderPanel.h"
 #include "ui/panels/SketchPanel.h"
@@ -23,6 +25,7 @@
 #include <QAction>
 #include <QAbstractButton>
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
@@ -254,6 +257,139 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
     closing.reset();
     QCoreApplication::processEvents();
 }
+
+void testGuidedReconstruction(const QString& cloudPath)
+{
+    MainWindow window;
+    auto* document = window.findChild<VTKViewer*>()->pointCloudDocument();
+    auto* model = window.findChild<ModelingController*>();
+    auto* task = window.findChild<CadReconstructionTask*>();
+    auto* relations = window.findChild<PointCloudRelationsPanel*>();
+    auto* panel = window.findChild<PointCloudPanel*>();
+    auto* geometry = window.findChild<QComboBox*>("pointCloudTemplateGeometry");
+    auto* assign = window.findChild<QPushButton*>("assignPointCloudRegion");
+    auto* rebuild = window.findChild<QPushButton*>("rebuildCloudTemplatesButton");
+    auto* status = window.findChild<QLabel*>("pointCloudRelationStatus");
+    QString error;
+    require(document->load(cloudPath, error), "load guided workflow fixture");
+    // Compact worker IDs differ from original IDs after editing the cloud.
+    document->selectPoint(0);
+    document->deleteSelectedPoints();
+    std::vector<vtkIdType> selected;
+    for (int i = 100; i < 200; ++i) selected.push_back(i);
+    document->select(selected);
+    geometry->setCurrentIndex(geometry->findData("plane"));
+    assign->click();
+    require(task->isRunning(), "assigning a metric template automatically starts CAD reconstruction");
+    waitForCad(window, true);
+    const auto* region = document->selection().region(1);
+    require(region && region->templateLocked && region->source == "manual" && !region->fitStale
+            && std::abs(std::abs(region->parameters["offset"].toDouble()) - 3) < 1e-6
+            && document->selection().regionPoints(1) == selected,
+            "guided fit preserves manual provenance, source units and original point membership");
+    require(model->features().size() == 1 && model->features()[0].reconstructed
+            && std::abs(volume(model->bodyShape()) - 216) < 1e-5
+            && document->selection().regions().size() > 1,
+            "partial plane guides complete CAD and remaining points are analyzed");
+    modeling::FeatureId authored = modeling::kInvalidFeatureId;
+    require(model->addSketch({}, authored), "add independent authored history");
+    rebuild->click();
+    waitForCad(window, true);
+    require(model->features().size() == 2 && model->features()[0].id == authored
+            && !model->features()[0].reconstructed && model->features()[1].reconstructed
+            && std::abs(volume(model->bodyShape()) - 216) < 1e-5,
+            "rebuilding replaces generated features and preserves independent authored history");
+    const auto revision = model->revision();
+    relations->editRegionRequested(1, "wrong sphere", "sphere");
+    waitForCad(window);
+    require(model->revision() == revision && status->text().contains("模板")
+            && status->text().contains("失败"), "wrong template reports conflict without changing CAD");
+    // Rapid changes cancel the obsolete job and reconstruct the latest template.
+    relations->editRegionRequested(1, "obsolete sphere", "sphere");
+    relations->editRegionRequested(1, "corrected plane", "plane");
+    QElapsedTimer deadline;
+    deadline.start();
+    while ((model->revision() == revision || task->isRunning()
+            || !action(window, "Reconstruct CAD")->isEnabled()) && deadline.elapsed() < 30000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QThread::msleep(1);
+    }
+    require(model->revision() > revision && model->features().size() == 2
+            && document->selection().region(1)->geometry == "plane"
+            && document->selection().regionPoints(1) == selected,
+            "queued retry uses latest template snapshot without duplicating generated features");
+    // A complete cuboid can also be specified using a local observed face.
+    relations->editRegionRequested(1, "cuboid patch", "cuboid");
+    waitForCad(window, true);
+    require(document->selection().region(1)->parameters.contains("size_x")
+            && model->features().size() == 2, "cuboid template completes from whole-cloud observations");
+    require(panel->regionId() == 0, "assign keeps the new-group target for subsequent templates");
+    window.findChild<QPushButton*>("undoCloudEditButton")->click();
+    waitForCad(window, true);
+    require(document->selection().region(1)->geometry == "plane"
+            && document->selection().region(1)->parameters.contains("offset")
+            && model->features().size() == 2,
+            "one undo restores the template edit and reconstructs it without an automatic-fit undo loop");
+    relations->editRegionRequested(1, "cuboid patch", "cuboid");
+    waitForCad(window, true);
+
+    document->selectRegion(1);
+    panel->unassignRequested();
+    waitForCad(window, true);
+    require(document->selection().regionPointCount(1) == 0 && model->features().size() == 2
+            && std::abs(volume(model->bodyShape()) - 216) < 1e-5,
+            "empty manual groups stop constraining global reconstruction after unassignment");
+    window.findChild<QPushButton*>("undoCloudEditButton")->click();
+    waitForCad(window, true);
+    require(document->selection().regionPoints(1) == selected,
+            "undo unassignment restores original membership and guided reconstruction");
+
+    ProjectSnapshot snapshot;
+    snapshot.features = model->features(); snapshot.cloud = document;
+    snapshot.currentBody = model->bodyShape();
+    const auto projectPath = QFileInfo(cloudPath).dir().filePath("guided.pcad");
+    require(ProjectStore::save(projectPath, snapshot, error), "save guided model and templates together");
+    auto restored = ProjectStore::load(projectPath, error);
+    if (!restored) throw std::runtime_error(error.toStdString());
+    require(restored->cloud->selection().region(1)->templateLocked
+            && restored->cloud->selection().regionPoints(1) == selected
+            && restored->cloud->selection().region(1)->parameters.contains("size_x")
+            && restored->model.features()[1].reconstructed,
+            "project round-trip preserves fitted cuboid, IDs, lock and generated feature provenance");
+    model->adoptProject(std::move(restored->model));
+    document->adoptProject(std::move(*restored->cloud));
+    rebuild->click(); waitForCad(window, true);
+    require(model->features().size() == 2 && std::abs(volume(model->bodyShape()) - 216) < 1e-5,
+            "rebuilding a restored guided project replaces generated features without growth");
+
+    // Unknown-scale edits store the template without opening an automatic modal.
+    QFile metadata(QFileInfo(document->sourcePath()).dir().filePath(
+        QFileInfo(document->sourcePath()).completeBaseName() + ".json"));
+    require(metadata.open(QIODevice::WriteOnly | QIODevice::Truncate), "set unknown scale for template test");
+    metadata.write("{\"unit\":\"arbitrary\"}"); metadata.close();
+    const auto beforeScale = model->revision();
+    relations->editRegionRequested(1, "unknown-scale cuboid", "cuboid");
+    require(!task->isRunning() && status->text().contains("尺度未知"),
+            "automatic template reconstruction requires explicit unknown-scale confirmation");
+    bool declined = false;
+    QTimer::singleShot(0, &window, [&] {
+        if (auto* box = window.findChild<QMessageBox*>()) {
+            declined = true; box->button(QMessageBox::No)->click();
+        }
+    });
+    rebuild->click();
+    require(declined && !task->isRunning() && model->revision() == beforeScale,
+            "declining guided scale assumption preserves CAD and template");
+    bool accepted = false;
+    QTimer::singleShot(0, &window, [&] {
+        if (auto* box = window.findChild<QMessageBox*>()) {
+            accepted = true; box->button(QMessageBox::Yes)->click();
+        }
+    });
+    rebuild->click(); waitForCad(window, true);
+    require(accepted && model->revision() > beforeScale && model->features().size() == 2,
+            "explicit guided scale confirmation completes whole reconstruction");
+}
 }
 
 int main(int argc, char** argv)
@@ -460,6 +596,7 @@ int main(int argc, char** argv)
         require(units.open(QIODevice::WriteOnly), "create metric unit sidecar");
         units.write("{\"unit\":\"mm\"}"); units.close();
         testCadReconstruction(window, cadCloudPath);
+        testGuidedReconstruction(cadCloudPath);
 
         // Start analysis and destroy the window immediately, before queued results
         // are delivered. This verifies the workspace's worker/view lifetime boundary.

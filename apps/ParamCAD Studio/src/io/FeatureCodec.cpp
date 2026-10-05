@@ -240,6 +240,7 @@ QJsonArray FeatureCodec::encode(const std::vector<modeling::Feature>& features)
         result.append(QJsonObject{{"id", QString::number(feature.id)},
                                   {"name", QString::fromStdString(feature.name)},
                                   {"suppressed", feature.suppressed},
+                                  {"reconstructed", feature.reconstructed},
                                   {"params", paramsJson(feature.params)}});
     return result;
 }
@@ -259,7 +260,7 @@ bool FeatureCodec::decode(const QJsonArray& json, std::vector<modeling::Feature>
                               std::move(params),
                               boolean(feature["suppressed"]),
                               true,
-                              {}});
+                              {}, feature.contains("reconstructed") ? boolean(feature["reconstructed"]) : false});
         }
         features = std::move(result);
         error.clear();

@@ -50,6 +50,21 @@ int main(int argc, char** argv)
             require(result.error.isEmpty() && !result.surfaces.empty(), "sample cloud surfaces detected");
             std::cout << "Sample: " << result.surfaces.size() << " surfaces, " << result.assignedPoints << "/" << input.positions.size() << " points.\n";
         }
+        reconstruction::TemplateFit fit;
+        reconstruction::PlaneEvidence plane;
+        plane.plane.normal = {0, 0, 1}; plane.plane.offset = -3000;
+        plane.meanAbsoluteResidual = 2;
+        fit.surface = plane;
+        auto annotation = describeTemplateFit(fit, 1000);
+        require(annotation.parameters["offset"].toDouble() == -3 && annotation.residual == 0.002,
+                "template plane equations and residuals return to source meter units");
+        fit.surface.reset(); fit.box = reconstruction::BoxCandidate{};
+        fit.box->primitive.pose.origin = {1000, 2000, 3000};
+        fit.box->primitive.sizeX = 4000; fit.box->primitive.sizeY = 5000; fit.box->primitive.sizeZ = 6000;
+        annotation = describeTemplateFit(fit, 1000);
+        require(annotation.geometry == "cuboid" && annotation.parameters["size_x"].toDouble() == 4
+                && annotation.parameters["size_z"].toDouble() == 6,
+                "cuboid template dimensions return to source meter units");
         std::cout<<"Point cloud analysis tests passed.\n"; return 0;
     } catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; }
 }

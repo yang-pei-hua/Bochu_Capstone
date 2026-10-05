@@ -133,14 +133,19 @@ void PointCloudDocument::replaceRegionPoints(int id)
     m_selection.replaceRegionPoints(id);
     notifyEdit();
 }
-void PointCloudDocument::updateRegionFit(int id, const PointCloudRegion& fitted)
+void PointCloudDocument::updateRegionFit(int id, const PointCloudRegion& fitted, bool recordUndo)
 {
-    m_selection.updateRegionFit(id, fitted);
+    m_selection.updateRegionFit(id, fitted, recordUndo);
     notifyEdit();
 }
 void PointCloudDocument::deleteRegionPoints(int id)
 {
     m_selection.deleteRegionPoints(id);
+    notifyEdit();
+}
+void PointCloudDocument::lockTemplate(int id)
+{
+    m_selection.lockTemplate(id);
     notifyEdit();
 }
 void PointCloudDocument::deleteSelectedPoints()
@@ -159,14 +164,14 @@ void PointCloudDocument::removeRelation(int id)
     m_selection.removeRelation(id);
     notifyEdit();
 }
-void PointCloudDocument::inferRelations(double distanceTolerance, double angleDegrees)
+void PointCloudDocument::inferRelations(double distanceTolerance, double angleDegrees, bool recordUndo)
 {
-    m_selection.inferRelations(distanceTolerance, angleDegrees);
+    m_selection.inferRelations(distanceTolerance, angleDegrees, recordUndo);
     notifyEdit();
 }
-void PointCloudDocument::addSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces)
+void PointCloudDocument::addSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces, bool recordUndo)
 {
-    m_selection.addSurfaces(surfaces);
+    m_selection.addSurfaces(surfaces, recordUndo);
     notifyEdit();
 }
 bool PointCloudDocument::undo()

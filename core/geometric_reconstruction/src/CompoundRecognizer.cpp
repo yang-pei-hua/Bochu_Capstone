@@ -543,7 +543,8 @@ bool reconstructCompound(const PointStore &store, const CompoundRecognitionOptio
 
 bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOptions &planes,
                                 const CylinderDetectionOptions &cylinders,
-                                CompoundCandidate &output, std::string &error) {
+                                CompoundCandidate &output, std::string &error,
+                                const std::vector<PrimitiveEvidence>& seeds) {
     CompoundRecognitionOptions options;
     options.distanceTolerance = planes.distanceThreshold;
     if (reconstructCompound(points, options, output, error))
@@ -553,6 +554,7 @@ bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOp
         CurvedSolidRecognitionOptions curvedOptions;
         curvedOptions.distanceTolerance = planes.distanceThreshold;
         curvedOptions.randomSeed = planes.randomSeed;
+        curvedOptions.seeds = seeds;
         CurvedSolidCandidate curved;
         output = {};
         if (!reconstructCurvedSolid(points, curvedOptions, curved, error)) {
@@ -567,7 +569,7 @@ bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOp
     };
     BoxWithThroughHolesCandidate legacy;
     if (!reconstructBoxWithThroughHoles(points, planes, cylinders, BoxRecognitionOptions{},
-                                        ThroughHoleRecognitionOptions{}, legacy, error)) {
+                                        ThroughHoleRecognitionOptions{}, legacy, error, seeds)) {
         return tryCurved(error);
     }
     const auto &box = legacy.box.primitive;

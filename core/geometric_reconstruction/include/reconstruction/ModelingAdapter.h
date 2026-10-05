@@ -8,7 +8,8 @@ namespace reconstruction {
 
 modeling::ModelPatchResult commitCompoundCandidate(
     const CompoundCandidate& candidate, modeling::ModelingCore& core,
-    modeling::ModelRevision expectedRevision = modeling::kAnyModelRevision);
+    modeling::ModelRevision expectedRevision = modeling::kAnyModelRevision,
+    bool replacePrevious = false);
 
 modeling::ModelPatchResult commitBoxCandidate(
     const BoxCandidate& candidate,

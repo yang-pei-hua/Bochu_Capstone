@@ -13,7 +13,7 @@ class RebuildEngine;
 
 class PartDocument {
 public:
-    FeatureId addFeature(const FeatureParams& params);
+    FeatureId addFeature(const FeatureParams& params, bool reconstructed = false);
     bool editFeature(FeatureId id, const FeatureParams& params);
     bool removeFeature(FeatureId id, bool cascade = false);
     bool setFeatureSuppressed(FeatureId id, bool suppressed);

@@ -2,6 +2,7 @@
 #include "reconstruction/AxisAlignedBoxRecognizer.h"
 #include "reconstruction/BoxRecognizer.h"
 #include "reconstruction/ModelingAdapter.h"
+#include "reconstruction/GuidedSolidRecognizer.h"
 #include "reconstruction/PointCloudPreprocessor.h"
 #include "reconstruction/PrimitiveDetector.h"
 #include "reconstruction/SyntheticPointCloud.h"
@@ -143,6 +144,21 @@ void testCompoundCommitFusesSolidsAtomically() {
     requireNear(volumeOf(core.bodyShape()),84800,1e-6,"Fused L bracket volume");
     const auto stale=reconstruction::commitCompoundCandidate(candidate,core,0);
     require(!stale.success&&core.features().size()==4,"Stale patch must leave compound unchanged");
+    for (const auto& feature : core.features())
+        require(feature.reconstructed, "All generated features retain reconstruction provenance");
+    const auto replaced=reconstruction::commitCompoundCandidate(candidate,core,core.revision(),true);
+    require(replaced.success && core.features().size()==4,
+            "Replacing generated compound does not append duplicate features");
+    requireNear(volumeOf(core.bodyShape()),84800,1e-6,"Replacement preserves fused volume");
+    modeling::SketchFeatureParams dependent;
+    dependent.plane=modeling::featureFace(core.features().back().id,modeling::FaceRole::EndFace);
+    const auto authored=core.execute(modeling::AddFeatureCommand{dependent});
+    require(authored.success,"Append authored dependent for replacement guard");
+    const auto revision=core.revision();
+    const auto blocked=reconstruction::commitCompoundCandidate(candidate,core,revision,true);
+    require(!blocked.success && core.revision()==revision && core.features().size()==5,
+            "Authored dependents reject replacement atomically instead of being deleted");
+    requireNear(volumeOf(core.bodyShape()),84800,1e-6,"Rejected replacement preserves native body");
     modeling::ModelingCore empty;
     candidate.prisms[0].depth=-1;
     const auto invalid=reconstruction::commitCompoundCandidate(candidate,empty,0);
@@ -383,6 +399,32 @@ void testVoxelDownsamplingPreservesOriginalPointIds() {
             "Voxel report must count one removed observation");
     require(processed.points()[0].id == 11U && processed.points()[1].id == 12U,
             "Voxel representatives must retain deterministic original PointIds");
+    options.protectedPointIds = {10};
+    require(reconstruction::preprocessPointCloud(input, options, processed, report, error), error);
+    require(processed.size() == 3 && processed.points()[0].id == 10,
+            "Manual observation survives even when another sample represents the same voxel");
+
+    std::vector<reconstruction::PointSample> dense;
+    for (int x=0;x<10;++x) for (int y=0;y<10;++y)
+        dense.push_back({static_cast<reconstruction::PointId>(dense.size()+1),
+                         {double(x),double(y),0},modeling::Vec3{0,0,1},1});
+    dense.push_back({1001,{1000,1000,0},modeling::Vec3{0,0,1},1});
+    dense.push_back({1002,{0,0,0},modeling::Vec3{0,0,1},1});
+    options.voxelSize = 2;
+    options.removeStatisticalOutliers = true;
+    options.protectedPointIds.clear();
+    const reconstruction::PointStore observations(dense,reconstruction::LengthUnit::Millimeter);
+    require(reconstruction::preprocessPointCloud(observations,options,processed,report,error),error);
+    require(report.removedByVoxel > 0 && report.removedAsOutliers > 0,
+            "Ordinary dense observations still use voxel and outlier filtering");
+    options.protectedPointIds = {1001,1002};
+    require(reconstruction::preprocessPointCloud(observations,options,processed,report,error),error);
+    for (auto id : options.protectedPointIds)
+        require(std::any_of(processed.points().begin(),processed.points().end(),
+                           [id](const auto& p){return p.id==id;}),
+                "Every explicit observation keeps its original ID despite voxel/outlier filtering");
+    require(report.removedByVoxel > 0,
+            "Protecting a manual group retains downsampling for the remaining scene");
 }
 
 void testCylinderPrimitiveProposal() {
@@ -685,6 +727,19 @@ void testBoxThroughHoleEndToEnd() {
             "End-to-end reconstruction must classify the cylinder as one through hole");
     requireNear(candidate.throughHoles.front().primitive.radius, kRadius, 0.02,
                 "end-to-end through-hole radius");
+    auto oriented = points.points();
+    reconstruction::TemplateHint wall{3, reconstruction::TemplateKind::Cylinder, {}};
+    for (auto& point : oriented) if (point.id >= nextId - 17 * 64) {
+        wall.points.push_back(point.id);
+        point.normal = modeling::Vec3{-point.normal->x, -point.normal->y, -point.normal->z};
+    }
+    reconstruction::GuidedSolidResult guided;
+    require(reconstruction::reconstructGuidedSolid(
+                reconstruction::PointStore(oriented, points.unit()), planeOptions, cylinderOptions,
+                {wall}, guided, error), error);
+    require(guided.candidate.boxes.size() == 1 && guided.candidate.throughHoles.size() == 1
+            && guided.fits[0].surface && !guided.fits[0].solid,
+            "Manual cylinder wall remains a through hole rather than becoming positive material");
 }
 
 void testSpherePrimitiveProposal() {

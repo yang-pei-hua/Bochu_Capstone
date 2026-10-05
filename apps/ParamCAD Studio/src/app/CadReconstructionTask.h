@@ -4,6 +4,7 @@
 
 #include <reconstruction/CompoundRecognizer.h>
 #include <reconstruction/PointCloudPreprocessor.h>
+#include <reconstruction/GuidedSolidRecognizer.h>
 
 #include <QObject>
 
@@ -19,6 +20,8 @@ struct CadReconstructionResult
     bool preprocessingComplete = false;
     reconstruction::PointCloudPreprocessingReport preprocessing;
     reconstruction::CompoundCandidate candidate;
+    std::vector<reconstruction::TemplateFit> templateFits;
+    int failedRegionId = 0;
     QString error;
 };
 
@@ -28,12 +31,13 @@ class CadReconstructionTask final : public QObject
 {
     Q_OBJECT
 public:
-    enum class Stage { Preprocessing, Recognizing, Cancelling };
+    enum class Stage { Preprocessing, FittingTemplates, Recognizing, Cancelling };
     Q_ENUM(Stage)
 
     explicit CadReconstructionTask(QObject* parent = nullptr);
     ~CadReconstructionTask() override;
-    bool start(PlyCloud cloud, reconstruction::LengthUnit unit);
+    bool start(PlyCloud cloud, reconstruction::LengthUnit unit,
+               std::vector<reconstruction::TemplateHint> hints = {}, double sourceTolerance = 0);
     bool isRunning() const noexcept;
     bool isCancellationRequested() const noexcept;
     void cancel();

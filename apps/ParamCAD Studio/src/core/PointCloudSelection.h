@@ -16,12 +16,13 @@ struct PointCloudRegion
 {
     int id = 0;
     QString name;
-    QString geometry; // Stable keys: cuboid, sphere, cylinder, plane, ring.
+    QString geometry; // Stable keys: cuboid, sphere, cylinder, cone, plane, ring.
     QJsonObject parameters; // Fitted equations in original cloud units.
     QString source = QStringLiteral("manual");
     double residual = 0.0;
     double confidence = 0.0;
     bool fitStale = false;
+    bool templateLocked = false;
 };
 
 struct PointCloudRelation
@@ -41,7 +42,8 @@ struct DetectedPointCloudSurface
 };
 
 // Selection and semantic annotations use original PLY point indices. Geometry
-// labels are user hints, not fitted solids or changes to the source cloud.
+// Locked geometry labels guide CAD reconstruction; annotations never modify
+// the source observations themselves.
 class PointCloudSelection
 {
 public:
@@ -58,15 +60,16 @@ public:
     void unassign();
     bool editRegion(int regionId, const QString& name, const QString& geometry);
     void replaceRegionPoints(int regionId);
-    void updateRegionFit(int regionId, const PointCloudRegion& fitted);
+    void updateRegionFit(int regionId, const PointCloudRegion& fitted, bool recordUndo = true);
+    void lockTemplate(int regionId);
     void deleteRegionPoints(int regionId); // 0 means the unassigned collection.
     void deleteSelectedPoints();
     void selectUnassigned();
     void selectRelation(int relationId);
-    void addSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces);
+    void addSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces, bool recordUndo = true);
     int setRelation(int relationId, int first, int second, const QString& type);
     void removeRelation(int relationId);
-    void inferRelations(double distanceTolerance, double angleDegrees);
+    void inferRelations(double distanceTolerance, double angleDegrees, bool recordUndo = true);
     bool undo();
     bool canUndo() const { return !m_undo.empty(); }
     bool active(vtkIdType id) const;
@@ -103,7 +106,7 @@ private:
         int nextRegionId = 1;
         int nextRelationId = 1;
     };
-    void checkpoint();
+    void checkpoint(bool recordUndo = true);
     void rebuildLocator();
     void invalidateRegion(int id);
     void deletePoints(const std::vector<vtkIdType>& ids);

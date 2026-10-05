@@ -39,5 +39,6 @@ bool reconstructCompound(const PointStore &points, const CompoundRecognitionOpti
 // accepted only if the complete surface agrees with its predicted boundary.
 bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOptions &planes,
                                 const CylinderDetectionOptions &cylinders,
-                                CompoundCandidate &output, std::string &error);
+                                CompoundCandidate &output, std::string &error,
+                                const std::vector<PrimitiveEvidence>& seeds = {});
 } // namespace reconstruction

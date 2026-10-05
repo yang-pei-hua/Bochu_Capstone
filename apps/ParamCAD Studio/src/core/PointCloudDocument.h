@@ -41,13 +41,14 @@ public:
     void unassignSelection();
     bool editRegion(int id, const QString& name, const QString& geometry);
     void replaceRegionPoints(int id);
-    void updateRegionFit(int id, const PointCloudRegion& fitted);
+    void updateRegionFit(int id, const PointCloudRegion& fitted, bool recordUndo = true);
+    void lockTemplate(int id);
     void deleteRegionPoints(int id);
     void deleteSelectedPoints();
     int setRelation(int id, int first, int second, const QString& type);
     void removeRelation(int id);
-    void inferRelations(double distanceTolerance, double angleDegrees);
-    void addSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces);
+    void inferRelations(double distanceTolerance, double angleDegrees, bool recordUndo = true);
+    void addSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces, bool recordUndo = true);
     bool undo();
 
 signals:

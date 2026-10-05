@@ -347,10 +347,13 @@ bool reconstructCurvedSolid(const PointStore &points, const CurvedSolidRecogniti
     detection.cylinder.probability = detection.sphere.probability = detection.cone.probability =
         detection.torus.probability = 0.001;
     PrimitiveDetectionResult proposals;
+    proposals.evidence = options.seeds;
     // Fit each family independently. In a joint run a nearly cylindrical cone
     // or torus can consume the cylinder's observations before parameter checks
     // reject that competing proposal. Complete-solid scoring decides the family.
     for (int family = 0; family < 4; ++family) {
+        const auto kind = static_cast<PrimitiveKind>(family + 1);
+        if (options.requiredKind && *options.requiredKind != kind) continue;
         detection.detectCylinders = family == 0;
         detection.detectSpheres = family == 1;
         detection.detectCones = family == 2;
@@ -367,6 +370,7 @@ bool reconstructCurvedSolid(const PointStore &points, const CurvedSolidRecogniti
     bool found = false;
     double score = -INFINITY;
     for (const auto &e : proposals.evidence) {
+        if (options.requiredKind && primitiveKind(e) != *options.requiredKind) continue;
         CurvedSolidCandidate candidate;
         bool constructed = false;
         std::visit(
@@ -443,5 +447,11 @@ bool reconstructCurvedSolid(const PointStore &points, const CurvedSolidRecogniti
     }
     error.clear();
     return true;
+}
+bool matchesCurvedBoundary(const modeling::CurvedPrimitiveParams& primitive,
+                          const PointSample& point, double tolerance) {
+    const auto b = boundary(primitive,point.position);
+    return b.distance <= tolerance && point.normal &&
+        dot(b.normal,normalized(*point.normal)) >= 0.8;
 }
 } // namespace reconstruction

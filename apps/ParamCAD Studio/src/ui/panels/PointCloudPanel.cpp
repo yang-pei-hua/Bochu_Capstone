@@ -57,6 +57,7 @@ PointCloudPanel::PointCloudPanel(QWidget* parent) : QWidget(parent)
     auto* regionGroup = new QGroupBox(tr("模板归属"), content);
     auto* regionForm = new QFormLayout(regionGroup);
     m_geometry = new QComboBox(content);
+    m_geometry->setObjectName("pointCloudTemplateGeometry");
     m_geometry->addItem(tr("长方体"), "cuboid");
     m_geometry->addItem(tr("球"), "sphere");
     m_geometry->addItem(tr("圆柱"), "cylinder");
@@ -74,6 +75,9 @@ PointCloudPanel::PointCloudPanel(QWidget* parent) : QWidget(parent)
     m_assign = new QPushButton(tr("将选中点归入此分组"), content);
     m_assign->setObjectName("assignPointCloudRegion");
     regionForm->addRow(m_assign);
+    m_reconstruct = new QPushButton(tr("按模板重建并继续整体重建"), content);
+    m_reconstruct->setObjectName("rebuildCloudTemplatesButton");
+    regionForm->addRow(m_reconstruct);
     m_recall = new QPushButton(tr("选中此分组的点"), content);
     m_remove = new QPushButton(tr("删除此分组"), content);
     auto* regionRow = new QHBoxLayout;
@@ -82,7 +86,8 @@ PointCloudPanel::PointCloudPanel(QWidget* parent) : QWidget(parent)
     m_unassign = new QPushButton(tr("移除选中点的归属"), content);
     regionForm->addRow(m_unassign);
     auto* note = new QLabel(tr("选中点显示为橙色，分组用不同颜色显示。每个点属于一个分组；"
-        "重新归属会替换旧归属。模板作为标注保存。"), content);
+        "重新归属会替换旧归属。指定模板后先拟合此点集，再以此约束整体 CAD 重建。"
+        "已知尺度时自动重建；未知尺度请点击重建按钮确认。"), content);
     note->setWordWrap(true);
     regionForm->addRow(note);
     layout->addWidget(regionGroup);
@@ -105,6 +110,7 @@ PointCloudPanel::PointCloudPanel(QWidget* parent) : QWidget(parent)
     connect(m_expand, &QPushButton::clicked, this, &PointCloudPanel::expandRequested);
     connect(m_clear, &QPushButton::clicked, this, &PointCloudPanel::clearRequested);
     connect(m_assign, &QPushButton::clicked, this, &PointCloudPanel::assignRequested);
+    connect(m_reconstruct, &QPushButton::clicked, this, &PointCloudPanel::reconstructRequested);
     connect(m_recall, &QPushButton::clicked, this, &PointCloudPanel::recallRequested);
     connect(m_remove, &QPushButton::clicked, this, &PointCloudPanel::removeRegionRequested);
     connect(m_unassign, &QPushButton::clicked, this, &PointCloudPanel::unassignRequested);
@@ -160,4 +166,8 @@ void PointCloudPanel::setDefaultRadius(double radius)
 {
     m_radius->setValue(radius);
     m_radius->setSingleStep(std::max(0.000001, radius / 10.0));
+}
+void PointCloudPanel::setReconstructionBusy(bool busy)
+{
+    m_reconstruct->setEnabled(!busy);
 }

@@ -8,6 +8,7 @@ namespace modeling {
 
 struct AddFeatureCommand {
     FeatureParams params;
+    bool reconstructed = false;
 };
 
 struct EditFeatureCommand {

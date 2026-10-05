@@ -99,7 +99,8 @@ PointCloudRelationsPanel::PointCloudRelationsPanel(QWidget* parent) : QWidget(pa
         first = new QPushButton(firstText, this); second = new QPushButton(secondText, this);
         row->addWidget(first); row->addWidget(second); target->addLayout(row);
     };
-    buttons(regionLayout, m_editRegion, tr("编辑集合"), m_refit, tr("重拟合此集合"));
+    buttons(regionLayout, m_editRegion, tr("编辑集合"), m_refit, tr("按此模板重建整体"));
+    m_refit->setObjectName("rebuildSelectedTemplateButton");
     buttons(regionLayout, m_append, tr("加入当前选区"), m_replace, tr("以选区替换集合"));
     buttons(regionLayout, m_removeRegion, tr("删除集合"), m_deleteRegionPoints, tr("删除集合内所有点"));
     m_deleteRegionPoints->setObjectName("deleteRegionPointsButton");
@@ -316,7 +317,7 @@ void PointCloudRelationsPanel::updateActions()
     const int id = selectedRegion(); const auto* region = m_document->region(id);
     const bool selected = !m_document->selected().empty();
     m_editRegion->setEnabled(region); m_removeRegion->setEnabled(region);
-    m_refit->setEnabled(region && region->geometry != "cuboid" && !m_busy && m_document->regionPointCount(id) >= 20);
+    m_refit->setEnabled(region && !m_busy && m_document->regionPointCount(id) >= 20);
     m_append->setEnabled(region && selected); m_replace->setEnabled(region && selected);
     m_deleteRegionPoints->setEnabled(id >= 0 && m_document->regionPointCount(id) > 0);
     m_deleteSelected->setEnabled(selected);

@@ -26,6 +26,7 @@ bool reconstructBox(
     const PlaneDetectionOptions& planeOptions,
     const BoxRecognitionOptions& boxOptions,
     BoxCandidate& output,
-    std::string& error);
+    std::string& error,
+    const std::vector<PlaneEvidence>& seeds = {});
 
 }  // namespace reconstruction

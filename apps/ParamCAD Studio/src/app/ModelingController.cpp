@@ -131,7 +131,8 @@ bool ModelingController::commitReconstructedBox(const reconstruction::BoxCandida
 bool ModelingController::commitReconstructedCompound(const reconstruction::CompoundCandidate& candidate)
 {
     if (!m_core) return false;
-    const auto result = reconstruction::commitCompoundCandidate(candidate, *m_core);
+    const auto result = reconstruction::commitCompoundCandidate(candidate, *m_core,
+        m_core->revision(), true);
     if (!result.success) {
         m_lastError = QString::fromStdString(result.error);
         emit modelError(m_lastError);

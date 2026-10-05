@@ -1,6 +1,7 @@
 #pragma once
 #include "reconstruction/PrimitiveDetector.h"
 #include "modeling/PrimitiveParams.h"
+#include <optional>
 namespace reconstruction {
 struct CurvedSolidRecognitionOptions {
     double distanceTolerance = 0.1;
@@ -8,6 +9,8 @@ struct CurvedSolidRecognitionOptions {
     double minimumBoundaryCoverage = 0.90;
     double minimumNormalAlignment = 0.80;
     std::uint32_t randomSeed = 4500;
+    std::optional<PrimitiveKind> requiredKind;
+    std::vector<PrimitiveEvidence> seeds;
 };
 struct CurvedSolidCandidate {
     modeling::CurvedPrimitiveParams primitive;
@@ -19,4 +22,6 @@ struct CurvedSolidCandidate {
 // angular boundary coverage prevents completion of unsupported partial scans.
 bool reconstructCurvedSolid(const PointStore &points, const CurvedSolidRecognitionOptions &options,
                             CurvedSolidCandidate &output, std::string &error);
+bool matchesCurvedBoundary(const modeling::CurvedPrimitiveParams& primitive,
+                          const PointSample& point, double tolerance);
 } // namespace reconstruction

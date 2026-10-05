@@ -22,6 +22,10 @@ struct PointCloudPreprocessingOptions {
     // The modeling core uses millimetres. Meter input is converted before any
     // thresholds are applied; arbitrary input remains arbitrary.
     bool convertKnownUnitsToMillimeters = true;
+
+    // Explicit template observations survive voxel and outlier filtering.
+    // Other observations retain the normal preprocessing/performance path.
+    std::vector<PointId> protectedPointIds;
 };
 
 struct PointCloudPreprocessingReport {

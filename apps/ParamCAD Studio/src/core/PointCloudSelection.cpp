@@ -146,6 +146,9 @@ int PointCloudSelection::assign(const QString& geometry, const QString& name, in
         m_memberships[index] = regionId;
     }
     invalidateRegion(regionId);
+    for (auto& region : m_regions) if (region.id == regionId) {
+        region.templateLocked = true; region.source = "manual";
+    }
     return regionId;
 }
 
@@ -201,7 +204,7 @@ bool PointCloudSelection::save(const QString& path, const QString& sourcePath, Q
         regions.append(QJsonObject{{"id", region.id}, {"name", region.name},
             {"geometry", region.geometry}, {"pointIndices", ids}, {"parameters", region.parameters},
             {"source", region.source}, {"residual", region.residual}, {"confidence", region.confidence},
-            {"fitStale", region.fitStale}});
+            {"fitStale", region.fitStale}, {"templateLocked", region.templateLocked}});
     }
     QJsonArray deleted, relations, suppressed;
     for (size_t i = 0; i < m_deleted.size(); ++i) if (m_deleted[i]) deleted.append(static_cast<qint64>(i));
@@ -280,6 +283,11 @@ bool PointCloudSelection::load(const QString& path, QString& error)
             memberships[static_cast<size_t>(point)] = id;
         }
         PointCloudRegion surface{id, region["name"].toString(), region["geometry"].toString()};
+        surface.templateLocked = region.contains("templateLocked")
+            ? region["templateLocked"].toBool() : region["source"].toString("manual") == "manual";
+        if (region.contains("templateLocked") && !region["templateLocked"].isBool()) {
+            error = QStringLiteral("无效的模板锁定状态。"); return false;
+        }
         if (version == 2) {
             surface.parameters = region["parameters"].toObject();
             surface.source = region["source"].toString();
@@ -315,6 +323,9 @@ bool PointCloudSelection::load(const QString& path, QString& error)
                     && validNumber("major_radius", true) && validNumber("minor_radius", true);
                 if (surface.geometry == "cone") valid = validVector("center", false) && validVector("axis", true)
                     && validNumber("angle", true) && surface.parameters["angle"].toDouble() < 1.5707963267948966;
+                if (surface.geometry == "cuboid") valid = validVector("origin", false)
+                    && validVector("x_direction", true) && validVector("z_direction", true)
+                    && validNumber("size_x", true) && validNumber("size_y", true) && validNumber("size_z", true);
                 if (!valid) { error = QStringLiteral("无效的表面参数。"); return false; }
             }
         }

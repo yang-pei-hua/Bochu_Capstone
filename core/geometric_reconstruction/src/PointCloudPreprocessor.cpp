@@ -9,6 +9,7 @@
 #include <limits>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -152,14 +153,20 @@ struct VoxelRepresentative {
 
 std::vector<PointSample> voxelDownsample(
     const std::vector<PointSample>& points,
-    double voxelSize) {
+    double voxelSize,
+    const std::unordered_set<PointId>& protectedIds) {
     if (voxelSize <= 0.0 || points.empty()) {
         return points;
     }
 
     std::unordered_map<VoxelKey, VoxelRepresentative, VoxelKeyHash> voxels;
+    std::vector<std::size_t> selected;
     voxels.reserve(points.size());
     for (std::size_t index = 0; index < points.size(); ++index) {
+        if (protectedIds.count(points[index].id)) {
+            selected.push_back(index);
+            continue;
+        }
         const Vec3& point = points[index].position;
         const VoxelKey key{
             static_cast<std::int64_t>(std::floor(point.x / voxelSize)),
@@ -179,8 +186,7 @@ std::vector<PointSample> voxelDownsample(
         }
     }
 
-    std::vector<std::size_t> selected;
-    selected.reserve(voxels.size());
+    selected.reserve(selected.size() + voxels.size());
     for (const auto& entry : voxels) {
         selected.push_back(entry.second.pointIndex);
     }
@@ -198,7 +204,8 @@ std::vector<PointSample> voxelDownsample(
 std::vector<PointSample> removeOutliers(
     const std::vector<PointSample>& points,
     const PointCloudPreprocessingOptions& options,
-    PointCloudPreprocessingReport& report) {
+    PointCloudPreprocessingReport& report,
+    const std::unordered_set<PointId>& protectedIds) {
     if (!options.removeStatisticalOutliers || points.size() < 4U ||
         options.outlierNeighborCount == 0U) {
         return points;
@@ -236,7 +243,7 @@ std::vector<PointSample> removeOutliers(
     std::vector<PointSample> result;
     result.reserve(points.size());
     for (std::size_t index = 0; index < points.size(); ++index) {
-        if (meanDistances[index] <= threshold) {
+        if (meanDistances[index] <= threshold || protectedIds.count(points[index].id)) {
             result.push_back(points[index]);
         }
     }
@@ -370,11 +377,13 @@ bool preprocessPointCloud(
     if (input.unit() == LengthUnit::Meter && outputUnit == LengthUnit::Millimeter) {
         voxelSize *= 1000.0;
     }
-    points = voxelDownsample(points, voxelSize);
+    const std::unordered_set<PointId> protectedIds(options.protectedPointIds.begin(),
+                                                 options.protectedPointIds.end());
+    points = voxelDownsample(points, voxelSize, protectedIds);
     report.voxelPointCount = points.size();
     report.removedByVoxel = report.inputPointCount - points.size();
 
-    points = removeOutliers(points, options, report);
+    points = removeOutliers(points, options, report, protectedIds);
     estimateNormalsAndCurvature(points, options, report);
     report.outputPointCount = points.size();
     if (points.empty()) {

@@ -4,13 +4,24 @@ namespace reconstruction {
 
 modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &candidate,
                                                    modeling::ModelingCore &core,
-                                                   modeling::ModelRevision expectedRevision) {
+                                                   modeling::ModelRevision expectedRevision,
+                                                   bool replacePrevious) {
     modeling::ModelPatch patch;
     patch.expectedRevision = expectedRevision;
     // Allocate sketch IDs on a private copy; the final patch applies atomically.
     auto staging = core;
+    if (replacePrevious) {
+        // Remove only this workflow's features, in dependency order. Authored
+        // dependents make replacement fail atomically rather than being deleted.
+        const auto features = core.features();
+        for (auto i = features.rbegin(); i != features.rend(); ++i) if (i->reconstructed) {
+            patch.commands.push_back(modeling::RemoveFeatureCommand{i->id, false});
+            const auto removed = staging.execute(patch.commands.back());
+            if (!removed.success) return {false, core.revision(), {}, removed.error};
+        }
+    }
     auto append = [&](const modeling::FeatureParams &params) {
-        patch.commands.push_back(modeling::AddFeatureCommand{params});
+        patch.commands.push_back(modeling::AddFeatureCommand{params, true});
         return staging.execute(patch.commands.back());
     };
     for (const auto &box : candidate.boxes) {
@@ -40,8 +51,10 @@ modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &cand
         if (!added.success)
             return {false, core.revision(), {}, added.error};
     }
-    for (const auto &hole : candidate.throughHoles)
-        append(hole.primitive);
+    for (const auto &hole : candidate.throughHoles) {
+        const auto added = append(hole.primitive);
+        if (!added.success) return {false, core.revision(), {}, added.error};
+    }
     for (const auto& solid : candidate.curvedSolids) {
         const auto added = std::visit([&](const auto& params) { return append(params); }, solid.primitive);
         if (!added.success) return {false, core.revision(), {}, added.error};
@@ -54,7 +67,7 @@ modeling::ModelPatchResult commitBoxCandidate(const BoxCandidate &candidate,
                                               modeling::ModelRevision expectedRevision) {
     modeling::ModelPatch patch;
     patch.expectedRevision = expectedRevision;
-    patch.commands.push_back(modeling::AddFeatureCommand{candidate.primitive});
+    patch.commands.push_back(modeling::AddFeatureCommand{candidate.primitive, true});
     patch.rebuild = true;
     return core.apply(patch);
 }
@@ -65,9 +78,9 @@ commitBoxWithThroughHolesCandidate(const BoxWithThroughHolesCandidate &candidate
                                    modeling::ModelRevision expectedRevision) {
     modeling::ModelPatch patch;
     patch.expectedRevision = expectedRevision;
-    patch.commands.push_back(modeling::AddFeatureCommand{candidate.box.primitive});
+    patch.commands.push_back(modeling::AddFeatureCommand{candidate.box.primitive, true});
     for (const ThroughHoleCandidate &hole : candidate.throughHoles) {
-        patch.commands.push_back(modeling::AddFeatureCommand{hole.primitive});
+        patch.commands.push_back(modeling::AddFeatureCommand{hole.primitive, true});
     }
     patch.rebuild = true;
     return core.apply(patch);

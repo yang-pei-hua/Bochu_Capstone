@@ -23,6 +23,7 @@ public:
     int regionId() const;
     void setDefaultRadius(double radius);
     void setTargetRegion(int id);
+    void setReconstructionBusy(bool busy);
 
 signals:
     void modeChanged(int mode); // 0: modeling, 1: point picking, 2: 3D box
@@ -31,6 +32,7 @@ signals:
     void expandRequested();
     void clearRequested();
     void assignRequested();
+    void reconstructRequested();
     void recallRequested();
     void removeRegionRequested();
     void unassignRequested();
@@ -53,4 +55,5 @@ private:
     QPushButton* m_recall;
     QPushButton* m_remove;
     QPushButton* m_unassign;
+    QPushButton* m_reconstruct;
 };

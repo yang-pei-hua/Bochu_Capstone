@@ -27,6 +27,7 @@ add_library(GeometricReconstruction
     src/CgalEfficientRansacDetector.cpp
     src/CompoundRecognizer.cpp
     src/CurvedSolidRecognizer.cpp
+    src/GuidedSolidRecognizer.cpp
     src/ModelingAdapter.cpp
     src/PointCloudPreprocessor.cpp
     src/PointStore.cpp

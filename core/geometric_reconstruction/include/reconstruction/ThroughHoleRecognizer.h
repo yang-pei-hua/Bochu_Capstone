@@ -41,6 +41,7 @@ bool reconstructBoxWithThroughHoles(
     const BoxRecognitionOptions& boxOptions,
     const ThroughHoleRecognitionOptions& holeOptions,
     BoxWithThroughHolesCandidate& output,
-    std::string& error);
+    std::string& error,
+    const std::vector<PrimitiveEvidence>& seeds = {});
 
 }  // namespace reconstruction

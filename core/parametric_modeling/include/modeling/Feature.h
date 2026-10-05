@@ -47,6 +47,7 @@ struct Feature {
     bool suppressed = false;
     bool valid = true;
     std::string errorText;
+    bool reconstructed = false;
 };
 
 }  // namespace modeling

@@ -105,6 +105,7 @@ void primitiveProjects(QTemporaryDir& temp)
     for (const auto& params : primitives) {
         ProjectSnapshot state;
         state.features = {{70, "重建基元", featureTypeOf(params), params}};
+        state.features[0].reconstructed = true;
         if (std::holds_alternative<BoxPrimitiveParams>(params)) {
             state.features.push_back({80, "通孔", FeatureType::ThroughHolePrimitive,
                                       ThroughHolePrimitiveParams{{3, 9, 11}, {1, 0, 0}, 1}});
@@ -118,6 +119,8 @@ void primitiveProjects(QTemporaryDir& temp)
         auto loaded = ProjectStore::load(path, error);
         require(loaded && loaded->model.features()[0].type == featureTypeOf(params),
                 "load primitive feature type");
+        require(loaded->model.features()[0].reconstructed,
+                "project retains reconstruction provenance for subsequent replacement");
         GProp_GProps before, after;
         BRepGProp::VolumeProperties(model.bodyShape(), before);
         BRepGProp::VolumeProperties(loaded->model.bodyShape(), after);
@@ -218,6 +221,9 @@ int main(int argc, char** argv)
                 "original observations, deletion mask and relations survive");
         require(restored->cloud->selection().selected() == std::vector<vtkIdType>({0, 1, 2, 3}),
                 "original point selection survives");
+        require(restored->cloud->selection().region(first)->templateLocked
+                && restored->cloud->selection().region(second)->templateLocked,
+                "manual template locks survive standalone project restoration");
         require(PointCloudAdapter::lengthUnitFor(restored->cloud->sourcePath()) ==
                     reconstruction::LengthUnit::Millimeter,
                 "embedded scale metadata survives removal of source files");
