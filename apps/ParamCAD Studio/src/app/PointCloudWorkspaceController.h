@@ -14,7 +14,6 @@ class PropertyPanel;
 class ReconstructionController;
 struct ReconstructRequest;
 class ScenePanel;
-class QTabWidget;
 class QThread;
 class VTKViewer;
 
@@ -23,7 +22,6 @@ struct PointCloudWorkspaceUi
     VTKViewer* viewer;
     ModelingPanel* modelingPanel;
     PointCloudRelationsPanel* relationsPanel;
-    QTabWidget* structureTabs;
     ScenePanel* scenePanel;
     PropertyPanel* propertyPanel;
     QAction* reconstructCadAction;

@@ -64,7 +64,6 @@ private:
     SketchToolPalette* m_toolPalette = nullptr;
     ModelingPanel* m_modelingPanel = nullptr;
     PointCloudRelationsPanel* m_relationsPanel = nullptr;
-    QTabWidget* m_structureTabs = nullptr;
     ScenePanel* m_scenePanel = nullptr;
     PropertyPanel* m_propertyPanel = nullptr;
     SketchPanel* m_sketchPanel = nullptr;

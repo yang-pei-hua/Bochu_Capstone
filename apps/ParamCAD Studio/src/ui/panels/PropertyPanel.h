@@ -17,6 +17,7 @@ class ReconstructPanel;
 class RenderPanel;
 class SketchEntityPanel;
 class PointCloudPanel;
+class PointCloudRelationsPanel;
 
 class PropertyPanel final : public QWidget
 {
@@ -31,6 +32,7 @@ public:
     ReconstructPanel* reconstructPanel() const;
     SketchEntityPanel* sketchEntityPanel() const;
     PointCloudPanel* pointCloudPanel() const;
+    PointCloudRelationsPanel* pointCloudRelationsPanel() const;
     void showPointCloudProperties();
     ObjectPresentation presentation() const;
     void setPresentation(const ObjectPresentation& state);

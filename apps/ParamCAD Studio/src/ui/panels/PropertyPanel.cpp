@@ -86,6 +86,7 @@ CameraPanel* PropertyPanel::cameraPanel() const
 }
 
 PointCloudPanel* PropertyPanel::pointCloudPanel() const { return m_pointCloudPanel; }
+PointCloudRelationsPanel* PropertyPanel::pointCloudRelationsPanel() const { return m_pointCloudPanel->relationsPanel(); }
 void PropertyPanel::showPointCloudProperties() { m_tabs->setCurrentWidget(m_pointCloudPanel); }
 
 RenderPanel* PropertyPanel::renderPanel() const

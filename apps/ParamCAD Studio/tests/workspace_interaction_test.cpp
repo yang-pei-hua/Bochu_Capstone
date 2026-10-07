@@ -28,6 +28,8 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QDialog>
+#include <QToolButton>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
@@ -46,6 +48,7 @@
 #include <QTimer>
 #include <QTreeWidget>
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -127,6 +130,52 @@ void waitForCad(MainWindow& window, bool includeAnalysis = false)
         QThread::msleep(1);
     }
     require(!task->isRunning() && (!includeAnalysis || reconstruct->isEnabled()), "CAD/analysis completed within deadline");
+}
+
+void replayDenseCloud(const QString& path)
+{
+    MainWindow window;
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.show();
+    QCoreApplication::processEvents();
+    auto* document = window.findChild<PointCloudDocument*>();
+    auto* model = window.findChild<ModelingController*>();
+    auto* task = window.findChild<CadReconstructionTask*>();
+    auto* reconstruct = action(window, "Reconstruct CAD");
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QString error;
+    require(document->load(path, error), error.toStdString().c_str());
+    std::cout << "Dense cloud load: " << elapsed.elapsed() << " ms, "
+              << document->pointCount() << " points." << std::endl;
+    QObject::connect(task, &CadReconstructionTask::stageChanged, &window,
+        [&](CadReconstructionTask::Stage stage) {
+            std::cout << "CAD stage " << static_cast<int>(stage) << " at "
+                      << elapsed.elapsed() << " ms." << std::endl;
+        });
+    QObject::connect(model, &ModelingController::modelRebuilt, &window, [&] {
+        std::cout << "CAD model rebuilt at " << elapsed.elapsed() << " ms." << std::endl;
+    });
+    QObject::connect(document, &PointCloudDocument::documentChanged, &window, [&] {
+        std::cout << "Cloud annotations updated at " << elapsed.elapsed() << " ms." << std::endl;
+    });
+    elapsed.restart();
+    reconstruct->trigger();
+    qint64 longestDispatch = elapsed.elapsed();
+    std::cout << "Reconstruct action returned after " << longestDispatch << " ms." << std::endl;
+    while ((task->isRunning() || !reconstruct->isEnabled()) && elapsed.elapsed() < 60000) {
+        QElapsedTimer dispatch;
+        dispatch.start();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        longestDispatch = std::max(longestDispatch, dispatch.elapsed());
+        QThread::msleep(1);
+    }
+    std::cout << "Dense reconstruction and analysis: " << elapsed.elapsed()
+              << " ms; longest GUI dispatch: " << longestDispatch << " ms." << std::endl;
+    require(!task->isRunning() && reconstruct->isEnabled(), "dense CAD and analysis complete");
+    require(!model->features().empty() && BRepCheck_Analyzer(model->bodyShape()).IsValid(),
+            "dense reconstruction publishes a valid parametric body");
+    require(longestDispatch < 5000, "dense reconstruction must keep GUI dispatches below Windows hang detection");
 }
 
 void testCadReconstruction(MainWindow& window, const QString& cloudPath)
@@ -265,10 +314,8 @@ void testGuidedReconstruction(const QString& cloudPath)
     auto* model = window.findChild<ModelingController*>();
     auto* task = window.findChild<CadReconstructionTask*>();
     auto* relations = window.findChild<PointCloudRelationsPanel*>();
-    auto* panel = window.findChild<PointCloudPanel*>();
-    auto* geometry = window.findChild<QComboBox*>("pointCloudTemplateGeometry");
-    auto* assign = window.findChild<QPushButton*>("assignPointCloudRegion");
-    auto* rebuild = window.findChild<QPushButton*>("rebuildCloudTemplatesButton");
+    auto* assign = window.findChild<QAction*>("createPointCollectionAction");
+    auto* rebuild = window.findChild<QToolButton*>("rebuildCloudTemplatesButton");
     auto* status = window.findChild<QLabel*>("pointCloudRelationStatus");
     QString error;
     require(document->load(cloudPath, error), "load guided workflow fixture");
@@ -278,8 +325,17 @@ void testGuidedReconstruction(const QString& cloudPath)
     std::vector<vtkIdType> selected;
     for (int i = 100; i < 200; ++i) selected.push_back(i);
     document->select(selected);
-    geometry->setCurrentIndex(geometry->findData("plane"));
-    assign->click();
+    bool created = false;
+    QTimer::singleShot(0, &window, [&] {
+        auto* dialog = relations->findChild<QDialog*>("createCloudCollectionDialog");
+        if (!dialog) return;
+        dialog->setAttribute(Qt::WA_DontShowOnScreen);
+        auto* geometry = dialog->findChild<QComboBox*>("pointCloudTemplateGeometry");
+        geometry->setCurrentIndex(geometry->findData("plane"));
+        created = true; dialog->accept();
+    });
+    assign->trigger();
+    require(created, "menu creates a manual collection through the template dialog");
     require(task->isRunning(), "assigning a metric template automatically starts CAD reconstruction");
     waitForCad(window, true);
     const auto* region = document->selection().region(1);
@@ -323,8 +379,7 @@ void testGuidedReconstruction(const QString& cloudPath)
     waitForCad(window, true);
     require(document->selection().region(1)->parameters.contains("size_x")
             && model->features().size() == 2, "cuboid template completes from whole-cloud observations");
-    require(panel->regionId() == 0, "assign keeps the new-group target for subsequent templates");
-    window.findChild<QPushButton*>("undoCloudEditButton")->click();
+    window.findChild<QAction*>("undoCloudEditAction")->trigger();
     waitForCad(window, true);
     require(document->selection().region(1)->geometry == "plane"
             && document->selection().region(1)->parameters.contains("offset")
@@ -334,12 +389,12 @@ void testGuidedReconstruction(const QString& cloudPath)
     waitForCad(window, true);
 
     document->selectRegion(1);
-    panel->unassignRequested();
+    relations->unassignRequested();
     waitForCad(window, true);
     require(document->selection().regionPointCount(1) == 0 && model->features().size() == 2
             && std::abs(volume(model->bodyShape()) - 216) < 1e-5,
             "empty manual groups stop constraining global reconstruction after unassignment");
-    window.findChild<QPushButton*>("undoCloudEditButton")->click();
+    window.findChild<QAction*>("undoCloudEditAction")->trigger();
     waitForCad(window, true);
     require(document->selection().regionPoints(1) == selected,
             "undo unassignment restores original membership and guided reconstruction");
@@ -398,6 +453,10 @@ int main(int argc, char** argv)
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat());
     QApplication application(argc, argv);
     try {
+        if (argc == 3 && QString::fromLocal8Bit(argv[1]) == "--replay-cloud") {
+            replayDenseCloud(QString::fromLocal8Bit(argv[2]));
+            return 0;
+        }
         QTemporaryDir temp;
         require(temp.isValid(), "temporary workspace");
         MainWindow window;

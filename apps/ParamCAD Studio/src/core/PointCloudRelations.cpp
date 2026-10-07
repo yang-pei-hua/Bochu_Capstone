@@ -112,16 +112,19 @@ void PointCloudSelection::inferRelations(double tolerance, double angleDegrees, 
         if (points[a.id].empty() || points[b.id].empty()) continue;
         // Finite observed patches, not intersections of their infinite surfaces.
         // Every point in the smaller patch is queried to avoid missing a short
-        // contact edge. The spatial locator makes this independent of density.
+        // contact edge. Limit each search to the adjacency tolerance: finding
+        // an unrestricted nearest point on a distant dense patch can scan most
+        // locator buckets for every query and block the GUI thread for minutes.
         const auto& smaller = points[a.id].size() < points[b.id].size() ? points[a.id] : points[b.id];
         auto locator = points[a.id].size() < points[b.id].size() ? locators[b.id] : locators[a.id];
         bool adjacent = false;
         for (vtkIdType pointId : smaller) {
-            double p[3], q[3]; m_data->GetPoint(pointId, p);
-            const vtkIdType neighbour = locator->FindClosestPoint(p);
-            locator->GetDataSet()->GetPoint(neighbour, q);
-            const double dx = p[0]-q[0], dy = p[1]-q[1], dz = p[2]-q[2];
-            if (dx*dx+dy*dy+dz*dz <= tolerance*tolerance) { adjacent = true; break; }
+            double p[3], distanceSquared;
+            m_data->GetPoint(pointId, p);
+            if (locator->FindClosestPointWithinRadius(tolerance, p, distanceSquared) >= 0) {
+                adjacent = true;
+                break;
+            }
         }
         if (adjacent) append(a, b, "adjacent", 0.75);
         if (a.fitStale || b.fitStale || a.parameters.isEmpty() || b.parameters.isEmpty()) continue;

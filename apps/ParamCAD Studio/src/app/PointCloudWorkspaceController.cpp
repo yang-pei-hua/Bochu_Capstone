@@ -23,7 +23,6 @@
 #include <QMessageBox>
 #include <QSaveFile>
 #include <QScopeGuard>
-#include <QTabWidget>
 #include <QThread>
 #include <QTimer>
 #include <map>
@@ -113,7 +112,6 @@ void PointCloudWorkspaceController::connectUi()
         if (m_analysisThread) m_analysisThread->requestInterruption();
         m_ui.relationsPanel->setDefaultTolerances(m_ui.viewer->suggestedPointCloudRadius() / 0.02);
         m_ui.relationsPanel->setStatus(workspaceTr("可识别未归属点，或先在三维视图中手动建立集合。"));
-        m_ui.structureTabs->setCurrentWidget(m_ui.relationsPanel);
         cloudPanel->setDefaultRadius(m_ui.viewer->suggestedPointCloudRadius());
         refreshCloudPanel();
         m_ui.propertyPanel->showPointCloudProperties();
@@ -127,22 +125,20 @@ void PointCloudWorkspaceController::connectUi()
         m_document->expandSelection(cloudPanel->radius());
     });
     connect(cloudPanel, &PointCloudPanel::clearRequested, m_document, &PointCloudDocument::clearSelection);
-    connect(cloudPanel, &PointCloudPanel::assignRequested, this, [this, cloudPanel] {
-        const auto id=m_document->assignRegion(cloudPanel->geometry(), cloudPanel->regionName(), cloudPanel->regionId());
-        if(id) requestGuidedReconstruction();
+    connect(cloudPanel, &PointCloudPanel::pointRequested, this, [this](qint64 id) {
+        if (m_document->selection().active(id)) m_document->selectPoint(id);
+        else m_ui.relationsPanel->setStatus(workspaceTr("该点 ID 不存在或已删除。"));
     });
-    connect(cloudPanel,&PointCloudPanel::reconstructRequested,this,&PointCloudWorkspaceController::reconstructCad);
-    connect(cloudPanel, &PointCloudPanel::recallRequested, this, [this, cloudPanel] {
-        m_document->selectRegion(cloudPanel->regionId());
-    });
-    connect(cloudPanel, &PointCloudPanel::removeRegionRequested, this, [this, cloudPanel] {
-        m_document->removeRegion(cloudPanel->regionId());
-        requestGuidedReconstruction();
-    });
-    connect(cloudPanel, &PointCloudPanel::unassignRequested,this,[this] {
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::assignRequested, this,
+        [this](const QString& geometry, const QString& name, int target) {
+            if (m_document->assignRegion(geometry, name, target)) requestGuidedReconstruction();
+        });
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::reconstructRequested,
+        this, &PointCloudWorkspaceController::reconstructCad);
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::unassignRequested, this, [this] {
         m_document->unassignSelection(); requestGuidedReconstruction();
     });
-    connect(cloudPanel, &PointCloudPanel::saveRequested, this, [this] {
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::saveRequested, this, [this] {
         QString path = QFileDialog::getSaveFileName(m_dialogParent, workspaceTr("保存点云标注"),
             m_document->sourcePath() + QStringLiteral(".regions.json"), workspaceTr("点云标注 (*.json)"));
         if (path.isEmpty()) return;
@@ -154,7 +150,7 @@ void PointCloudWorkspaceController::connectUi()
         }
         emit logInfo(workspaceTr("点云标注已保存：%1").arg(path));
     });
-    connect(cloudPanel, &PointCloudPanel::loadRequested, this, [this] {
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::loadRequested, this, [this] {
         const QString path = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("载入点云标注"),
             QFileInfo(m_document->sourcePath()).absolutePath(), workspaceTr("点云标注 (*.json)"));
         if (path.isEmpty()) return;
@@ -168,6 +164,7 @@ void PointCloudWorkspaceController::connectUi()
     });
     refreshCloudPanel();
     const auto refreshRelationships = [this] {
+        m_ui.relationsPanel->setSourceInfo(m_document->sourcePath(), m_document->sourceUnit());
         m_ui.relationsPanel->setDocument(m_document->selection(), m_document->hasCloud());
         updateCadActions();
         if (m_document->hasCloud()) m_ui.scenePanel->updateNodeLabel(SceneNodeType::PointCloud,
@@ -175,10 +172,9 @@ void PointCloudWorkspaceController::connectUi()
     };
     connect(m_document, &PointCloudDocument::documentChanged, this, refreshRelationships);
     connect(m_document, &PointCloudDocument::selectionChanged, m_ui.relationsPanel, &PointCloudRelationsPanel::updateSelection);
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::regionSelected, this, [this, cloudPanel](int id) {
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::regionSelected, this, [this](int id) {
         if (id == 0) m_document->selectUnassigned();
         else m_document->selectRegion(id);
-        cloudPanel->setTargetRegion(id);
     });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::relationSelected, m_document, &PointCloudDocument::selectRelation);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::pointSelected, m_document, &PointCloudDocument::selectPoint);
@@ -223,8 +219,6 @@ void PointCloudWorkspaceController::connectUi()
         m_document->inferRelations(m_ui.relationsPanel->relationTolerance(), m_ui.relationsPanel->angleTolerance());
         m_ui.relationsPanel->setStatus(workspaceTr("已按当前容差更新自动关系。手动关系与已删除的关系记录保持有效。"));
     });
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::saveRequested, cloudPanel, &PointCloudPanel::saveRequested);
-    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::loadRequested, cloudPanel, &PointCloudPanel::loadRequested);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::exportRequested, this, [this] {
         const QFileInfo source(m_document->sourcePath());
         QString path = QFileDialog::getSaveFileName(m_dialogParent, workspaceTr("导出当前工作点云"),
@@ -453,7 +447,7 @@ void PointCloudWorkspaceController::requestGuidedReconstruction()
     if (m_analysisThread) m_analysisThread->requestInterruption();
     if (cloudUnit(*m_document) == reconstruction::LengthUnit::Arbitrary) {
         m_guidedQueued = false;
-        m_ui.relationsPanel->setStatus(workspaceTr("模板已保存。点云尺度未知，请点击「按模板重建并继续整体重建」确认尺度后继续。"));
+        m_ui.relationsPanel->setStatus(workspaceTr("模板已保存。点云尺度未知，请点击「重建 CAD」确认尺度后继续。"));
         return;
     }
     m_guidedQueued = true;
@@ -488,7 +482,6 @@ void PointCloudWorkspaceController::updateCadActions()
                                          && m_document->pointCount() > 0);
     m_ui.cancelCadAction->setEnabled(running && !m_cadTask->isCancellationRequested());
     m_ui.relationsPanel->setBusy(busy);
-    m_ui.propertyPanel->pointCloudPanel()->setReconstructionBusy(busy);
     m_ui.relationsPanel->setCadReconstructionBusy(running, m_ui.cancelCadAction->isEnabled());
 }
 

@@ -104,7 +104,7 @@ void MainWindow::createWorkspaceControllers()
         {m_viewer, m_propertyPanel, m_captureToolAction}, this, this);
     m_propertyPanel->reconstructPanel()->setCaptureBaseDirectory(capture->baseDirectory());
     m_pointCloudWorkspace = new PointCloudWorkspaceController(m_pointCloudDocument, modeling, reconstruction,
-        {m_viewer, m_modelingPanel, m_relationsPanel, m_structureTabs, m_scenePanel,
+        {m_viewer, m_modelingPanel, m_relationsPanel, m_scenePanel,
          m_propertyPanel, m_reconstructCadAction, m_cancelCadAction, m_reconstructToolAction}, this, this);
     m_modelViewController = new ModelViewController(capture,
         {m_viewer, m_propertyPanel, m_scenePanel, m_exportStepAction}, this, this);
@@ -359,16 +359,12 @@ void MainWindow::createDockPanels()
     resizeDocks({m_bottomDock}, {170}, Qt::Vertical);
 
     m_modelingPanel = new ModelingPanel(this);
-    m_relationsPanel = new PointCloudRelationsPanel(this);
-    m_structureTabs = new QTabWidget(this);
-    m_structureTabs->setObjectName("structureTabs");
-    m_structureTabs->addTab(m_relationsPanel, tr("点云关系"));
-    m_structureTabs->addTab(m_modelingPanel, tr("CAD 特征"));
-    auto* modelingDock = new QDockWidget(tr("结构"), this);
+    m_relationsPanel = m_propertyPanel->pointCloudRelationsPanel();
+    auto* modelingDock = new QDockWidget(tr("CAD 特征"), this);
     modelingDock->setObjectName(QStringLiteral("modelingDock"));
     modelingDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    modelingDock->setWidget(m_structureTabs);
-    modelingDock->setMinimumWidth(360);
+    modelingDock->setWidget(m_modelingPanel);
+    modelingDock->setMinimumWidth(235);
     addDockWidget(Qt::LeftDockWidgetArea, modelingDock);
     splitDockWidget(sceneDock, modelingDock, Qt::Vertical);
 }
@@ -434,13 +430,11 @@ void MainWindow::connectUi()
 
     connect(m_scenePanel, &ScenePanel::nodeSelected, this, [this](SceneNodeType type) {
         if (type == SceneNodeType::Model) {
-            m_structureTabs->setCurrentWidget(m_modelingPanel);
             m_viewer->setPointCloudSelectionMode(0);
             m_propertyPanel->showObjectProperties();
         } else if (type == SceneNodeType::Camera) {
             m_propertyPanel->showCameraProperties();
         } else if (type == SceneNodeType::PointCloud) {
-            m_structureTabs->setCurrentWidget(m_relationsPanel);
             m_propertyPanel->showPointCloudProperties();
             m_viewer->setPointCloudSelectionMode(1);
         }

@@ -2,6 +2,7 @@
 #include "io/PlyReader.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -19,12 +20,58 @@ bool hasRelation(const PointCloudSelection& document, int a, int b, const QStrin
         && std::max(r.first,r.second) == std::max(a,b) && r.type == type) return true;
     return false;
 }
+
+void testDenseSeparatedPatches()
+{
+    PlyCloud cloud;
+    std::vector<DetectedPointCloudSurface> surfaces;
+    for (int face = 0; face < 2; ++face) {
+        PointCloudRegion region;
+        region.geometry = "plane";
+        region.name = QStringLiteral("Dense face %1").arg(face);
+        region.confidence = 0.95;
+        region.parameters = {{"normal", QJsonArray{0, 0, 1}}, {"offset", -1000.0 * face}};
+        DetectedPointCloudSurface surface{region, {}};
+        for (int x = 0; x < 256; ++x) for (int y = 0; y < 256; ++y) {
+            surface.points.push_back(static_cast<vtkIdType>(cloud.positions.size()));
+            cloud.positions.push_back({x * 0.01F, y * 0.01F, face * 1000.0F});
+        }
+        surfaces.push_back(std::move(surface));
+    }
+    PointCloudSelection document;
+    document.setCloud(cloud);
+    document.addSurfaces(surfaces);
+    QElapsedTimer elapsed;
+    elapsed.start();
+    document.inferRelations(0.005, 2);
+    require(hasRelation(document, 1, 2, "parallel") && !hasRelation(document, 1, 2, "adjacent"),
+            "dense separated surfaces retain analytic relations without false adjacency");
+    require(elapsed.elapsed() < 5000,
+            "dense separated patches must not perform unrestricted nearest-point searches");
+}
+
+void testAdjacencyToleranceBoundary()
+{
+    PlyCloud cloud;
+    cloud.positions = {{0, 0, 0}, {0.125F, 0, 0}};
+    PointCloudRegion region;
+    region.geometry = "plane";
+    PointCloudSelection document;
+    document.setCloud(cloud);
+    document.addSurfaces({{region, {0}}, {region, {1}}});
+    document.inferRelations(0.125, 2);
+    require(hasRelation(document, 1, 2, "adjacent"), "adjacency includes points exactly at tolerance");
+    document.inferRelations(0.12, 2);
+    require(!hasRelation(document, 1, 2, "adjacent"), "points outside tolerance remain separate");
+}
 }
 
 int main(int argc, char** argv)
 {
     QCoreApplication application(argc, argv);
     try {
+        testDenseSeparatedPatches();
+        testAdjacencyToleranceBoundary();
         PlyCloud cloud;
         std::vector<DetectedPointCloudSurface> surfaces;
         for (int face = 0; face < 3; ++face) {
