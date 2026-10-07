@@ -148,7 +148,12 @@ checks cloud, modeling-core and displayed-body revisions before committing, so
 point edits, reloads, sketch changes and STEP imports invalidate pending results.
 Surface analysis and CAD recognition are serialized within a workspace.
 
-While CAD reconstruction runs, **File → Cancel CAD Reconstruction** and the
+The toolbar's **Reconstruct CAD** command (also under **Tools**) reconstructs
+parametric CAD from the loaded point cloud. It replaces the inactive Geometry
+Fitting placeholder. **File** contains opening, closing, saving and exporting;
+**Apply Texture** is under **Tools**.
+
+While CAD reconstruction runs, **Tools → Cancel CAD Reconstruction** and the
 relationship panel's **取消 CAD 重建** button cancel the task. Cancellation takes
 effect between calculation stages and before result delivery; it does not abort
 a geometry-library call midway. The model stays unchanged by cancelled or stale
@@ -287,6 +292,18 @@ Qt/VTK window to exercise real Save/Save As/Open actions, continued editing,
 failed-load preservation, session reset, empty projects and stale CAD results.
 
 ## Point-cloud workspace in Properties
+
+Select a row in the left **CAD 特征** list to open **Properties → 特征**.
+The read-only details show the current core parameters in millimetres and model
+coordinates, before Object display transforms. Box details include local dimensions,
+origin, axes, fusion mode and an equivalent rectangle/extrusion recipe. Sketches
+show their resolved plane and local/world contour coordinates. Extrudes and cuts
+include their source sketch, depth/termination, actual direction and boolean operation;
+click the source sketch link to inspect it. Curved primitives and through holes show
+their centres/axes and radii. Right-click the details to copy the complete text.
+Rebuilding refreshes the selected feature without switching the active Properties
+page; deleting it clears the details. These parameters describe the accepted
+decomposition, not a recovered original authoring history or a SolidWorks feature export.
 
 Open a PLY with **File → Open Point Cloud** or select the Point Cloud scene node.
 All cloud controls live in **Properties → 点云**; the left dock holds **CAD 特征**.

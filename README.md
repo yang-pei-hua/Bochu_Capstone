@@ -209,7 +209,7 @@ Bochu_Capstone/
 ├── docs/                          架构、实现计划和依赖安装说明
 ├── outputs/                       默认运行输出目录
 ├── tools/                         输出清理、性能验证等辅助脚本
-├── packaging/                     Windows full/bootstrap 打包与安装脚本
+├── packaging/                     Windows 完整离线 Release 打包与安装脚本
 └── deps/                          本地二进制 SDK/运行时，不提交到 Git
 ```
 
@@ -272,7 +272,7 @@ Bochu_Capstone/
 | 客户端 STEP 导出 | 未接通 | 核心已有导出能力，桌面端暂无操作入口 |
 | 文本/LLM 指导修改 | 未开始 | 无 UI、Agent、命令协议和模型服务接入 |
 | SolidWorks MCP | 未实现 | 当前实际 CAD 后端为项目内的 OpenCASCADE 建模核心 |
-| Windows 打包 | 已有基础流程 | 支持包含全部运行时的 full 包和按需下载依赖的 bootstrap 包 |
+| Windows 打包 | 完整离线版 | 自动生成包含全部运行时的 full ZIP；清晰目录、离线安装、依赖与完整性校验，见 packaging/README.md |
 
 当前最重要的后续工作是：处理不完整可见面的点云、对象分割、primitive 鲁棒精修与全局几何约束，扩展盲孔/凸台/阶梯轴/口袋等特征，然后在稳定的结构化命令与 Feature Graph 基础上接入文本指导修改。
 

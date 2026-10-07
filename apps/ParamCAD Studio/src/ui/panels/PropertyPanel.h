@@ -18,6 +18,7 @@ class RenderPanel;
 class SketchEntityPanel;
 class PointCloudPanel;
 class PointCloudRelationsPanel;
+class FeatureDetailsPanel;
 
 class PropertyPanel final : public QWidget
 {
@@ -34,6 +35,8 @@ public:
     PointCloudPanel* pointCloudPanel() const;
     PointCloudRelationsPanel* pointCloudRelationsPanel() const;
     void showPointCloudProperties();
+    FeatureDetailsPanel* featureDetailsPanel() const;
+    void showFeatureDetails();
     ObjectPresentation presentation() const;
     void setPresentation(const ObjectPresentation& state);
 
@@ -71,6 +74,7 @@ private:
     ReconstructPanel* m_reconstructPanel = nullptr;
     SketchEntityPanel* m_sketchEntityPanel = nullptr;
     PointCloudPanel* m_pointCloudPanel = nullptr;
+    FeatureDetailsPanel* m_featureDetailsPanel = nullptr;
 
     std::array<QDoubleSpinBox*, 3> m_position{};
     std::array<QDoubleSpinBox*, 3> m_rotation{};

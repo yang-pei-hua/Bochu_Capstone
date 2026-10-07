@@ -11,6 +11,8 @@
 #include "ui/panels/PointCloudRelationsPanel.h"
 #include "ui/panels/PointCloudPanel.h"
 #include "ui/panels/PropertyPanel.h"
+#include "ui/panels/ModelingPanel.h"
+#include "ui/panels/FeatureDetailsPanel.h"
 #include "ui/panels/RenderPanel.h"
 #include "ui/panels/SketchPanel.h"
 #include "ui/panels/SketchToolPalette.h"
@@ -47,6 +49,8 @@
 #include <QThread>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QTabWidget>
+#include <QTextBrowser>
 
 #include <algorithm>
 #include <cmath>
@@ -132,7 +136,35 @@ void waitForCad(MainWindow& window, bool includeAnalysis = false)
     require(!task->isRunning() && (!includeAnalysis || reconstruct->isEnabled()), "CAD/analysis completed within deadline");
 }
 
-void replayDenseCloud(const QString& path)
+void verifyFeatureDetails(MainWindow& window)
+{
+    auto* model = window.findChild<ModelingController*>();
+    auto* list = window.findChild<ModelingPanel*>();
+    auto* properties = window.findChild<PropertyPanel*>();
+    auto* details = properties->featureDetailsPanel();
+    auto* text = details->findChild<QTextBrowser*>("featureDetailsText");
+    const auto revision = model->revision();
+    for (const auto& f : model->features()) {
+        list->selectFeature(f.id);
+        require(properties->findChild<QTabWidget*>()->currentWidget() == details
+                && text->toPlainText().contains(QString::fromStdString(f.name)),
+                "actual feature list selection opens current details in Properties");
+        if (const auto* extrusion = std::get_if<modeling::ExtrudeFeatureParams>(&f.params)) {
+            require(text->toPlainText().contains(QString::number(extrusion->depth,'g',12) + " mm")
+                    && text->toPlainText().contains("草图轮廓"),
+                    "reconstructed extrusion shows fitted depth and its source sketch");
+        }
+    }
+    require(model->revision() == revision, "viewing details preserves the parametric model");
+    properties->showPointCloudProperties();
+    model->modelRebuilt();
+    require(properties->findChild<QTabWidget*>()->currentWidget() == properties->pointCloudPanel()
+            && !text->toPlainText().contains("选择一项"),
+            "rebuild updates retained feature details without stealing the active tab");
+    properties->showFeatureDetails();
+}
+
+void replayDenseCloud(const QString& path, const QString& previewPath = {})
 {
     MainWindow window;
     window.setAttribute(Qt::WA_DontShowOnScreen);
@@ -176,6 +208,12 @@ void replayDenseCloud(const QString& path)
     require(!model->features().empty() && BRepCheck_Analyzer(model->bodyShape()).IsValid(),
             "dense reconstruction publishes a valid parametric body");
     require(longestDispatch < 5000, "dense reconstruction must keep GUI dispatches below Windows hang detection");
+    verifyFeatureDetails(window);
+    if (!previewPath.isEmpty()) {
+        window.resize(1600,1000);
+        QCoreApplication::processEvents();
+        require(window.grab().save(previewPath), "save real feature details workspace preview");
+    }
 }
 
 void testCadReconstruction(MainWindow& window, const QString& cloudPath)
@@ -197,7 +235,7 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
         [&](bool running) { starts += running; });
     const auto rebuilt = QObject::connect(model, &ModelingController::modelRebuilt, &window,
         [&] { commitsOnOwner &= QThread::currentThread() == window.thread(); });
-    reconstruct->trigger();
+    window.findChild<QToolButton*>("reconstructCadButton")->click();
     require(task->isRunning() && !reconstruct->isEnabled() && cancel->isEnabled()
             && !cancelButton->isHidden(), "running reconstruction exposes cancel and prevents duplicate commands");
     workspace->reconstructCad();
@@ -206,6 +244,7 @@ void testCadReconstruction(MainWindow& window, const QString& cloudPath)
     require(model->revision() > initialRevision && viewer->hasBody() && commitsOnOwner,
             "background candidate commits to model on GUI thread");
     require(!cancel->isEnabled() && cancelButton->isHidden(), "completion restores controls");
+    verifyFeatureDetails(window);
     const QString exportPath = QFileInfo(cloudPath).dir().filePath("reconstructed.step");
     verifyExport(window, exportPath, exportPath, model->bodyShape());
 
@@ -453,8 +492,8 @@ int main(int argc, char** argv)
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat());
     QApplication application(argc, argv);
     try {
-        if (argc == 3 && QString::fromLocal8Bit(argv[1]) == "--replay-cloud") {
-            replayDenseCloud(QString::fromLocal8Bit(argv[2]));
+        if ((argc == 3 || argc == 4) && QString::fromLocal8Bit(argv[1]) == "--replay-cloud") {
+            replayDenseCloud(QString::fromLocal8Bit(argv[2]), argc == 4 ? QString::fromLocal8Bit(argv[3]) : QString());
             return 0;
         }
         QTemporaryDir temp;

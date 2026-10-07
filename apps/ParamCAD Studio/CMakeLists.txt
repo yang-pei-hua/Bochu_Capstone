@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(CadPointCloudClient VERSION 0.1.0 LANGUAGES CXX)
+project(CadPointCloudClient VERSION 0.2.0 LANGUAGES CXX)
 
 option(CAD_CLIENT_BUILD_TESTS "Build ParamCAD Studio I/O tests" OFF)
 option(CAD_CLIENT_BUILD_VALIDATION_TOOLS "Build standard STEP and CAD validation tools" OFF)
@@ -135,6 +135,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/ui/viewport/VTKViewer.cpp
     src/ui/panels/ModelingPanel.h
     src/ui/panels/ModelingPanel.cpp
+    src/ui/panels/FeatureDetailsPanel.h
+    src/ui/panels/FeatureDetailsPanel.cpp
     src/ui/panels/ScenePanel.h
     src/ui/panels/ScenePanel.cpp
     src/ui/panels/PropertyPanel.h
@@ -251,6 +253,18 @@ endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(feature_details_test tests/feature_details_test.cpp
+        src/ui/panels/FeatureDetailsPanel.h src/ui/panels/FeatureDetailsPanel.cpp
+        src/ui/panels/ModelingPanel.h src/ui/panels/ModelingPanel.cpp
+        src/core/SketchFrame.cpp)
+    target_include_directories(feature_details_test PRIVATE src)
+    target_link_libraries(feature_details_test PRIVATE Qt6::Widgets CadModelCore::CadModelCore)
+    if(MSVC)
+        target_compile_options(feature_details_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME feature_details_test COMMAND feature_details_test)
+    set_tests_properties(feature_details_test PROPERTIES TIMEOUT 60
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(project_store_test tests/project_store_test.cpp
         src/io/ProjectStore.cpp src/io/FeatureCodec.cpp src/io/PlyWriter.cpp
         src/io/PlyReader.cpp src/io/PointCloudAdapter.cpp

@@ -1,306 +1,248 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("All", "Full", "Offline", "Bootstrap")]
-    [string]$Variant = "All",
-    [ValidateSet("cuda", "nocuda")]
-    [string]$ColmapFlavor = "cuda",
+    [ValidateSet('Full','Offline')][string]$Variant = 'Full',
+    [ValidateSet('cuda','nocuda')][string]$ColmapFlavor = 'cuda',
     [string]$QtRoot = $env:QTDIR,
     [string]$VcpkgRoot = $env:VCPKG_ROOT,
-    [string]$Version = "0.1.0",
+    [string]$VCRuntimeRoot,
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$')][string]$Version = '0.2.0',
     [string]$OutputDirectory,
     [string]$BuildDirectory,
     [string]$LocalColmapPath,
+    [string]$PythonArchive,
     [switch]$Clean,
     [switch]$SkipBuild,
     [switch]$SkipSmokeTest
 )
-
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+. (Join-Path $PSScriptRoot 'Runtime-Helpers.ps1')
 
 function Invoke-Native([string]$Program, [string[]]$Arguments) {
     Write-Host "> $Program $($Arguments -join ' ')"
-    # Windows PowerShell 5 wraps native stderr as ErrorRecord objects. With the
-    # script-wide Stop policy, harmless CMake warnings would otherwise abort the
-    # package before LASTEXITCODE can be checked.
-    $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
+    $previous = $ErrorActionPreference
     try {
-        & $Program @Arguments 2>&1 | ForEach-Object {
-            Write-Host ([string]$_)
-        }
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-    if ($exitCode -ne 0) {
-        throw "$Program failed with exit code $exitCode"
-    }
+        $ErrorActionPreference = 'Continue'
+        & $Program @Arguments 2>&1 | ForEach-Object { Write-Host ([string]$_) }
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previous }
+    if ($code -ne 0) { throw "$Program failed with exit code $code" }
 }
-
-function Assert-WorkspaceChild([string]$Root, [string]$Path) {
-    $rootPath = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-    $candidate = [System.IO.Path]::GetFullPath($Path)
-    if (-not $candidate.StartsWith($rootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to modify a path outside the workspace: $candidate"
-    }
-}
-
-function Reset-Directory([string]$Root, [string]$Path) {
-    Assert-WorkspaceChild $Root $Path
-    if (Test-Path -LiteralPath $Path) {
-        Remove-Item -LiteralPath $Path -Recurse -Force
-    }
+function Reset-Directory([string]$Path) {
+    Assert-ChildPath $projectRoot $Path
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
-
-function Copy-DirectoryContents([string]$Source, [string]$Destination) {
-    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
+function Write-Utf8([string]$Path, [string]$Text) {
+    [IO.File]::WriteAllText($Path,$Text,(New-Object Text.UTF8Encoding($true)))
+}
+function Get-CacheValue([string]$Name) {
+    $cache = Join-Path $BuildDirectory 'CMakeCache.txt'
+    if (-not (Test-Path -LiteralPath $cache)) { return '' }
+    $line = Get-Content -LiteralPath $cache | Where-Object { $_ -match "^${Name}:[^=]+=" } | Select-Object -First 1
+    if ($null -eq $line) { return '' }
+    return ($line -split '=',2)[1]
+}
+function Get-CrtDirectory {
+    if ($VCRuntimeRoot) { return [IO.Path]::GetFullPath($VCRuntimeRoot) }
+    if ($env:VCToolsRedistDir) { $base = $env:VCToolsRedistDir }
+    else {
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Set -VCRuntimeRoot to the x64 Microsoft.VC143.CRT redistribution directory' }
+        $vsRoot = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        $versions = Get-ChildItem -LiteralPath (Join-Path $vsRoot 'VC\Redist\MSVC') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending
+        $base = $versions[0].FullName
     }
+    return (Join-Path $base 'x64\Microsoft.VC143.CRT')
 }
 
-function Assert-ClientRuntime([string]$Directory) {
-    # CGAL is header-heavy, so its GMP dependency is not always reported by
-    # CMake's TARGET_RUNTIME_DLLS traversal through the static reconstruction
-    # library. Validate the loader-visible file explicitly before smoke tests
-    # or archives are created.
-    foreach ($file in @("gmp-10.dll")) {
-        $path = Join-Path $Directory $file
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "Missing required GUI runtime dependency: $path"
-        }
-    }
+$projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$appRoot = Join-Path $projectRoot 'apps\ParamCAD Studio'
+if (-not $BuildDirectory) { $BuildDirectory = Join-Path $appRoot 'build\msvc-debug' }
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $projectRoot "artifacts\releases\$Version" }
+if (-not $LocalColmapPath) { $LocalColmapPath = Join-Path $projectRoot 'deps\colmap' }
+$BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$LocalColmapPath = [IO.Path]::GetFullPath($LocalColmapPath)
+Assert-ChildPath $projectRoot $BuildDirectory
+Assert-ChildPath $projectRoot $OutputDirectory
+
+# Infer producer dependencies from the existing CMake cache. End users never need them.
+if (-not $QtRoot) {
+    $qtConfig = Get-CacheValue 'Qt6_DIR'
+    if ($qtConfig) { $QtRoot = [IO.Path]::GetFullPath((Join-Path $qtConfig '..\..\..')) }
 }
-
-function Assert-PackageStage([string]$Directory, [bool]$IncludesOptionalDependencies) {
-    $requiredFiles = @(
-        "ParamCAD Studio.exe",
-        "gmp-10.dll",
-        "dependencies.json",
-        "Install-Dependencies.ps1",
-        "Install-Dependencies.cmd",
-        "Install-ParamCADStudio.ps1",
-        "Install-ParamCADStudio.cmd",
-        "README.md"
-    )
-    foreach ($relativePath in $requiredFiles) {
-        $path = Join-Path $Directory $relativePath
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "Package stage is missing required file: $path"
-        }
-    }
-
-    $optionalAnchors = @(
-        "deps\python\python.exe",
-        "deps\colmap\bin\colmap.exe"
-    )
-    foreach ($relativePath in $optionalAnchors) {
-        $path = Join-Path $Directory $relativePath
-        if ($IncludesOptionalDependencies) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-                throw "Full package is missing bundled dependency: $path"
-            }
-        }
-        elseif (Test-Path -LiteralPath $path) {
-            throw "Bootstrap package unexpectedly contains optional dependency: $path"
-        }
-    }
+if (-not $VcpkgRoot) {
+    $toolchain = Get-CacheValue 'CMAKE_TOOLCHAIN_FILE'
+    if ($toolchain) { $VcpkgRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $toolchain) '..\..')) }
 }
-
-function Invoke-GuiSmokeTest([string]$Executable, [string]$WorkingDirectory) {
-    Assert-ClientRuntime $WorkingDirectory
-
-    # Suppress Windows loader/crash dialogs so a missing DLL produces an exit
-    # code instead of leaving a modal process alive and fooling the timeout.
-    if (-not ("ParamCadPackaging.NativeMethods" -as [type])) {
-        Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-namespace ParamCadPackaging {
-    public static class NativeMethods {
-        [DllImport("kernel32.dll")]
-        public static extern uint SetErrorMode(uint mode);
-    }
+if (-not $QtRoot -or -not $VcpkgRoot) { throw 'Pass -QtRoot and -VcpkgRoot for the first build' }
+$QtRoot = [IO.Path]::GetFullPath($QtRoot)
+$VcpkgRoot = [IO.Path]::GetFullPath($VcpkgRoot)
+$crtDirectory = Get-CrtDirectory
+$manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'dependencies.json') -Raw | ConvertFrom-Json
+if (-not $PythonArchive) { $PythonArchive = Join-Path $projectRoot "artifacts\cache\$($manifest.dependencies.python.fileName)" }
+$PythonArchive = [IO.Path]::GetFullPath($PythonArchive)
+foreach ($file in @($PythonArchive, (Join-Path $LocalColmapPath 'bin\colmap.exe'),
+                    (Join-Path $crtDirectory 'vcruntime140.dll'))) {
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing offline packaging input: $file. No dependency is downloaded by this script." }
 }
-"@
-    }
-    $previousErrorMode = [ParamCadPackaging.NativeMethods]::SetErrorMode(0x8003)
-    try {
-        $process = Start-Process `
-            -FilePath $Executable `
-            -WorkingDirectory $WorkingDirectory `
-            -WindowStyle Hidden `
-            -PassThru
-        if ($process.WaitForExit(3000)) {
-            throw "Packaged GUI exited unexpectedly during smoke test with code $($process.ExitCode)"
-        }
-        $process.Kill()
-        $process.WaitForExit()
-    }
-    finally {
-        [void][ParamCadPackaging.NativeMethods]::SetErrorMode($previousErrorMode)
-    }
+if ((Get-FileHash -LiteralPath $PythonArchive -Algorithm SHA256).Hash -ne $manifest.dependencies.python.sha256) {
+    throw 'Embedded Python archive failed SHA-256 verification'
 }
+$colmapVersion = (& (Join-Path $LocalColmapPath 'bin\colmap.exe') version | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $colmapVersion -notmatch 'COLMAP 4\.2\.0') { throw "Unexpected COLMAP runtime: $colmapVersion" }
+if (($ColmapFlavor -eq 'cuda') -ne ($colmapVersion -match 'with CUDA')) { throw 'COLMAP flavor does not match the local runtime' }
 
-function New-PackageStage([string]$Name, [bool]$IncludeDependencies) {
-    $stage = Join-Path $stagingRoot $Name
-    Reset-Directory $projectRoot $stage
-    Copy-DirectoryContents $releaseDirectory $stage
-    Assert-ClientRuntime $stage
-
-    Get-ChildItem -LiteralPath $stage -Filter "*.pdb" -File -Recurse | Remove-Item -Force
-
-    $reconstructionTarget = Join-Path $stage "core\reconstruction"
-    New-Item -ItemType Directory -Path $reconstructionTarget -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $projectRoot "core\reconstruction\reconstruct.py") -Destination $reconstructionTarget
-    Copy-Item -LiteralPath (Join-Path $projectRoot "core\reconstruction\camera_info.example.json") -Destination $reconstructionTarget
-    Copy-Item -LiteralPath (Join-Path $projectRoot "core\reconstruction\colmap_reconstruction") -Destination $reconstructionTarget -Recurse
-
-    foreach ($file in @(
-        "dependencies.json",
-        "Install-Dependencies.ps1",
-        "Install-Dependencies.cmd",
-        "Install-ParamCADStudio.ps1",
-        "Install-ParamCADStudio.cmd"
-    )) {
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $stage
-    }
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "PACKAGE_README.md") -Destination (Join-Path $stage "README.md")
-
-    if ($IncludeDependencies) {
-        $arguments = @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", (Join-Path $stage "Install-Dependencies.ps1"),
-            "-InstallRoot", $stage,
-            "-ManifestPath", (Join-Path $stage "dependencies.json"),
-            "-CacheDirectory", (Join-Path $projectRoot "artifacts\cache"),
-            "-ColmapFlavor", $ColmapFlavor
-        )
-        if (-not [string]::IsNullOrWhiteSpace($LocalColmapPath)) {
-            $arguments += @("-LocalColmapPath", $LocalColmapPath)
-        }
-        Invoke-Native "powershell.exe" $arguments
-    }
-
-    Assert-PackageStage $stage $IncludeDependencies
-
-    if (-not $SkipSmokeTest) {
-        $executable = Join-Path $stage "ParamCAD Studio.exe"
-        Invoke-GuiSmokeTest $executable $stage
-    }
-
-    $archive = Join-Path $OutputDirectory "$Name.zip"
-    if (Test-Path -LiteralPath $archive) {
-        Remove-Item -LiteralPath $archive -Force
-    }
-    # ZipFile streams the archive without the high memory usage of
-    # Compress-Archive and, unlike bsdtar, does not prefix entries with "./".
-    # That prefix is legal ZIP but makes Windows Explorer display an empty
-    # archive, so use the .NET writer for native Explorer compatibility.
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::CreateFromDirectory(
-        $stage,
-        $archive,
-        [System.IO.Compression.CompressionLevel]::Optimal,
-        $false
-    )
-    Write-Host "Created $archive"
-    return $archive
-}
-
-$projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$appRoot = Join-Path $projectRoot "apps\ParamCAD Studio"
-if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
-    $BuildDirectory = Join-Path $appRoot "build\package"
-}
-if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $projectRoot "artifacts\packages"
-}
-$BuildDirectory = [System.IO.Path]::GetFullPath($BuildDirectory)
-$OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
-$stagingRoot = Join-Path $projectRoot "artifacts\staging"
-Assert-WorkspaceChild $projectRoot $BuildDirectory
-Assert-WorkspaceChild $projectRoot $OutputDirectory
-Assert-WorkspaceChild $projectRoot $stagingRoot
-
-if ([string]::IsNullOrWhiteSpace($QtRoot)) {
-    throw "QtRoot is required. Pass -QtRoot <Qt MSVC x64 root> or set QTDIR."
-}
-if ([string]::IsNullOrWhiteSpace($VcpkgRoot)) {
-    throw "VcpkgRoot is required for CGAL. Pass -VcpkgRoot <vcpkg root> or set VCPKG_ROOT."
-}
-$QtRoot = [System.IO.Path]::GetFullPath($QtRoot)
-$VcpkgRoot = [System.IO.Path]::GetFullPath($VcpkgRoot)
-
-$requiredFiles = @(
-    (Join-Path $QtRoot "lib\cmake\Qt6\Qt6Config.cmake"),
-    (Join-Path $VcpkgRoot "scripts\buildsystems\vcpkg.cmake"),
-    (Join-Path $projectRoot "deps\vtk-9.7.0\lib\cmake\vtk-9.7\vtk-config.cmake"),
-    (Join-Path $projectRoot "deps\occt-8.0.1\cmake\OpenCASCADEConfig.cmake")
-)
-foreach ($file in $requiredFiles) {
-    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-        throw "Missing packaging prerequisite: $file"
-    }
-}
-if (-not [string]::IsNullOrWhiteSpace($LocalColmapPath)) {
-    $LocalColmapPath = [System.IO.Path]::GetFullPath($LocalColmapPath)
-    $localColmap = Join-Path $LocalColmapPath "bin\colmap.exe"
-    if (-not (Test-Path -LiteralPath $localColmap -PathType Leaf)) {
-        throw "Local COLMAP payload is missing its executable: $localColmap"
-    }
-}
-
-if ($Clean -and -not $SkipBuild) {
-    if (Test-Path -LiteralPath $BuildDirectory) {
-        Assert-WorkspaceChild $projectRoot $BuildDirectory
-        Remove-Item -LiteralPath $BuildDirectory -Recurse -Force
-    }
-}
+if ($Clean -and -not $SkipBuild) { Reset-Directory $BuildDirectory }
 if (-not $SkipBuild) {
-    $configure = @(
-        "-S", $appRoot,
-        "-B", $BuildDirectory,
-        "-G", "Visual Studio 17 2022",
-        "-A", "x64",
-        "-DCMAKE_TOOLCHAIN_FILE=$((Join-Path $VcpkgRoot 'scripts\buildsystems\vcpkg.cmake') -replace '\\', '/')",
-        "-DCMAKE_PREFIX_PATH=$($QtRoot -replace '\\', '/')",
-        "-DVTK_DIR=$((Join-Path $projectRoot 'deps\vtk-9.7.0\lib\cmake\vtk-9.7') -replace '\\', '/')",
-        "-DOpenCASCADE_DIR=$((Join-Path $projectRoot 'deps\occt-8.0.1\cmake') -replace '\\', '/')"
-    )
-    Invoke-Native "cmake" $configure
-    Invoke-Native "cmake" @("--build", $BuildDirectory, "--config", "Release", "--target", "CadPointCloudClient", "--parallel")
+    Invoke-Native 'cmake' @('-S',$appRoot,'-B',$BuildDirectory,'-G','Visual Studio 17 2022','-A','x64',
+        "-DCMAKE_TOOLCHAIN_FILE=$(Join-Path $VcpkgRoot 'scripts\buildsystems\vcpkg.cmake')",
+        "-DCMAKE_PREFIX_PATH=$QtRoot",
+        "-DVTK_DIR=$(Join-Path $projectRoot 'deps\vtk-9.7.0\lib\cmake\vtk-9.7')",
+        "-DOpenCASCADE_DIR=$(Join-Path $projectRoot 'deps\occt-8.0.1\cmake')")
+    Invoke-Native 'cmake' @('--build',$BuildDirectory,'--config','Release','--target','CadPointCloudClient','--parallel')
 }
+$release = Join-Path $BuildDirectory 'Release'
+$name = "ParamCAD-Studio-$Version-windows-x64-full-$ColmapFlavor"
+$stage = Join-Path $projectRoot "artifacts\staging\release\$name"
+Reset-Directory $stage
+foreach ($directory in @('app','app\plugins','deps','core\reconstruction\colmap_reconstruction','installer','docs\licenses')) {
+    New-Item -ItemType Directory -Path (Join-Path $stage $directory) -Force | Out-Null
+}
+$app = Join-Path $stage 'app'
+# Copy only the production executable and runtime libraries, never tests, tools, PDBs or SDKs.
+Copy-Item -LiteralPath (Join-Path $release 'ParamCAD Studio.exe') -Destination $app
+Get-ChildItem -LiteralPath $release -Filter '*.dll' -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $app }
+foreach ($plugin in @('platforms','styles','imageformats','iconengines','networkinformation','tls','generic')) {
+    $source = Join-Path $release $plugin
+    if (Test-Path -LiteralPath $source -PathType Container) {
+        Copy-Item -LiteralPath $source -Destination (Join-Path $app "plugins\$plugin") -Recurse
+    }
+}
+Write-Utf8 (Join-Path $app 'qt.conf') "[Paths]`r`nPrefix=.`r`nPlugins=plugins`r`n"
 
-$releaseDirectory = Join-Path $BuildDirectory "Release"
-$releaseExecutable = Join-Path $releaseDirectory "ParamCAD Studio.exe"
-if (-not (Test-Path -LiteralPath $releaseExecutable -PathType Leaf)) {
-    throw "Release executable was not produced: $releaseExecutable"
+Write-Host 'Bundling Python and the opaque COLMAP runtime payload'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$pythonRoot = Join-Path $stage 'deps\python'
+[IO.Compression.ZipFile]::ExtractToDirectory($PythonArchive,$pythonRoot)
+$pth = Get-ChildItem -LiteralPath $pythonRoot -Filter 'python*._pth' -File | Select-Object -First 1
+if ($null -eq $pth) { throw 'Embedded Python path configuration is missing' }
+$lines = @(Get-Content -LiteralPath $pth.FullName)
+if ($lines -notcontains '../../core/reconstruction') { $lines += '../../core/reconstruction' }
+Set-Content -LiteralPath $pth.FullName -Value $lines -Encoding ASCII
+# Bulk-copy the runtime without inspecting or logging files in the local COLMAP dependency.
+Copy-Item -LiteralPath $LocalColmapPath -Destination (Join-Path $stage 'deps\colmap') -Recurse
+# Clean only the copied payload; never enumerate the opaque local dependency.
+$developerFiles = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object {
+    $_.Extension -in @('.pdb','.lib','.exp','.obj','.pyc') -or $_.Name -like '*_test.exe'
+})
+foreach ($file in $developerFiles) {
+    Assert-ChildPath $stage $file.FullName
+    Remove-Item -LiteralPath $file.FullName -Force
 }
-# TARGET_RUNTIME_DLLS does not reliably see GMP through CGAL's static target.
-# Copy it from the same x64 vcpkg installation used to configure this build,
-# then validate again after every package stage is populated.
-$vcpkgRuntimeDirectory = Join-Path $VcpkgRoot "installed\x64-windows\bin"
-$gmpRuntime = Join-Path $vcpkgRuntimeDirectory "gmp-10.dll"
-if (-not (Test-Path -LiteralPath $gmpRuntime -PathType Leaf)) {
-    throw "Missing CGAL GMP runtime in vcpkg: $gmpRuntime"
+Write-Host "Removed $($developerFiles.Count) developer artifacts from the copied payload"
+foreach ($runtime in @($app,$pythonRoot,(Join-Path $stage 'deps\colmap\bin'))) {
+    Get-ChildItem -LiteralPath $crtDirectory -Filter '*.dll' -File | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $runtime -Force
+    }
 }
-Copy-Item -LiteralPath $gmpRuntime -Destination $releaseDirectory -Force
-Assert-ClientRuntime $releaseDirectory
+$binaryCount = Assert-AppRuntime $app @((Join-Path $QtRoot 'bin'),(Join-Path $VcpkgRoot 'installed\x64-windows\bin'),$crtDirectory) -TrimUnused
+$pipeline = Join-Path $projectRoot 'core\reconstruction'
+Copy-Item -LiteralPath (Join-Path $pipeline 'reconstruct.py'),(Join-Path $pipeline 'camera_info.example.json') -Destination (Join-Path $stage 'core\reconstruction')
+Get-ChildItem -LiteralPath (Join-Path $pipeline 'colmap_reconstruction') -Filter '*.py' -File | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stage 'core\reconstruction\colmap_reconstruction')
+}
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-ParamCADStudio.ps1') -Destination (Join-Path $stage 'installer')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-ParamCADStudio.cmd'),(Join-Path $PSScriptRoot 'Start-ParamCADStudio.cmd') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'PACKAGE_README.md') -Destination (Join-Path $stage 'README.md')
+Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $stage 'docs\licenses\ParamCAD-MIT.txt')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD-PARTY-NOTICES.md') -Destination (Join-Path $stage 'docs')
+foreach ($library in @('cgal','gmp','mpfr','eigen3')) {
+    $copyright = Join-Path $VcpkgRoot "installed\x64-windows\share\$library\copyright"
+    if (Test-Path -LiteralPath $copyright) { Copy-Item -LiteralPath $copyright -Destination (Join-Path $stage "docs\licenses\$library.txt") }
+}
+# Exact license files only; the local VTK/OCCT SDKs are not scanned or copied.
+foreach ($entry in @(
+    @('deps\vtk-9.7.0\Copyright.txt','VTK.txt'),
+    @('deps\occt-8.0.1\LICENSE_LGPL_21.txt','OCCT-LGPL-2.1.txt'),
+    @('deps\occt-8.0.1\OCCT_LGPL_EXCEPTION.txt','OCCT-exception.txt'))) {
+    $license = Join-Path $projectRoot $entry[0]
+    if (Test-Path -LiteralPath $license -PathType Leaf) { Copy-Item -LiteralPath $license -Destination (Join-Path $stage "docs\licenses\$($entry[1])") }
+}
+# Preserve Qt's installed license notices without accessing any local opaque SDK.
+$qtLicenses = [IO.Path]::GetFullPath((Join-Path $QtRoot '..\..\Licenses'))
+foreach ($file in @('COPYING.txt','Copyright.txt')) {
+    $license = Join-Path $qtLicenses $file
+    if (Test-Path -LiteralPath $license) { Copy-Item -LiteralPath $license -Destination (Join-Path $stage "docs\licenses\Qt-$file") }
+}
+if (-not $SkipSmokeTest) { Invoke-IsolatedRuntimeValidation $stage }
+
+$commit = (& git -C $projectRoot rev-parse HEAD | Out-String).Trim()
+$dirty = -not [string]::IsNullOrWhiteSpace((& git -C $projectRoot status --porcelain | Out-String))
+Write-Host 'Recording release provenance and file checksums'
+$files = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Sort-Object FullName | ForEach-Object {
+    [ordered]@{ path=$_.FullName.Substring($stage.Length+1).Replace('\','/'); bytes=$_.Length;
+        sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+})
+$releaseInfo = [ordered]@{
+    schema='paramcad.release'; formatVersion=1; version=$Version; platform='windows-x64'; variant='full';
+    offline=$true; entryPoint='Start-ParamCADStudio.cmd'; executable='app/ParamCAD Studio.exe';
+    builtAtUtc=[DateTime]::UtcNow.ToString('o'); gitCommit=$commit; workingTreeModified=$dirty;
+    dependencies=[ordered]@{ python=$manifest.dependencies.python.version; pythonArchiveSha256=$manifest.dependencies.python.sha256;
+        colmap=$colmapVersion; qt=(Get-Item (Join-Path $app 'Qt6Core.dll')).VersionInfo.FileVersion;
+        vtk='9.7.0'; occt='8.0.1'; msvc=(Get-Item (Join-Path $app 'vcruntime140.dll')).VersionInfo.FileVersion };
+    validation=[ordered]@{ auditedGuiBinaries=$binaryCount; isolatedRuntimeSmokeTest=(-not $SkipSmokeTest) };
+    files=$files
+}
+Write-Utf8 (Join-Path $stage 'package-manifest.json') ($releaseInfo | ConvertTo-Json -Depth 8)
+Invoke-Native 'powershell.exe' @('-NoProfile','-ExecutionPolicy','Bypass','-File',
+    (Join-Path $PSScriptRoot 'Test-Package.ps1'),'-PackageRoot',$stage,'-VerifyHashes','-SkipRuntime')
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
-
-$created = @()
-if ($Variant -eq "All" -or $Variant -eq "Full" -or $Variant -eq "Offline") {
-    $created += New-PackageStage "ParamCAD-Studio-$Version-windows-x64-full-$ColmapFlavor" $true
+$archive = Join-Path $OutputDirectory "$name.zip"
+$pending = "$archive.pending-$([guid]::NewGuid().ToString('N'))"
+Assert-ChildPath $projectRoot $pending
+try {
+    Write-Host "Compressing $name (one top-level folder)"
+    # Windows PowerShell's .NET Framework ZIP helper uses backslashes in entries.
+    # Create entries explicitly so Explorer and cross-platform unzip tools agree.
+    $archiveStream = [IO.File]::Create($pending)
+    $writer = $null
+    try {
+        $writer = New-Object IO.Compression.ZipArchive($archiveStream,[IO.Compression.ZipArchiveMode]::Create,$true)
+        foreach ($file in Get-ChildItem -LiteralPath $stage -File -Recurse) {
+            $relative = $file.FullName.Substring($stage.Length+1).Replace('\','/')
+            $entry = $writer.CreateEntry("$name/$relative",[IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = [DateTimeOffset]$file.LastWriteTime
+            $inputStream = [IO.File]::OpenRead($file.FullName)
+            $entryStream = $null
+            try {
+                $entryStream = $entry.Open()
+                $inputStream.CopyTo($entryStream)
+            } finally {
+                if ($null -ne $entryStream) { $entryStream.Dispose() }
+                $inputStream.Dispose()
+            }
+        }
+    } finally {
+        if ($null -ne $writer) { $writer.Dispose() }
+        $archiveStream.Dispose()
+    }
+    $zip = [IO.Compression.ZipFile]::OpenRead($pending)
+    try {
+        foreach ($entry in $zip.Entries) {
+            if (-not $entry.FullName.StartsWith("$name/",[StringComparison]::Ordinal)) { throw 'Unexpected archive root' }
+        }
+        Write-Host "Archive contains $($zip.Entries.Count) entries"
+    } finally { $zip.Dispose() }
+    if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
+    Move-Item -LiteralPath $pending -Destination $archive
+} finally {
+    if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force }
 }
-if ($Variant -eq "All" -or $Variant -eq "Bootstrap") {
-    $created += New-PackageStage "ParamCAD-Studio-$Version-windows-x64-bootstrap" $false
-}
-
-Write-Host "Packages:"
-$created | ForEach-Object { Write-Host "  $_" }
+$hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+[IO.File]::WriteAllText((Join-Path $OutputDirectory 'SHA256SUMS.txt'),"$hash  $name.zip`r`n",(New-Object Text.UTF8Encoding($false)))
+Write-Host "Created $archive"
+Write-Host "Size: $([math]::Round((Get-Item -LiteralPath $archive).Length/1MB,2)) MiB; SHA256: $hash"
+Write-Host 'Portable launch and installation are fully offline. No bootstrap package was created.'

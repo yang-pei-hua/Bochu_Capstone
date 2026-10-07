@@ -29,9 +29,11 @@ public:
     // selection is empty. Deleting is the window's decision because only it can
     // ask the core which features depend on this one.
     modeling::FeatureId selectedFeatureId() const noexcept;
+    void selectFeature(modeling::FeatureId id);
 
 signals:
     void deleteFeatureRequested(modeling::FeatureId featureId);
+    void featureSelected(modeling::FeatureId featureId);
 
 private:
     QTreeWidget* m_features = nullptr;

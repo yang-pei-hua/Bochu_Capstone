@@ -1,5 +1,6 @@
 #include "app/SketchWorkspaceController.h"
 #include "ui/panels/ModelingPanel.h"
+#include "ui/panels/FeatureDetailsPanel.h"
 #include "ui/panels/PropertyPanel.h"
 #include "ui/panels/SketchPanel.h"
 #include "ui/panels/SketchEntityPanel.h"
@@ -42,6 +43,12 @@ void SketchWorkspaceController::connectUi()
             this, &SketchWorkspaceController::onSketchEntityEdited);
     connect(m_ui.modelingPanel, &ModelingPanel::deleteFeatureRequested,
             this, &SketchWorkspaceController::deleteFeature);
+    connect(m_ui.modelingPanel, &ModelingPanel::featureSelected, this, [this](modeling::FeatureId id) {
+        m_ui.propertyPanel->featureDetailsPanel()->setFeature(m_modelingController->features(), id);
+        if (id != modeling::kInvalidFeatureId) m_ui.propertyPanel->showFeatureDetails();
+    });
+    connect(m_ui.propertyPanel->featureDetailsPanel(), &FeatureDetailsPanel::featureRequested,
+            m_ui.modelingPanel, &ModelingPanel::selectFeature);
 
     // Viewport sketch workflow: a click picks the sketch plane and the toolbar
     // action turns that selection into a sketch.
@@ -72,6 +79,8 @@ void SketchWorkspaceController::onModelRebuilt()
     m_ui.viewer->renderNow();
 
     m_ui.modelingPanel->setFeatures(m_modelingController->features());
+    m_ui.propertyPanel->featureDetailsPanel()->setFeature(m_modelingController->features(),
+                                                        m_ui.modelingPanel->selectedFeatureId());
 
     const QString error = m_modelingController->lastError();
     m_ui.modelingPanel->setStatusText(
@@ -134,6 +143,8 @@ void SketchWorkspaceController::onModelError(const QString& message)
     // A rejected command or a failed rebuild must be visible in the panel, not
     // only in the console; the previous body stays on screen untouched.
     m_ui.modelingPanel->setFeatures(m_modelingController->features());
+    m_ui.propertyPanel->featureDetailsPanel()->setFeature(m_modelingController->features(),
+                                                        m_ui.modelingPanel->selectedFeatureId());
     m_ui.modelingPanel->setStatusText(message);
     emit statusTextChanged(workspaceTr("Ready | Model: None | Camera: %1")
                                .arg(m_ui.viewer->cameraParameters().parallelProjection

@@ -157,17 +157,16 @@ void MainWindow::createActions()
     // inspected without going through the pipeline again.
     m_openPointCloudAction = new QAction(tr("Open Point Cloud..."), this);
     m_openPointCloudAction->setToolTip(tr("Load a .ply point cloud into the viewport"));
-    // Turning observations into a model is the second half of the pipeline, so
-    // it sits next to the loader and stays inert until a cloud exists.
+    // The toolbar and Tools menu share the point-cloud-to-CAD command.
     m_reconstructCadAction = new QAction(tr("Reconstruct CAD"), this);
+    m_reconstructCadAction->setObjectName(QStringLiteral("reconstructCadAction"));
     m_reconstructCadAction->setToolTip(
-        tr("Recognize a box in the loaded point cloud and add it to the model"));
+        tr("Recognize geometry in the loaded point cloud and reconstruct a parametric CAD model"));
     m_reconstructCadAction->setEnabled(false);
     m_cancelCadAction = new QAction(tr("Cancel CAD Reconstruction"), this);
     m_cancelCadAction->setObjectName(QStringLiteral("cancelCadReconstructionAction"));
     m_cancelCadAction->setEnabled(false);
-    // Texturing is a presentation step rather than a modeling one, so it sits
-    // next to the loading actions and appears as soon as a body exists.
+    // Texturing is a presentation tool, available once a body exists.
     m_textureAction = new QAction(tr("Apply Texture..."), this);
     m_textureAction->setToolTip(
         tr("Project an image onto the model without unwrapping it"));
@@ -228,9 +227,6 @@ void MainWindow::createMenus()
     QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
     fileMenu->addAction(m_openAction);
     fileMenu->addAction(m_openPointCloudAction);
-    fileMenu->addAction(m_reconstructCadAction);
-    fileMenu->addAction(m_cancelCadAction);
-    fileMenu->addAction(m_textureAction);
     fileMenu->addAction(m_closeAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_openProjectAction);
@@ -249,8 +245,12 @@ void MainWindow::createMenus()
     viewMenu->addAction(m_datumPlanesAction);
 
     QMenu* toolsMenu = menuBar()->addMenu(tr("&Tools"));
+    toolsMenu->addAction(m_textureAction);
+    toolsMenu->addSeparator();
     toolsMenu->addAction(m_captureToolAction);
     toolsMenu->addAction(m_reconstructToolAction);
+    toolsMenu->addAction(m_reconstructCadAction);
+    toolsMenu->addAction(m_cancelCadAction);
 
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
     QAction* aboutAction = helpMenu->addAction(tr("About"));
@@ -263,8 +263,7 @@ void MainWindow::createToolBar()
     toolBar->setObjectName(QStringLiteral("mainToolBar"));
     toolBar->setMovable(true);
     toolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    // The toolbar carries the whole pipeline: load a model, generate the data
-    // by capturing images, then the stages reserved for later versions.
+    // The toolbar carries loading, image capture, cloud reconstruction and CAD reconstruction.
     toolBar->addAction(m_openAction);
     toolBar->addSeparator();
     // The toolbar button is created explicitly so it keeps a stable object name
@@ -277,8 +276,13 @@ void MainWindow::createToolBar()
     toolBar->addSeparator();
     toolBar->addAction(m_captureAction);
     toolBar->addAction(m_reconstructToolAction);
+    auto* reconstructCadButton = new QToolButton(toolBar);
+    reconstructCadButton->setObjectName(QStringLiteral("reconstructCadButton"));
+    reconstructCadButton->setDefaultAction(m_reconstructCadAction);
+    reconstructCadButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    toolBar->addWidget(reconstructCadButton);
 
-    const QStringList reservedStages{tr("Geometry Fitting"), tr("AI Edit")};
+    const QStringList reservedStages{tr("AI Edit")};
     for (const QString& stage : reservedStages) {
         auto* button = new QToolButton(toolBar);
         button->setText(stage);
@@ -482,7 +486,7 @@ void MainWindow::showAbout()
     QMessageBox::about(this, tr("About"),
                        tr("CAD & Point Cloud Studio\n\n"
                           "C++17 / Qt 6 Widgets / VTK UI skeleton\n"
-                          "Version 0.1.0"));
+                          "Version 0.2.0"));
 }
 
 void MainWindow::updateCameraStatus(bool parallelProjection)

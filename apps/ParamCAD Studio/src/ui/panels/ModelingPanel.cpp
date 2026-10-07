@@ -6,6 +6,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -73,6 +74,10 @@ ModelingPanel::ModelingPanel(QWidget* parent)
 
     outer->addStretch();
 
+    connect(m_features, &QTreeWidget::itemSelectionChanged, this, [this] {
+        emit featureSelected(selectedFeatureId());
+    });
+
     connect(deleteFeatureButton, &QPushButton::clicked, this, [this] {
         const modeling::FeatureId id = selectedFeatureId();
         if (id != modeling::kInvalidFeatureId) {
@@ -91,6 +96,7 @@ void ModelingPanel::setFeatures(const std::vector<modeling::Feature>& features)
     // Repopulating the list must not look like the user cleared the selection, so
     // it is remembered and restored by feature id.
     const modeling::FeatureId previous = selectedFeatureId();
+    const QSignalBlocker blocker(m_features);
     m_features->clear();
     for (const modeling::Feature& feature : features) {
         auto* item = new QTreeWidgetItem(m_features);
@@ -100,13 +106,25 @@ void ModelingPanel::setFeatures(const std::vector<modeling::Feature>& features)
         item->setText(3, feature.valid ? tr("yes") : tr("no"));
         item->setText(4, QString::fromStdString(feature.errorText));
         if (feature.id == previous) {
-            item->setSelected(true);
+            m_features->setCurrentItem(item);
         }
     }
     m_features->resizeColumnToContents(0);
     m_features->resizeColumnToContents(1);
     m_features->resizeColumnToContents(2);
     m_features->resizeColumnToContents(3);
+}
+
+void ModelingPanel::selectFeature(modeling::FeatureId id)
+{
+    for (int i = 0; i < m_features->topLevelItemCount(); ++i) {
+        auto* item = m_features->topLevelItem(i);
+        if (item->text(0).toULongLong() == id) {
+            m_features->setCurrentItem(item);
+            m_features->scrollToItem(item);
+            return;
+        }
+    }
 }
 
 modeling::FeatureId ModelingPanel::selectedFeatureId() const noexcept
