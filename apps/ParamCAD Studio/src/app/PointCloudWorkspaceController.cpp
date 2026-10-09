@@ -99,6 +99,25 @@ PointCloudWorkspaceController::~PointCloudWorkspaceController()
 
 void PointCloudWorkspaceController::connectUi()
 {
+    connect(m_modelingController, &ModelingController::modelRebuilt, this, [this] {
+        if (m_modelingController->hasProtectedReconstruction()) {
+            m_guidedQueued = false;
+            if (m_cadTask->isRunning()) m_cadTask->cancel();
+        }
+    });
+    connect(m_ui.scenePanel, &ScenePanel::nodeVisibilityRequested, this,
+            [this](SceneNodeType type, bool visible) {
+        if (type == SceneNodeType::PointCloud) m_ui.viewer->setPointCloudVisible(visible);
+    });
+    connect(m_ui.scenePanel, &ScenePanel::nodeDeleteRequested, this, [this](SceneNodeType type) {
+        if (type != SceneNodeType::PointCloud) return;
+        prepareProjectReplacement();
+        m_document->clear();
+        emit logInfo(workspaceTr("Point cloud deleted"));
+    });
+    connect(m_ui.viewer, &VTKViewer::pointCloudVisibilityChanged, this, [this](bool visible) {
+        m_ui.scenePanel->setNodeState(SceneNodeType::PointCloud, m_document->hasCloud(), visible);
+    });
     connect(m_document, &PointCloudDocument::cloudChanged, this, [this] {
         m_guidedQueued = false;
     });
@@ -169,6 +188,9 @@ void PointCloudWorkspaceController::connectUi()
         updateCadActions();
         if (m_document->hasCloud()) m_ui.scenePanel->updateNodeLabel(SceneNodeType::PointCloud,
             workspaceTr("%1 (%2 有效点)").arg(QFileInfo(m_document->sourcePath()).fileName()).arg(m_document->pointCount()));
+        else m_ui.scenePanel->updateNodeLabel(SceneNodeType::PointCloud, workspaceTr("PointCloud"));
+        m_ui.scenePanel->setNodeState(SceneNodeType::PointCloud, m_document->hasCloud(),
+                                     m_ui.viewer->pointCloudVisible());
     };
     connect(m_document, &PointCloudDocument::documentChanged, this, refreshRelationships);
     connect(m_document, &PointCloudDocument::selectionChanged, m_ui.relationsPanel, &PointCloudRelationsPanel::updateSelection);
@@ -386,6 +408,14 @@ void PointCloudWorkspaceController::reconstructCad()
     m_cadModelRevision = m_modelingController->revision();
     m_cadBodyRevision = m_ui.viewer->bodyRevision();
     m_cadSourcePath = m_document->sourcePath();
+    m_cadOverwriteManual = false;
+    if (m_modelingController->hasProtectedReconstruction()) {
+        const auto answer = QMessageBox::question(m_dialogParent, workspaceTr("替换手动修改"),
+            workspaceTr("当前重建特征包含手动修改。重新拟合会替换这些特征及其尺寸调整。是否继续？"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+        m_cadOverwriteManual = true;
+    }
     std::vector<vtkIdType> ids;
     PlyCloud cloud = m_document->workingCloud(&ids);
     std::map<vtkIdType, reconstruction::PointId> pointIds;
@@ -445,6 +475,11 @@ void PointCloudWorkspaceController::requestGuidedReconstruction()
     m_analyseAfterCad = false;
     if (m_cadTask->isRunning()) m_cadTask->cancel();
     if (m_analysisThread) m_analysisThread->requestInterruption();
+    if (m_modelingController->hasProtectedReconstruction()) {
+        m_guidedQueued = false;
+        m_ui.relationsPanel->setStatus(workspaceTr("模板已保存；CAD 包含手动修改，自动重建已暂停。点击「重建 CAD」可明确替换。"));
+        return;
+    }
     if (cloudUnit(*m_document) == reconstruction::LengthUnit::Arbitrary) {
         m_guidedQueued = false;
         m_ui.relationsPanel->setStatus(workspaceTr("模板已保存。点云尺度未知，请点击「重建 CAD」确认尺度后继续。"));
@@ -458,6 +493,7 @@ void PointCloudWorkspaceController::startQueuedReconstruction()
 {
     if (!m_guidedQueued || m_cadTask->isRunning() || m_analysisThread || m_startingCad) return;
     m_guidedQueued = false;
+    if (m_modelingController->hasProtectedReconstruction()) return;
     if (m_document->hasCloud()) reconstructCad();
 }
 
@@ -534,7 +570,7 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
         return;
     }
     const auto& candidate = result.candidate;
-    if (!m_modelingController->commitReconstructedCompound(candidate)) {
+    if (!m_modelingController->commitReconstructedCompound(candidate, m_cadOverwriteManual)) {
         const QString message = m_modelingController->lastError();
         reportStatus(message);
         emit logError(message);

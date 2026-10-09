@@ -128,6 +128,15 @@ DatumPlaneActor::DatumPlaneActor()
     setHighlightedPlane(std::nullopt);
 }
 
+void DatumPlaneActor::setTransform(vtkMatrix4x4* matrix)
+{
+    for (auto& visual : m_planes) {
+        visual.surface->SetUserMatrix(matrix);
+        visual.outline->SetUserMatrix(matrix);
+        visual.label->SetUserMatrix(matrix);
+    }
+}
+
 void DatumPlaneActor::attach(vtkRenderer* renderer) const
 {
     if (renderer == nullptr) {

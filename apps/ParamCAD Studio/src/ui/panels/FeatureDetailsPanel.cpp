@@ -1,5 +1,7 @@
 #include "ui/panels/FeatureDetailsPanel.h"
+#include "ui/panels/FeatureEditorPanel.h"
 #include "core/SketchFrame.h"
+#include <modeling/SemanticFaces.h>
 
 #include <QApplication>
 #include <QAction>
@@ -88,7 +90,7 @@ struct Details {
         }
         if (const auto* p = std::get_if<FaceReference>(&params.plane)) {
             row("依附特征", reference(features, p->ownerFeature), true);
-            row("依附面", p->role == FaceRole::StartFace ? "起始面" : p->role == FaceRole::EndFace ? "终止面" : "未知面");
+            row("依附面", QString::fromLatin1(modeling::faceRoleName(p->role)));
         }
         sketchapp::PlaneFrame f;
         const bool resolved = resolvedFrame(features, params.plane, f);
@@ -129,6 +131,8 @@ FeatureDetailsPanel::FeatureDetailsPanel(QWidget* parent) : QWidget(parent)
 {
     setObjectName("featureDetailsPanel");
     auto* layout = new QVBoxLayout(this); layout->setContentsMargins(6,6,6,6);
+    m_editor = new FeatureEditorPanel(this);
+    layout->addWidget(m_editor);
     m_details = new QTextBrowser(this); m_details->setObjectName("featureDetailsText");
     m_details->setOpenLinks(false);
     layout->addWidget(m_details);
@@ -162,6 +166,7 @@ void FeatureDetailsPanel::setFeature(const std::vector<Feature>& features, Featu
     d.html = "<h3>" + QString::fromStdString(feature->name).toHtmlEscaped() + "</h3><table cellspacing=\"6\">";
     d.row("特征 ID", QString::number(feature->id));
     d.row("来源", feature->reconstructed ? "点云重建" : "手动建模");
+    if (feature->manuallyEdited) d.row("调整状态", "已手动修改；重拟合覆盖需要确认");
     d.row("状态", feature->suppressed ? "已抑制" : feature->valid ? "有效" : "无效");
     if (!feature->errorText.empty()) d.row("错误", QString::fromStdString(feature->errorText));
     d.note("尺寸与坐标单位：mm；方向向量无单位。坐标属于建模空间，未叠加 Object 面板的显示变换。");

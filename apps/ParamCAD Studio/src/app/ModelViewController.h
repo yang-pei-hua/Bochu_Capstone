@@ -28,6 +28,7 @@ public:
     void connectUi();
     void openModel();
     void closeModel();
+    void deleteModel();
     void exportModel();
     bool exportStepTo(const QString& path, QString& error) const;
     const TopoDS_Shape& currentBody() const { return m_currentBody; }

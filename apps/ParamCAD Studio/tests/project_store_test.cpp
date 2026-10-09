@@ -260,7 +260,11 @@ int main(int argc, char** argv)
         require(!ProjectStore::load(bad, error) && error.contains("checksum"),
                 "corrupt asset rejected");
         auto metadata = manifest(original);
-        metadata["version"] = 2;
+        require(metadata["version"] == 2, "new saves use version 2");
+        metadata["version"] = 1;
+        write(bad, withManifest(original, metadata));
+        require(ProjectStore::load(bad, error) != nullptr, "version 1 projects remain readable");
+        metadata["version"] = 3;
         write(bad, withManifest(original, metadata));
         require(!ProjectStore::load(bad, error) && error.contains("version"),
                 "future version rejected");

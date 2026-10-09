@@ -22,6 +22,7 @@ struct ProjectSnapshot
     TopoDS_Shape currentBody;
     const PointCloudDocument* cloud = nullptr;
     ProjectViewState view;
+    bool parametricBody = false;
 };
 struct PreparedProject
 {

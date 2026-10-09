@@ -14,17 +14,26 @@ enum class DatumPlane {
 };
 
 enum class FaceRole {
-    StartFace,
-    EndFace,
-    Unknown,
+    StartFace = 0,
+    EndFace = 1,
+    Unknown = 2,
+    BoxXMin = 3,
+    BoxXMax = 4,
+    BoxYMin = 5,
+    BoxYMax = 6,
+    BoxZMin = 7,
+    BoxZMax = 8,
+    CylinderBase = 9,
+    CylinderTop = 10,
 };
 
 struct FaceReference {
     FeatureId ownerFeature = kInvalidFeatureId;
     FaceRole role = FaceRole::Unknown;
 
-    // Geometric hints are persisted for future fallback matching. V0 resolves
-    // StartFace/EndFace semantically and reports ReferenceLost otherwise.
+    // Semantic roles are resolved from their owner's parameters, independently
+    // of transient face indices or boolean-result topology. Old enum values
+    // remain stable for project compatibility.
     Vec3 normal{};
     Vec3 centroid{};
     double area = 0.0;

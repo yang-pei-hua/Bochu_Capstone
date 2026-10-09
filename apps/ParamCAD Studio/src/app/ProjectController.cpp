@@ -107,6 +107,8 @@ bool ProjectController::saveTo(const QString& path, QString& error)
     ProjectSnapshot snapshot;
     snapshot.features = m_model->features();
     snapshot.currentBody = m_modelView->currentBody();
+    snapshot.parametricBody = !snapshot.currentBody.IsNull() && !m_model->bodyShape().IsNull()
+        && snapshot.currentBody.IsSame(m_model->bodyShape());
     snapshot.cloud = m_cloud;
     auto& view = snapshot.view;
     view.camera = m_ui.viewer->cameraParameters();

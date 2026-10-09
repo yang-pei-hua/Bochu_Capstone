@@ -23,7 +23,8 @@ ModelResult ModelingCore::executeOne(const ModelCommand& command) {
                 return {success, id, success ? std::string{} : document_.lastError()};
             } else if constexpr (std::is_same_v<Command, EditFeatureCommand>) {
                 const bool success = document_.editFeature(
-                    concreteCommand.id, concreteCommand.params);
+                    concreteCommand.id, concreteCommand.params,
+                    concreteCommand.markManuallyEdited, concreteCommand.resizeAnchor);
                 return {success, concreteCommand.id,
                         success ? std::string{} : document_.lastError()};
             } else if constexpr (std::is_same_v<Command, RemoveFeatureCommand>) {

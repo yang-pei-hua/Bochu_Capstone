@@ -75,6 +75,7 @@ VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
     : QVTKOpenGLNativeWidget(parent)
     , m_renderWindow(vtkSmartPointer<vtkGenericOpenGLRenderWindow>::New())
     , m_renderer(vtkSmartPointer<vtkRenderer>::New())
+    , m_referenceRenderer(vtkSmartPointer<vtkRenderer>::New())
     , m_pointCloudDocument(document ? document : new PointCloudDocument(this))
 {
     setObjectName(QStringLiteral("vtkViewport"));
@@ -125,6 +126,12 @@ VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
     m_renderer->AddActor(m_sketchActor.draftActor());
     m_datumPlanes.attach(m_renderer);
     createOrientationAxes();
+    m_renderWindow->SetNumberOfLayers(3);
+    m_referenceRenderer->SetLayer(2);
+    m_referenceRenderer->InteractiveOff();
+    m_referenceRenderer->SetActiveCamera(m_renderer->GetActiveCamera());
+    m_renderWindow->AddRenderer(m_referenceRenderer);
+    m_boxReferenceActor.attach(m_referenceRenderer);
 
     CameraParameters initialCamera;
     CameraController::apply(m_renderer->GetActiveCamera(), initialCamera);
@@ -162,7 +169,10 @@ CameraParameters VTKViewer::cameraParameters() const
 
 void VTKViewer::setBodyShape(const TopoDS_Shape& shape)
 {
+    endBoxReferenceSelection();
     m_bodyActor.setShape(shape);
+    m_displayedBody = shape;
+    m_pickedFaceId = -1;
     ++m_bodyRevision;
     m_renderer->ResetCameraClippingRange();
     emit bodyShapeChanged(shape);
@@ -170,7 +180,10 @@ void VTKViewer::setBodyShape(const TopoDS_Shape& shape)
 
 void VTKViewer::clearBody()
 {
+    endBoxReferenceSelection();
     m_bodyActor.clear();
+    m_displayedBody.Nullify();
+    m_pickedFaceId = -1;
     ++m_bodyRevision;
     m_renderer->ResetCameraClippingRange();
     emit bodyShapeChanged(TopoDS_Shape{});
@@ -179,6 +192,30 @@ void VTKViewer::clearBody()
 bool VTKViewer::hasBody() const noexcept
 {
     return m_bodyActor.hasShape();
+}
+
+bool VTKViewer::beginBoxReferenceSelection(const modeling::BoxPrimitiveParams& box)
+{
+    if (m_sketchInteraction || !hasBody() || !objectVisible()) return false;
+    m_boxReferenceActor.setBox(box);
+    m_boxReferenceActor.setTransform(m_bodyActor.surfaceActor()->GetMatrix());
+    m_sketchActor.actor()->SetUserMatrix(m_bodyActor.surfaceActor()->GetMatrix());
+    m_sketchActor.draftActor()->SetUserMatrix(m_bodyActor.surfaceActor()->GetMatrix());
+    m_referenceSelection=true;
+    m_datumPlanes.setVisible(false);
+    m_pointBox->SetEnabled(0);
+    renderNow();
+    return true;
+}
+
+void VTKViewer::endBoxReferenceSelection()
+{
+    if (!m_referenceSelection) return;
+    m_referenceSelection=false;
+    m_boxReferenceActor.setVisible(false);
+    m_datumPlanes.setVisible(m_datumPlanesVisible);
+    m_pointBox->SetEnabled(m_pointSelectionMode==2 && hasPointCloud() ? 1 : 0);
+    renderNow();
 }
 
 void VTKViewer::renderNow()
@@ -194,6 +231,8 @@ void VTKViewer::setSketch(const modeling::SketchFeatureParams& params,
                           const sketchapp::PlaneFrame& frame)
 {
     m_sketchActor.setSketch(params, frame);
+    m_sketchActor.actor()->SetUserMatrix(m_bodyActor.surfaceActor()->GetMatrix());
+    m_sketchActor.draftActor()->SetUserMatrix(m_bodyActor.surfaceActor()->GetMatrix());
     m_renderer->ResetCameraClippingRange();
     renderNow();
 }
@@ -225,8 +264,10 @@ ViewportTool VTKViewer::viewportTool() const noexcept
 
 void VTKViewer::setSketchInteractionEnabled(bool enabled)
 {
+    if (enabled) endBoxReferenceSelection();
     if (enabled) setPointCloudSelectionMode(0);
     m_sketchInteraction = enabled;
+    emit sketchInteractionChanged(enabled);
     if (!enabled) {
         clearSketchDraft();
     }
@@ -248,8 +289,16 @@ void VTKViewer::clearSketchPlane()
     m_hasSketchPlane = false;
 }
 
-void VTKViewer::alignToSketchPlane(const sketchapp::PlaneFrame& frame)
+void VTKViewer::alignToSketchPlane(const sketchapp::PlaneFrame& modelFrame)
 {
+    vtkNew<vtkTransform> placement;
+    placement->SetMatrix(m_bodyActor.surfaceActor()->GetMatrix());
+    sketchapp::PlaneFrame frame;
+    placement->TransformPoint(modelFrame.origin, frame.origin);
+    placement->TransformNormal(modelFrame.normal, frame.normal);
+    placement->TransformVector(modelFrame.yDirection, frame.yDirection);
+    normalize(frame.normal);
+    normalize(frame.yDirection);
     vtkCamera* camera = m_renderer->GetActiveCamera();
 
     // The camera sits on the +normal side looking back at the plane origin with
@@ -293,7 +342,7 @@ void VTKViewer::clearFaceHighlight()
 void VTKViewer::setDatumPlanesVisible(bool visible)
 {
     m_datumPlanesVisible = visible;
-    m_datumPlanes.setVisible(visible);
+    m_datumPlanes.setVisible(visible && !m_referenceSelection);
     renderNow();
 }
 
@@ -381,6 +430,14 @@ bool VTKViewer::sketchPointAt(int x, int y, modeling::Point2D& point)
         }
     }
 
+    // Geometry stays in model coordinates even when the body is transformed
+    // for display. Intersect the inverse-transformed ray with the model plane.
+    vtkNew<vtkTransform> inverse;
+    inverse->SetMatrix(m_bodyActor.surfaceActor()->GetMatrix());
+    inverse->Inverse();
+    inverse->TransformPoint(origin, origin);
+    inverse->TransformVector(direction, direction);
+
     // The ray direction is normalized so the plane distance below is a real
     // length; vtkPlane::IntersectWithLine cannot be used here because it treats
     // its parameter as a fraction along the segment and would reject any hit
@@ -441,6 +498,17 @@ bool VTKViewer::snapSketchPointAt(int x, int y, modeling::Point2D& point)
     return true;
 }
 
+bool VTKViewer::pickedBodyPlane(int faceId, modeling::Plane3d& plane, modeling::Vec3& point) const
+{
+    const auto* info = m_bodyActor.faceInfo(faceId);
+    if (!info || !info->planar || m_pickedFaceId != faceId) return false;
+    plane = {{info->origin[0],info->origin[1],info->origin[2]},
+             {info->normal[0],info->normal[1],info->normal[2]},
+             {info->xDirection[0],info->xDirection[1],info->xDirection[2]}};
+    point = m_pickedModelPoint;
+    return true;
+}
+
 bool VTKViewer::pickBodyFaceAt(int x, int y, int& faceId,
                                sketchapp::PlaneFrame& plane, bool& planar)
 {
@@ -469,54 +537,21 @@ bool VTKViewer::pickBodyFaceAt(int x, int y, int& faceId,
         return true;
     }
 
-    // The body can be transformed for display, and the plane has to follow: the
-    // frame is what the user sees, and the sketch must be built exactly there.
-    vtkNew<vtkTransform> placement;
-    placement->SetMatrix(m_bodyActor.surfaceActor()->GetMatrix());
-
-    const double localOrigin[3] = {info->origin[0], info->origin[1], info->origin[2]};
-    const double localNormal[3] = {info->normal[0], info->normal[1], info->normal[2]};
-    const double localX[3] = {info->xDirection[0], info->xDirection[1],
-                              info->xDirection[2]};
-    double worldNormal[3] = {0.0, 0.0, 1.0};
-    double worldX[3] = {1.0, 0.0, 0.0};
-    placement->TransformPoint(localOrigin, plane.origin);
-    placement->TransformNormal(localNormal, worldNormal);
-    placement->TransformVector(localX, worldX);
-
-    double normalLength = 0.0;
+    // The exact plane and picked point stay in model coordinates. Display
+    // placement is applied to sketch actors and removed from drawing rays.
     for (int axis = 0; axis < 3; ++axis) {
-        normalLength += worldNormal[axis] * worldNormal[axis];
+        plane.origin[axis] = info->origin[axis];
+        plane.normal[axis] = info->normal[axis];
+        plane.xDirection[axis] = info->xDirection[axis];
     }
-    normalLength = std::sqrt(normalLength);
-    if (normalLength <= 1.0e-12) {
-        return false;
-    }
-
-    // X is orthogonalized against the world normal and renormalized, then Y is
-    // derived so X x Y = normal - the same rule the core uses for Plane3d.
-    const double projection = (worldX[0] * worldNormal[0] + worldX[1] * worldNormal[1] +
-                               worldX[2] * worldNormal[2]) /
-                              (normalLength * normalLength);
-    double xLength = 0.0;
-    for (int axis = 0; axis < 3; ++axis) {
-        plane.normal[axis] = worldNormal[axis] / normalLength;
-        plane.xDirection[axis] = worldX[axis] - projection * worldNormal[axis];
-        xLength += plane.xDirection[axis] * plane.xDirection[axis];
-    }
-    xLength = std::sqrt(xLength);
-    if (xLength <= 1.0e-12) {
-        return false;
-    }
-    for (double& value : plane.xDirection) {
-        value /= xLength;
-    }
-    plane.yDirection[0] = plane.normal[1] * plane.xDirection[2] -
-                          plane.normal[2] * plane.xDirection[1];
-    plane.yDirection[1] = plane.normal[2] * plane.xDirection[0] -
-                          plane.normal[0] * plane.xDirection[2];
-    plane.yDirection[2] = plane.normal[0] * plane.xDirection[1] -
-                          plane.normal[1] * plane.xDirection[0];
+    cross(plane.normal, plane.xDirection, plane.yDirection);
+    vtkNew<vtkTransform> inverse;
+    inverse->SetMatrix(m_bodyActor.surfaceActor()->GetMatrix());
+    inverse->Inverse();
+    double point[3];
+    inverse->TransformPoint(picker->GetPickPosition(),point);
+    m_pickedFaceId = hitFace;
+    m_pickedModelPoint = {point[0],point[1],point[2]};
     return true;
 }
 
@@ -576,6 +611,11 @@ bool VTKViewer::pickSketchEntityAt(int x, int y, modeling::SketchEntityId& entit
 
 void VTKViewer::onLeftButtonPressed(int x, int y)
 {
+    if (m_referenceSelection) {
+        const int anchor=m_boxReferenceActor.pick(m_referenceRenderer,x,y);
+        if (anchor>=0) { endBoxReferenceSelection(); emit boxReferencePicked(anchor); }
+        return;
+    }
     if (!m_sketchInteraction && m_pointSelectionMode != 0) {
         if (m_pointSelectionMode == 1 && hasPointCloud() && m_pointCloudVisible) {
             vtkNew<vtkPointPicker> picker;
@@ -668,6 +708,9 @@ void VTKViewer::onMouseMoved(int x, int y)
 
 void VTKViewer::onCancelRequested()
 {
+    if (m_referenceSelection) {
+        endBoxReferenceSelection(); emit boxReferenceSelectionCancelled(); return;
+    }
     if (m_pointSelectionMode != 0) {
         setPointCloudSelectionMode(0);
         return;
@@ -679,6 +722,9 @@ void VTKViewer::onCancelRequested()
 
 void VTKViewer::onKeyPressed(const std::string& keySym)
 {
+    if (m_referenceSelection && keySym=="Escape") {
+        endBoxReferenceSelection(); emit boxReferenceSelectionCancelled(); return;
+    }
     if (m_pointSelectionMode != 0 && keySym == "Escape") {
         setPointCloudSelectionMode(0);
         return;
@@ -706,6 +752,7 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     const bool datumPlanesWereVisible = m_datumPlanesVisible;
     const int highlightedFace = m_highlightedFace;
     const bool boxWasVisible = m_pointBox->GetEnabled() != 0;
+    m_referenceRenderer->DrawOff();
     m_pointBox->SetEnabled(0);
     m_pointCloudActor.setAnnotations(nullptr);
     m_datumPlanes.setVisible(false);
@@ -735,7 +782,8 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     writer->Write();
     const bool written = writer->GetErrorCode() == 0;
 
-    m_datumPlanes.setVisible(datumPlanesWereVisible);
+    m_datumPlanes.setVisible(datumPlanesWereVisible && !m_referenceSelection);
+    m_referenceRenderer->DrawOn();
     m_pointBox->SetEnabled(boxWasVisible ? 1 : 0);
     m_pointCloudActor.setAnnotations(&pointCloudSelection());
     if (highlightedFace >= 0) {
@@ -765,12 +813,15 @@ void VTKViewer::syncPointCloud()
         m_pointCloudActor.setPointMask(pointCloudSelection().deleted());
         m_pointCloudVisible = true;
         m_pointCloudActor.setVisible(true);
+        emit pointCloudVisibilityChanged(true);
         resetPointCloudBox();
         setPointCloudSelectionMode(m_sketchInteraction ? 0 : 1);
         emit pointCloudLoaded();
     } else {
         setPointCloudSelectionMode(0);
         m_pointCloudActor.clear();
+        m_pointCloudVisible = false;
+        emit pointCloudVisibilityChanged(false);
     }
     m_renderer->ResetCameraClippingRange();
     renderNow();
@@ -843,6 +894,7 @@ void VTKViewer::setPointCloudVisible(bool visible)
     m_pointCloudVisible = visible;
     if (!visible) setPointCloudSelectionMode(0);
     m_pointCloudActor.setVisible(visible);
+    emit pointCloudVisibilityChanged(visible);
     renderNow();
 }
 
@@ -972,13 +1024,19 @@ void VTKViewer::setObjectTransform(double px, double py, double pz,
                                    double sx, double sy, double sz)
 {
     m_bodyActor.setTransform(px, py, pz, rx, ry, rz, sx, sy, sz);
+    m_datumPlanes.setTransform(m_bodyActor.surfaceActor()->GetMatrix());
+    m_boxReferenceActor.setTransform(m_bodyActor.surfaceActor()->GetMatrix());
+    m_sketchActor.actor()->SetUserMatrix(m_bodyActor.surfaceActor()->GetMatrix());
+    m_sketchActor.draftActor()->SetUserMatrix(m_bodyActor.surfaceActor()->GetMatrix());
     m_renderer->ResetCameraClippingRange();
     renderNow();
 }
 
 void VTKViewer::setObjectVisible(bool visible)
 {
+    if (!visible) endBoxReferenceSelection();
     m_bodyActor.setVisible(visible);
+    emit objectVisibilityChanged(visible);
     renderNow();
 }
 

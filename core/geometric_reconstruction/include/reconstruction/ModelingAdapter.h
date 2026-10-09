@@ -9,7 +9,7 @@ namespace reconstruction {
 modeling::ModelPatchResult commitCompoundCandidate(
     const CompoundCandidate& candidate, modeling::ModelingCore& core,
     modeling::ModelRevision expectedRevision = modeling::kAnyModelRevision,
-    bool replacePrevious = false);
+    bool replacePrevious = false, bool overwriteManual = false);
 
 modeling::ModelPatchResult commitBoxCandidate(
     const BoxCandidate& candidate,

@@ -35,11 +35,23 @@ ModelViewController::ModelViewController(
         // native body currently presented, without rebuilding from render data.
         m_currentBody = shape;
         m_ui.exportStepAction->setEnabled(!shape.IsNull() && m_ui.viewer->hasBody());
+        m_ui.scenePanel->setNodeState(SceneNodeType::Model, m_ui.viewer->hasBody(),
+                                     m_ui.viewer->objectVisible());
     });
 }
 
 void ModelViewController::connectUi()
 {
+    connect(m_ui.scenePanel, &ScenePanel::nodeVisibilityRequested, this,
+            [this](SceneNodeType type, bool visible) {
+        if (type == SceneNodeType::Model) m_ui.viewer->setObjectVisible(visible);
+    });
+    connect(m_ui.viewer, &VTKViewer::objectVisibilityChanged, this, [this](bool visible) {
+        auto state = m_ui.propertyPanel->presentation();
+        state.visible = visible;
+        m_ui.propertyPanel->setPresentation(state);
+        m_ui.scenePanel->setNodeState(SceneNodeType::Model, m_ui.viewer->hasBody(), visible);
+    });
     RenderPanel* renderPanel = m_ui.propertyPanel->renderPanel();
     // The texture controls only ask for a change; the dialog and the texture
     // itself stay with this controller and the viewport.
@@ -161,6 +173,19 @@ void ModelViewController::closeModel()
                                .arg(m_ui.viewer->cameraParameters().parallelProjection
                                         ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
     emit logInfo(workspaceTr("Model closed"));
+}
+
+void ModelViewController::deleteModel()
+{
+    m_loadedModel = LoadedModel{};
+    clearTexture();
+    m_ui.viewer->clearBody();
+    m_ui.viewer->setObjectVisible(true);
+    m_ui.scenePanel->updateNodeLabel(SceneNodeType::Model, workspaceTr("Model"));
+    emit statusTextChanged(workspaceTr("Ready | Model: None | Camera: %1")
+        .arg(m_ui.viewer->cameraParameters().parallelProjection
+            ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
+    emit logInfo(workspaceTr("Model deleted"));
 }
 
 bool ModelViewController::exportStepTo(const QString& path, QString& error) const

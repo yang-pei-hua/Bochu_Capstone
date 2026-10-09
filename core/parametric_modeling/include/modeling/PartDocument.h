@@ -6,6 +6,7 @@
 
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace modeling {
 
@@ -14,7 +15,8 @@ class RebuildEngine;
 class PartDocument {
 public:
     FeatureId addFeature(const FeatureParams& params, bool reconstructed = false);
-    bool editFeature(FeatureId id, const FeatureParams& params);
+    bool editFeature(FeatureId id, const FeatureParams& params, bool markManuallyEdited = false,
+                     std::optional<ResizeAnchor> anchor = std::nullopt);
     bool removeFeature(FeatureId id, bool cascade = false);
     bool setFeatureSuppressed(FeatureId id, bool suppressed);
 
@@ -25,7 +27,7 @@ public:
         const SketchGeometry& geometry);
     bool removeSketchEntity(FeatureId sketchId, SketchEntityId entityId);
 
-    std::vector<FeatureId> dependentsOf(FeatureId id) const;
+    std::vector<FeatureId> dependentsOf(FeatureId id, bool transitive = false) const;
     void clear();
     bool restoreFeatures(const std::vector<Feature>& features);
 

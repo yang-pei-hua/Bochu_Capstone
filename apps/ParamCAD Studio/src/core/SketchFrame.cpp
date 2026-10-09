@@ -1,25 +1,11 @@
 #include "core/SketchFrame.h"
+#include <modeling/SemanticFaces.h>
 
 #include <cmath>
 #include <variant>
 
 namespace sketchapp {
 namespace {
-
-// Guard against a malformed history that references itself through a chain of
-// extrusions. The core builds sketches in order, so a legitimate chain is short.
-constexpr int kMaxResolutionDepth = 32;
-
-const modeling::Feature* findFeature(const std::vector<modeling::Feature>& features,
-                                     modeling::FeatureId id)
-{
-    for (const modeling::Feature& feature : features) {
-        if (feature.id == id) {
-            return &feature;
-        }
-    }
-    return nullptr;
-}
 
 void cross(const double a[3], const double b[3], double out[3])
 {
@@ -28,71 +14,6 @@ void cross(const double a[3], const double b[3], double out[3])
     out[2] = a[0] * b[1] - a[1] * b[0];
 }
 
-bool resolve(const std::vector<modeling::Feature>& features,
-             const modeling::SketchPlaneReference& reference,
-             PlaneFrame& frame,
-             int depth)
-{
-    if (depth > kMaxResolutionDepth) {
-        return false;
-    }
-    if (const auto* datum = std::get_if<modeling::DatumPlaneReference>(&reference)) {
-        frame = datumPlaneFrame(datum->plane);
-        return true;
-    }
-    if (const auto* offset = std::get_if<modeling::OffsetDatumPlane>(&reference)) {
-        const PlaneFrame base = datumPlaneFrame(offset->base);
-        frame = translatedFrame(base, base.normal, offset->offset);
-        return true;
-    }
-    if (const auto* explicitPlane = std::get_if<modeling::Plane3d>(&reference)) {
-        frame = planeFrameOf(*explicitPlane);
-        return true;
-    }
-
-    // A face reference is only resolvable through the extrusion that produced
-    // the face, so the owning feature and its own sketch are looked up first.
-    const auto& face = std::get<modeling::FaceReference>(reference);
-    const modeling::Feature* owner = findFeature(features, face.ownerFeature);
-    if (owner == nullptr || owner->type != modeling::FeatureType::Extrude) {
-        return false;
-    }
-    const auto* extrude = std::get_if<modeling::ExtrudeFeatureParams>(&owner->params);
-    if (extrude == nullptr) {
-        return false;
-    }
-    const modeling::Feature* sketch = findFeature(features, extrude->sketchId);
-    if (sketch == nullptr) {
-        return false;
-    }
-    const auto* sketchParams = std::get_if<modeling::SketchFeatureParams>(&sketch->params);
-    if (sketchParams == nullptr) {
-        return false;
-    }
-
-    PlaneFrame profileFrame;
-    if (!resolve(features, sketchParams->plane, profileFrame, depth + 1)) {
-        return false;
-    }
-
-    double direction[3] = {profileFrame.normal[0], profileFrame.normal[1],
-                           profileFrame.normal[2]};
-    if (extrude->reverse) {
-        for (double& value : direction) {
-            value = -value;
-        }
-    }
-
-    if (face.role == modeling::FaceRole::StartFace) {
-        // The start face is the sketch plane itself, with the normal flipped
-        // back towards the sketch, exactly as the core's extrude builder does.
-        const double startNormal[3] = {-direction[0], -direction[1], -direction[2]};
-        frame = translatedFrame(profileFrame, startNormal, 0.0);
-        return true;
-    }
-    frame = translatedFrame(profileFrame, direction, extrude->depth);
-    return true;
-}
 
 }  // namespace
 
@@ -225,14 +146,19 @@ QString planeLabel(const modeling::SketchPlaneReference& reference)
     if (std::holds_alternative<modeling::Plane3d>(reference)) {
         return QStringLiteral("Face Plane");
     }
-    return QStringLiteral("Face of an extrusion");
+    const auto& face = std::get<modeling::FaceReference>(reference);
+    return QStringLiteral("%1 of #%2").arg(QString::fromLatin1(modeling::faceRoleName(face.role))).arg(face.ownerFeature);
 }
 
 bool resolveSketchFrame(const std::vector<modeling::Feature>& features,
                         const modeling::SketchPlaneReference& reference,
                         PlaneFrame& frame)
 {
-    return resolve(features, reference, frame, 0);
+    modeling::Plane3d plane;
+    std::string error;
+    if (!modeling::resolveSketchPlane(features, reference, plane, error)) return false;
+    frame = planeFrameOf(plane);
+    return true;
 }
 
 }  // namespace sketchapp

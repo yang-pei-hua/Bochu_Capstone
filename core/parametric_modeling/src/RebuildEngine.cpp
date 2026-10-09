@@ -1,6 +1,7 @@
 #include "RebuildEngine.h"
 
 #include "modeling/PartDocument.h"
+#include "modeling/SemanticFaces.h"
 #include "occt/Builders.h"
 #include "occt/OcctError.h"
 
@@ -30,7 +31,8 @@ struct ExtrudeBuildState {
     occt::ExtrudeResult result;
 };
 
-using DerivedFeatureState = std::variant<SketchBuildState, ExtrudeBuildState>;
+struct PrimitiveBuildState { FeatureParams params; };
+using DerivedFeatureState = std::variant<SketchBuildState, ExtrudeBuildState, PrimitiveBuildState>;
 using DerivedStateMap = std::unordered_map<FeatureId, DerivedFeatureState>;
 
 void appendIndependentSolid(const TopoDS_Shape& solid, TopoDS_Shape& currentBody) {
@@ -51,72 +53,16 @@ bool resolvePlane(
     const DerivedStateMap& states,
     occt::PlaneFrame& frame,
     std::string& error) {
-    if (const auto* datum = std::get_if<DatumPlaneReference>(&reference)) {
-        frame = occt::datumPlaneFrame(datum->plane);
-        return true;
-    }
-    if (const auto* offset = std::get_if<OffsetDatumPlane>(&reference)) {
-        if (!std::isfinite(offset->offset)) {
-            error = "Offset datum plane distance must be finite";
-            return false;
-        }
-        frame = occt::datumPlaneFrame(offset->base);
-        frame = occt::translatedFrame(frame, frame.normal, offset->offset);
-        return true;
-    }
-    if (const auto* plane = std::get_if<Plane3d>(&reference)) {
-        constexpr double kDegenerate = 1.0e-12;
-        const auto finite = [](const Vec3& value) {
-            return std::isfinite(value.x) && std::isfinite(value.y) &&
-                std::isfinite(value.z);
-        };
-        if (!finite(plane->origin) || !finite(plane->normal) ||
-            !finite(plane->xDirection)) {
-            error = "Explicit sketch plane must be finite and non-degenerate";
-            return false;
-        }
-
-        const double normalLength = std::sqrt(
-            plane->normal.x * plane->normal.x +
-            plane->normal.y * plane->normal.y +
-            plane->normal.z * plane->normal.z);
-        if (normalLength <= kDegenerate) {
-            error = "Explicit sketch plane must be finite and non-degenerate";
-            return false;
-        }
-        const Vec3 normal{
-            plane->normal.x / normalLength,
-            plane->normal.y / normalLength,
-            plane->normal.z / normalLength};
-
-        const double projection =
-            plane->xDirection.x * normal.x +
-            plane->xDirection.y * normal.y +
-            plane->xDirection.z * normal.z;
-        Vec3 xDirection{
-            plane->xDirection.x - projection * normal.x,
-            plane->xDirection.y - projection * normal.y,
-            plane->xDirection.z - projection * normal.z};
-        const double xLength = std::sqrt(
-            xDirection.x * xDirection.x +
-            xDirection.y * xDirection.y +
-            xDirection.z * xDirection.z);
-        if (xLength <= kDegenerate) {
-            error = "Explicit sketch plane must be finite and non-degenerate";
-            return false;
-        }
-        xDirection = Vec3{
-            xDirection.x / xLength,
-            xDirection.y / xLength,
-            xDirection.z / xLength};
-
-        frame.origin = gp_Pnt(plane->origin.x, plane->origin.y, plane->origin.z);
-        frame.normal = gp_Dir(normal.x, normal.y, normal.z);
-        frame.xDirection = gp_Dir(xDirection.x, xDirection.y, xDirection.z);
+    if (!std::holds_alternative<FaceReference>(reference)) {
+        Plane3d plane;
+        if (!resolveSketchPlane({},reference,plane,error)) return false;
+        frame.origin = gp_Pnt(plane.origin.x,plane.origin.y,plane.origin.z);
+        frame.normal = gp_Dir(plane.normal.x,plane.normal.y,plane.normal.z);
+        frame.xDirection = gp_Dir(plane.xDirection.x,plane.xDirection.y,plane.xDirection.z);
         frame.yDirection = gp_Dir(
-            normal.y * xDirection.z - normal.z * xDirection.y,
-            normal.z * xDirection.x - normal.x * xDirection.z,
-            normal.x * xDirection.y - normal.y * xDirection.x);
+            plane.normal.y*plane.xDirection.z-plane.normal.z*plane.xDirection.y,
+            plane.normal.z*plane.xDirection.x-plane.normal.x*plane.xDirection.z,
+            plane.normal.x*plane.xDirection.y-plane.normal.y*plane.xDirection.x);
         return true;
     }
 
@@ -127,6 +73,11 @@ bool resolvePlane(
             std::to_string(faceReference.ownerFeature) +
             " has no geometry in the current rebuild";
         return false;
+    }
+    if (const auto* primitive = std::get_if<PrimitiveBuildState>(&owner->second)) {
+        Plane3d plane;
+        return primitiveFacePlane(primitive->params, faceReference.role, plane, error)
+            && resolvePlane(plane, states, frame, error);
     }
     const auto* extrude = std::get_if<ExtrudeBuildState>(&owner->second);
     if (extrude == nullptr) {
@@ -141,8 +92,8 @@ bool resolvePlane(
     case FaceRole::EndFace:
         frame = extrude->result.endFace;
         return true;
-    case FaceRole::Unknown:
-        error = "ReferenceLost: V0 requires semantic StartFace or EndFace";
+    default:
+        error = "ReferenceLost: extrusion requires semantic StartFace or EndFace";
         return false;
     }
     error = "ReferenceLost: unsupported face role";
@@ -337,6 +288,7 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
             } else {
                 appendIndependentSolid(box, currentBody);
             }
+            states.emplace(feature.id, PrimitiveBuildState{feature.params});
             continue;
         }
         case FeatureType::ThroughHolePrimitive: {
@@ -372,6 +324,8 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
             }, feature.params);
             if (!built) break;
             appendIndependentSolid(solid, currentBody);
+            if (feature.type == FeatureType::CylinderPrimitive)
+                states.emplace(feature.id, PrimitiveBuildState{feature.params});
             continue;
         }
         }

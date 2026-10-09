@@ -3,6 +3,7 @@
 #include "modeling/FeatureParams.h"
 
 #include <variant>
+#include <optional>
 
 namespace modeling {
 
@@ -14,6 +15,8 @@ struct AddFeatureCommand {
 struct EditFeatureCommand {
     FeatureId id = kInvalidFeatureId;
     FeatureParams params;
+    bool markManuallyEdited = false;
+    std::optional<ResizeAnchor> resizeAnchor;
 };
 
 struct RemoveFeatureCommand {

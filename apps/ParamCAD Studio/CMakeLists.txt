@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(CadPointCloudClient VERSION 0.2.0 LANGUAGES CXX)
+project(CadPointCloudClient VERSION 0.2.1 LANGUAGES CXX)
 
 option(CAD_CLIENT_BUILD_TESTS "Build ParamCAD Studio I/O tests" OFF)
 option(CAD_CLIENT_BUILD_VALIDATION_TOOLS "Build standard STEP and CAD validation tools" OFF)
@@ -77,6 +77,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/app/ModelViewController.cpp
     src/app/ModelingController.h
     src/app/ModelingController.cpp
+    src/app/FeatureEditingController.h
+    src/app/FeatureEditingController.cpp
     src/app/CaptureController.h
     src/app/CaptureController.cpp
     src/app/ProjectController.h
@@ -120,6 +122,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/io/CameraInfoBuilder.cpp
     src/rendering/BodyActor.h
     src/rendering/BodyActor.cpp
+    src/rendering/BoxReferenceActor.h
+    src/rendering/BoxReferenceActor.cpp
     src/rendering/DatumPlaneActor.h
     src/rendering/DatumPlaneActor.cpp
     src/rendering/PointCloudActor.h
@@ -137,6 +141,8 @@ qt_add_executable(CadPointCloudClient WIN32
     src/ui/panels/ModelingPanel.cpp
     src/ui/panels/FeatureDetailsPanel.h
     src/ui/panels/FeatureDetailsPanel.cpp
+    src/ui/panels/FeatureEditorPanel.h
+    src/ui/panels/FeatureEditorPanel.cpp
     src/ui/panels/ScenePanel.h
     src/ui/panels/ScenePanel.cpp
     src/ui/panels/PropertyPanel.h
@@ -254,6 +260,7 @@ endif()
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
     add_executable(feature_details_test tests/feature_details_test.cpp
+        src/ui/panels/FeatureEditorPanel.h src/ui/panels/FeatureEditorPanel.cpp
         src/ui/panels/FeatureDetailsPanel.h src/ui/panels/FeatureDetailsPanel.cpp
         src/ui/panels/ModelingPanel.h src/ui/panels/ModelingPanel.cpp
         src/core/SketchFrame.cpp)
@@ -354,7 +361,7 @@ if(CAD_CLIENT_BUILD_TESTS)
     # wiring of the same widgets maintained only for tests.
     get_target_property(CAD_CLIENT_TEST_SOURCES CadPointCloudClient SOURCES)
     list(REMOVE_ITEM CAD_CLIENT_TEST_SOURCES src/main.cpp)
-    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test project_interaction_test)
+    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test project_interaction_test scene_interaction_test parameter_editing_test semantic_face_reference_test)
         add_executable(${interaction_test}
             tests/${interaction_test}.cpp ${CAD_CLIENT_TEST_SOURCES})
         target_include_directories(${interaction_test} PRIVATE src)

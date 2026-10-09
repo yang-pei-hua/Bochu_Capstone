@@ -11,6 +11,7 @@ class vtkActor;
 class vtkBillboardTextActor3D;
 class vtkPolyDataMapper;
 class vtkRenderer;
+class vtkMatrix4x4;
 
 // Draws the three datum planes (XY, YZ, XZ) as translucent squares with an
 // outline and a billboarded name, so a sketch plane is picked straight in the
@@ -28,6 +29,7 @@ public:
 
     void setVisible(bool visible);
     bool visible() const noexcept;
+    void setTransform(vtkMatrix4x4* matrix);
 
     // The highlighted plane is drawn more opaque and with a brighter outline.
     void setHighlightedPlane(std::optional<modeling::DatumPlane> plane);

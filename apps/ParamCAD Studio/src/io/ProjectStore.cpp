@@ -4,6 +4,9 @@
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -19,8 +22,27 @@
 #include <fstream>
 #include <set>
 #include <stdexcept>
+#include <algorithm>
 
 namespace {
+double volume(const TopoDS_Shape& shape)
+{
+    if (shape.IsNull()) return 0;
+    GProp_GProps properties; BRepGProp::VolumeProperties(shape,properties);
+    return std::abs(properties.Mass());
+}
+bool sameMaterial(const TopoDS_Shape& a, const TopoDS_Shape& b)
+{
+    if (a.IsNull() || b.IsNull()) return false;
+    const double tolerance=std::max(1.0,volume(a))*1e-8;
+    if (std::abs(volume(a)-volume(b))>tolerance) return false;
+    // Equal bounds/volume alone cannot distinguish relocated holes. Test the
+    // material difference in both directions for legacy/source validation.
+    BRepAlgoAPI_Cut first(a,b); first.SetRunParallel(false); first.Build();
+    if (!first.IsDone() || volume(first.Shape())>tolerance) return false;
+    BRepAlgoAPI_Cut second(b,a); second.SetRunParallel(false); second.Build();
+    return second.IsDone() && volume(second.Shape())<=tolerance;
+}
 void check(bool ok, const QString& message = QStringLiteral("Invalid or incomplete project data"))
 {
     if (!ok)
@@ -185,14 +207,17 @@ bool ProjectStore::save(const QString& path, const ProjectSnapshot& state, QStri
         if (!checked.restoreFeatures(state.features))
             check(false, QString::fromStdString(checked.lastError()));
         QJsonObject manifest{{"schema", "paramcad.project"},
-                             {"version", 1},
+                             {"version", 2},
                              {"features", FeatureCodec::encode(state.features)},
+                             {"parametricBody", state.parametricBody},
                              {"view", viewJson(state.view)}};
         std::vector<modeling::Feature> decoded;
         check(FeatureCodec::decode(manifest["features"].toArray(), decoded, error), error);
         readView(manifest["view"].toObject());
         QStringList names;
         if (!state.currentBody.IsNull()) {
+            if (state.parametricBody) check(sameMaterial(state.currentBody,checked.bodyShape()),
+                QStringLiteral("Current body does not match its parametric features"));
             check(BRepCheck_Analyzer(state.currentBody).IsValid(),
                   QStringLiteral("Invalid project CAD body"));
             std::ofstream output(nativePath(stage.filePath("body.brep")), std::ios::binary);
@@ -270,7 +295,8 @@ std::unique_ptr<PreparedProject> ProjectStore::load(const QString& path, QString
         const auto document = QJsonDocument::fromJson(json, &parse);
         check(parse.error == QJsonParseError::NoError && document.isObject());
         const auto manifest = document.object();
-        check(manifest["schema"] == "paramcad.project" && manifest["version"] == 1,
+        check(manifest["schema"] == "paramcad.project" &&
+                  (manifest["version"] == 1 || manifest["version"] == 2),
               QStringLiteral("Unsupported project format/version"));
         check(manifest["features"].isArray() && manifest["view"].isObject() &&
               manifest["assets"].isArray() && manifest["selection"].isArray());
@@ -310,6 +336,16 @@ std::unique_ptr<PreparedProject> ProjectStore::load(const QString& path, QString
             check(!body.fail() && !result->currentBody.IsNull() &&
                       BRepCheck_Analyzer(result->currentBody).IsValid(),
                   QStringLiteral("Invalid project CAD body"));
+            const bool parametric = manifest.contains("parametricBody")
+                ? boolean(manifest["parametricBody"])
+                : sameMaterial(result->currentBody,result->model.bodyShape());
+            if (parametric) {
+                check(sameMaterial(result->currentBody,result->model.bodyShape()),
+                    QStringLiteral("Stored body does not match its parametric features"));
+                result->currentBody=result->model.bodyShape();
+            }
+        } else if (manifest.contains("parametricBody")) {
+            check(!boolean(manifest["parametricBody"]),QStringLiteral("Parametric body asset is missing"));
         }
         check(names.count("cloud.ply") == names.count("annotations.json"));
         if (names.count("cloud.ply")) {

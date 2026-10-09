@@ -7,6 +7,7 @@
 #include "app/PointCloudWorkspaceController.h"
 #include "app/ReconstructionController.h"
 #include "app/SketchWorkspaceController.h"
+#include "app/FeatureEditingController.h"
 #include "core/CameraController.h"
 #include "core/PointCloudDocument.h"
 #include "ui/panels/CameraPanel.h"
@@ -58,6 +59,8 @@ MainWindow::MainWindow(QWidget* parent)
     applyDarkTheme();
 
     m_scenePanel->setScene(m_scene);
+    m_scenePanel->setNodeState(SceneNodeType::Model, m_viewer->hasBody(), m_viewer->objectVisible());
+    m_scenePanel->setNodeState(SceneNodeType::PointCloud, m_viewer->hasPointCloud(), m_viewer->pointCloudVisible());
     m_propertyPanel->cameraPanel()->setParameters(m_viewer->cameraParameters());
 
     logInfo(tr("Application started"));
@@ -73,6 +76,7 @@ MainWindow::~MainWindow()
     // Workspaces borrow widgets: destroy them (and join analysis) before Qt tears
     // down the window's child widgets and command controllers.
     delete m_pointCloudWorkspace;
+    delete m_featureEditing;
     delete m_sketchWorkspace;
     delete m_captureWorkspace;
     delete m_modelViewController;
@@ -108,6 +112,15 @@ void MainWindow::createWorkspaceControllers()
          m_propertyPanel, m_reconstructCadAction, m_cancelCadAction, m_reconstructToolAction}, this, this);
     m_modelViewController = new ModelViewController(capture,
         {m_viewer, m_propertyPanel, m_scenePanel, m_exportStepAction}, this, this);
+    m_featureEditing = new FeatureEditingController(modeling,
+        {m_viewer,m_modelingPanel,m_propertyPanel,m_undoCadAction,m_redoCadAction},this,this);
+    connect(m_scenePanel, &ScenePanel::nodeDeleteRequested, this, [this, modeling](SceneNodeType type) {
+        if (type != SceneNodeType::Model) return;
+        m_pointCloudWorkspace->prepareProjectReplacement();
+        m_sketchWorkspace->resetForProject();
+        modeling->adoptProject(modeling::ModelingCore{});
+        m_modelViewController->deleteModel();
+    });
 
     m_projectController = new ProjectController(modeling, m_pointCloudDocument, m_modelViewController,
         reconstruction, {m_viewer, m_propertyPanel, m_scenePanel, m_openProjectAction, m_saveAction,
@@ -122,7 +135,7 @@ void MainWindow::createWorkspaceControllers()
     connect(capture, &CaptureController::batchStateChanged, m_projectController, &ProjectController::setCaptureBusy);
 
     WorkspaceController* workspaces[] = {
-        m_sketchWorkspace, m_captureWorkspace, m_pointCloudWorkspace, m_modelViewController, m_projectController};
+        m_sketchWorkspace, m_captureWorkspace, m_pointCloudWorkspace, m_modelViewController, m_projectController, m_featureEditing};
     for (auto* workspace : workspaces) {
         connect(workspace, &WorkspaceController::logInfo, this, &MainWindow::logInfo);
         connect(workspace, &WorkspaceController::logWarning, this, &MainWindow::logWarning);
@@ -151,6 +164,11 @@ void MainWindow::logError(const QString& message)
 
 void MainWindow::createActions()
 {
+    m_undoCadAction = new QAction(tr("撤销 CAD 编辑"),this);
+    m_undoCadAction->setObjectName("undoCadAction"); m_undoCadAction->setShortcut(QKeySequence::Undo);
+    m_redoCadAction = new QAction(tr("重做 CAD 编辑"),this);
+    m_redoCadAction->setObjectName("redoCadAction"); m_redoCadAction->setShortcut(QKeySequence::Redo);
+    m_undoCadAction->setEnabled(false); m_redoCadAction->setEnabled(false);
     m_openAction = new QAction(style()->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Model"), this);
     m_openAction->setShortcut(QKeySequence::Open);
     // A cloud produced elsewhere (or by an earlier reconstruction run) can be
@@ -235,6 +253,8 @@ void MainWindow::createMenus()
     fileMenu->addAction(m_exportStepAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_exitAction);
+    auto* editMenu=menuBar()->addMenu(tr("&Edit"));
+    editMenu->addAction(m_undoCadAction); editMenu->addAction(m_redoCadAction);
 
     QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(m_resetCameraAction);
@@ -381,6 +401,7 @@ void MainWindow::createStatusBar()
 
 void MainWindow::connectUi()
 {
+    m_featureEditing->connectUi();
     connect(m_openAction, &QAction::triggered, m_modelViewController, &ModelViewController::openModel);
     connect(m_openPointCloudAction, &QAction::triggered, m_pointCloudWorkspace, &PointCloudWorkspaceController::openPointCloud);
     connect(m_reconstructCadAction, &QAction::triggered, m_pointCloudWorkspace, &PointCloudWorkspaceController::reconstructCad);
@@ -486,7 +507,7 @@ void MainWindow::showAbout()
     QMessageBox::about(this, tr("About"),
                        tr("CAD & Point Cloud Studio\n\n"
                           "C++17 / Qt 6 Widgets / VTK UI skeleton\n"
-                          "Version 0.2.0"));
+                          "Version %1").arg(QApplication::applicationVersion()));
 }
 
 void MainWindow::updateCameraStatus(bool parallelProjection)

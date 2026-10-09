@@ -48,6 +48,8 @@ struct Feature {
     bool valid = true;
     std::string errorText;
     bool reconstructed = false;
+    bool manuallyEdited = false;
+    ResizeAnchor resizeAnchor = ResizeAnchor::Center;
 };
 
 }  // namespace modeling

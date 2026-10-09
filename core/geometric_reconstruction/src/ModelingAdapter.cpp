@@ -5,12 +5,16 @@ namespace reconstruction {
 modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &candidate,
                                                    modeling::ModelingCore &core,
                                                    modeling::ModelRevision expectedRevision,
-                                                   bool replacePrevious) {
+                                                   bool replacePrevious, bool overwriteManual) {
     modeling::ModelPatch patch;
     patch.expectedRevision = expectedRevision;
     // Allocate sketch IDs on a private copy; the final patch applies atomically.
     auto staging = core;
     if (replacePrevious) {
+        for (const auto& feature : core.features()) {
+            if (feature.reconstructed && feature.manuallyEdited && !overwriteManual)
+                return {false, core.revision(), {}, "Manually edited CAD features are protected; explicit replacement is required"};
+        }
         // Remove only this workflow's features, in dependency order. Authored
         // dependents make replacement fail atomically rather than being deleted.
         const auto features = core.features();

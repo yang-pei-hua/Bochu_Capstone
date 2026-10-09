@@ -92,6 +92,47 @@ Pinned URLs and SHA-256 values live in
 
 ## Client architecture
 
+Select a Box, Through Hole or Cylinder in **CAD 特征 → Features** to edit its
+dimensions in **Properties → 特征**. Box dimensions use its local X/Y/Z axes:
+the center anchor resizes symmetrically, while a fixed face permits only its
+normal dimension. **在视口选择参照面 / 中心** displays the selected primitive's
+six colored semantic faces and a yellow center marker, even inside fused geometry.
+Rotate the view to pick a face, or choose it from the anchor list; Esc cancels picking.
+Cylinder height supports fixed base, top or center; its radius remains concentric.
+Through-hole diameter edits preserve the world-space axis. Other features retain
+their model coordinates; automatic attachment or edge-distance constraints are not
+introduced by resizing.
+
+**应用** commits one atomic CAD transaction; **取消** restores pending fields.
+**Edit → 撤销 CAD 编辑 / 重做 CAD 编辑** undo/redo successful CAD changes (up to
+50 undo steps per session). Failed commands/rebuilds retain both parameters and
+geometry, and stale edits cannot overwrite a newer revision. `.pcad` retains the
+committed dimensions, anchors and manual-edit protection, but not undo stacks.
+Template-triggered reconstruction pauses when manually edited reconstructed
+features exist. Explicit **Reconstruct CAD** asks before replacing them; results
+started before a new edit or undo are discarded. STEP import and project replacement
+clear CAD undo history; imported STEP geometry has no parametric feature editor.
+
+Planar picks on the current parametric Box and Cylinder attach sketches to
+`FeatureId + FaceRole` (six box faces and cylinder base/top). The core resolves
+support planes from the owner's current parameters; dependent sketches and their
+extrusions/cuts follow resizing, safe deletion reports the entire dependency
+chain, and cascade removes it. The preview uses the same resolver. A pick must
+match the outward plane and finite primitive bounds; ambiguous coplanar owners
+and imported STEP faces remain fixed planes, explicitly reported in the status.
+These are source-feature support planes, not persistent IDs of arbitrary faces
+created by boolean operations. Existing fixed-plane sketches remain fixed.
+
+Display placement applies equally to bodies, sketches and datum planes. Picking
+and drawing remove that placement before creating CAD data, so display rotation
+and nonuniform scale do not change model dimensions.
+
+The Scene tree lists the current model, viewport camera and point cloud. Right-click
+a model or point cloud to hide/show it or delete it from the project. Hiding preserves
+its data; deleting a model clears its feature history, and deleting a point cloud clears
+its observations and annotations. Source files are preserved. Empty asset leaves are
+omitted, and importing or creating new assets restores their entries.
+
 `src/app/MainWindow` is the composition root: it creates the widgets and command
 controllers, lays out docks/menus/toolbars, connects scene navigation and camera
 display controls, and presents shared logs and status messages. Editing state
@@ -275,7 +316,7 @@ successful open resets the sketch session and point edit undo. Save requires a
 feature history that can rebuild; fix invalid features before saving.
 
 `ProjectStore` stages assets in a temporary directory and writes through
-`QSaveFile`, so a failed save preserves the previous file. The version 1 archive
+`QSaveFile`, so a failed save preserves the previous file. The version 2 archive (with version 1 read compatibility)
 contains an 8-byte `PCADPRJ1` signature, a big-endian 32-bit JSON manifest length,
 the manifest, then its ordered assets. Asset sizes and SHA-256 hashes are checked
 before decoding; unknown versions, truncated data, invalid geometry/history or
@@ -408,9 +449,9 @@ across the interactive `captures/` and `reconstructions/` roots.
 
 ## Deferred work
 
-- Interactive sketching, face picking, and SolidWorks-style mouse and keyboard
-  mapping
-- Undo/redo and a persistent feature tree with in-place editing
+- Stable naming of arbitrary boolean-result faces and references to trimmed
+  boundaries; broader feature parameter editing and geometric constraints
+- Cross-session undo history and general project-schema migrations
 - Real OBJ/PLY mesh parsing
 - Point-cloud meshing, CAD alignment, and AI editing
 - Production scene graph, selection, task progress, FPS, and mesh stats

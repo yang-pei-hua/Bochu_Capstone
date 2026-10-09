@@ -3,6 +3,7 @@
 #include "core/CameraController.h"
 #include "core/PointCloudDocument.h"
 #include "rendering/BodyActor.h"
+#include "rendering/BoxReferenceActor.h"
 #include "rendering/DatumPlaneActor.h"
 #include "rendering/PointCloudActor.h"
 #include "rendering/SketchActor.h"
@@ -15,6 +16,7 @@
 #include <QVTKOpenGLNativeWidget.h>
 
 #include <vtkSmartPointer.h>
+#include <TopoDS_Shape.hxx>
 
 #include <optional>
 #include <string>
@@ -57,9 +59,15 @@ public:
     void setBodyShape(const TopoDS_Shape& shape);
     void clearBody();
     bool hasBody() const noexcept;
+    const TopoDS_Shape& displayedBody() const { return m_displayedBody; }
+    bool pickedBodyPlane(int faceId, modeling::Plane3d& plane, modeling::Vec3& point) const;
+    bool objectVisible() const { return m_bodyActor.presentation().visible; }
     // Imported/replaced bodies may change without a feature-history command.
     quint64 bodyRevision() const noexcept { return m_bodyRevision; }
     void renderNow();
+    bool beginBoxReferenceSelection(const modeling::BoxPrimitiveParams& box);
+    void endBoxReferenceSelection();
+    bool boxReferenceSelectionActive() const { return m_referenceSelection; }
 
     // Mirrors the sketch that is currently open in the feature graph, on the
     // plane the core will build it on. The viewer only consumes the sketch and
@@ -160,6 +168,11 @@ public slots:
     void setPointCloudPointSize(double size);
 
 signals:
+    void boxReferencePicked(int anchor);
+    void boxReferenceSelectionCancelled();
+    void sketchInteractionChanged(bool enabled);
+    void objectVisibilityChanged(bool visible);
+    void pointCloudVisibilityChanged(bool visible);
     // Native geometry publication; consumers retain their own OCCT handle.
     void bodyShapeChanged(const TopoDS_Shape& shape);
     void pointCloudSelectionChanged();
@@ -171,7 +184,7 @@ signals:
     // to survive whatever the panels think the pose should be.
     void cameraPanned();
 
-    // Body face under the cursor, with its exact plane when that face is
+    // Body face under the cursor, with its exact model-space plane when it is
     // planar. Only emitted while sketch interaction is off.
     void facePicked(int faceId, bool planar, const sketchapp::PlaneFrame& plane);
     void emptyPicked();
@@ -220,8 +233,14 @@ private:
 
     vtkSmartPointer<vtkGenericOpenGLRenderWindow> m_renderWindow;
     vtkSmartPointer<vtkRenderer> m_renderer;
+    vtkSmartPointer<vtkRenderer> m_referenceRenderer;
+    BoxReferenceActor m_boxReferenceActor;
+    bool m_referenceSelection = false;
     vtkSmartPointer<SketchInteractorStyle> m_interactorStyle;
     BodyActor m_bodyActor;
+    TopoDS_Shape m_displayedBody;
+    int m_pickedFaceId = -1;
+    modeling::Vec3 m_pickedModelPoint;
     QString m_bodyTexturePath;
     quint64 m_bodyRevision = 0;
     PointCloudActor m_pointCloudActor;

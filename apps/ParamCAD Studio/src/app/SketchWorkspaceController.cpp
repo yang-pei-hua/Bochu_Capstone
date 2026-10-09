@@ -8,6 +8,7 @@
 #include "ui/viewport/VTKViewer.h"
 
 #include <modeling/SketchValidation.h>
+#include <modeling/SemanticFaces.h>
 
 #include <QAction>
 #include <QMessageBox>
@@ -75,6 +76,8 @@ void SketchWorkspaceController::connectUi()
 
 void SketchWorkspaceController::onModelRebuilt()
 {
+    // A selected transient face belongs to the previous body revision.
+    clearPendingSelection();
     m_ui.viewer->setBodyShape(m_modelingController->bodyShape());
     m_ui.viewer->renderNow();
 
@@ -146,7 +149,7 @@ void SketchWorkspaceController::onModelError(const QString& message)
     m_ui.propertyPanel->featureDetailsPanel()->setFeature(m_modelingController->features(),
                                                         m_ui.modelingPanel->selectedFeatureId());
     m_ui.modelingPanel->setStatusText(message);
-    emit statusTextChanged(workspaceTr("Ready | Model: None | Camera: %1")
+    emit statusTextChanged(workspaceTr("Ready | Model unchanged | Camera: %1")
                                .arg(m_ui.viewer->cameraParameters().parallelProjection
                                         ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
 }
@@ -200,9 +203,19 @@ void SketchWorkspaceController::onFacePicked(int faceId, bool planar, const sket
         return;
     }
 
-    // The face is captured as an explicit world-space plane, so the sketch works
-    // on this face whatever its orientation is - not only on XY/YZ/XZ.
+    // Preserve a semantic owner when the displayed body is the current model.
+    // Imported and ambiguous faces remain explicit planes, with a visible note.
     m_pendingSketchPlane = sketchapp::plane3dOf(plane);
+    modeling::Plane3d pickedPlane;
+    modeling::Vec3 pickedPoint;
+    std::string referenceError;
+    const auto& body = m_modelingController->bodyShape();
+    if (!body.IsNull() && m_ui.viewer->displayedBody().IsSame(body)
+        && m_ui.viewer->pickedBodyPlane(faceId,pickedPlane,pickedPoint)) {
+        if (const auto reference = modeling::identifyPrimitiveFace(
+                m_modelingController->features(),pickedPlane,pickedPoint,referenceError))
+            m_pendingSketchPlane = *reference;
+    }
     m_pendingFaceId = faceId;
     m_ui.viewer->clearDatumPlaneHighlight();
     m_ui.viewer->highlightFace(faceId);
@@ -210,6 +223,11 @@ void SketchWorkspaceController::onFacePicked(int faceId, bool planar, const sket
     emit statusMessage(
         workspaceTr("Face %1 (planar) selected - press New Sketch to draw on it").arg(faceId), 4000);
     emit logInfo(workspaceTr("Face %1 selected as sketch plane").arg(faceId));
+    if (const auto* reference = std::get_if<modeling::FaceReference>(&*m_pendingSketchPlane))
+        emit statusMessage(workspaceTr("已关联特征 #%1 的 %2；草图将随上游尺寸更新。")
+            .arg(reference->ownerFeature).arg(QString::fromLatin1(modeling::faceRoleName(reference->role))),4000);
+    else
+        emit statusMessage(workspaceTr("已选择固定平面；此面未关联参数特征，不会随上游尺寸移动。"),4000);
 }
 
 void SketchWorkspaceController::onEmptyPicked()
@@ -231,6 +249,9 @@ void SketchWorkspaceController::resetForProject()
     clearPendingSelection();
     pushSketchState();
     m_ui.viewer->clearSketch();
+    m_ui.sketchPanel->clearSketch();
+    m_ui.propertyPanel->sketchEntityPanel()->setEntity(nullptr);
+    m_ui.propertyPanel->showSketchEntityPanel(false);
 }
 
 void SketchWorkspaceController::onNewSketchRequested()

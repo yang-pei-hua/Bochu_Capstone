@@ -1,4 +1,5 @@
 #include "app/ModelingController.h"
+#include <modeling/PrimitiveEditing.h>
 
 #include <modeling/FeatureParams.h>
 #include <modeling/Sketch.h>
@@ -115,6 +116,7 @@ bool ModelingController::commitReconstructedBox(const reconstruction::BoxCandida
 
     // The patch carries rebuild = true, so the document is up to date as soon
     // as it reports success; the UI follows from that alone.
+    const auto before = *m_core;
     const modeling::ModelPatchResult result =
         reconstruction::commitBoxCandidate(candidate, *m_core);
     if (!result.success) {
@@ -124,21 +126,25 @@ bool ModelingController::commitReconstructedBox(const reconstruction::BoxCandida
     }
 
     m_lastError.clear();
+    recordHistory(before);
     emit modelRebuilt();
     return true;
 }
 
-bool ModelingController::commitReconstructedCompound(const reconstruction::CompoundCandidate& candidate)
+bool ModelingController::commitReconstructedCompound(const reconstruction::CompoundCandidate& candidate,
+                                                     bool overwriteManual)
 {
     if (!m_core) return false;
+    const auto before = *m_core;
     const auto result = reconstruction::commitCompoundCandidate(candidate, *m_core,
-        m_core->revision(), true);
+        m_core->revision(), true, overwriteManual);
     if (!result.success) {
         m_lastError = QString::fromStdString(result.error);
         emit modelError(m_lastError);
         return false;
     }
     m_lastError.clear();
+    recordHistory(before);
     emit modelRebuilt();
     return true;
 }
@@ -150,6 +156,7 @@ bool ModelingController::commitReconstructedBoxWithThroughHoles(
         return false;
     }
 
+    const auto before = *m_core;
     const modeling::ModelPatchResult result =
         reconstruction::commitBoxWithThroughHolesCandidate(candidate, *m_core);
     if (!result.success) {
@@ -159,6 +166,7 @@ bool ModelingController::commitReconstructedBoxWithThroughHoles(
     }
 
     m_lastError.clear();
+    recordHistory(before);
     emit modelRebuilt();
     return true;
 }
@@ -175,7 +183,7 @@ bool ModelingController::removeFeature(modeling::FeatureId id, bool cascade)
 std::vector<modeling::FeatureId> ModelingController::dependentsOf(
     modeling::FeatureId id) const
 {
-    return m_core ? m_core->document().dependentsOf(id)
+    return m_core ? m_core->document().dependentsOf(id, true)
                   : std::vector<modeling::FeatureId>{};
 }
 
@@ -222,6 +230,7 @@ const QString& ModelingController::lastError() const noexcept
 void ModelingController::adoptProject(modeling::ModelingCore&& prepared)
 {
     m_core->adoptPrepared(std::move(prepared));
+    clearHistory();
     m_lastError.clear();
     emit modelRebuilt();
 }
@@ -241,11 +250,29 @@ bool ModelingController::execute(const modeling::ModelCommand& command,
                                  modeling::FeatureId* createdId,
                                  modeling::SketchEntityId* createdEntityId)
 {
-    const modeling::ModelResult result = m_core->execute(command);
+    // Stage ID allocation; actual mutation and rebuild commit atomically.
+    auto staging = *m_core;
+    const modeling::ModelResult result = staging.execute(command);
     if (!result.success) {
         m_lastError = QString::fromStdString(result.error);
         return false;
     }
+    modeling::ModelPatch patch;
+    patch.expectedRevision = m_core->revision();
+    patch.commands.push_back(command);
+    const auto* changed = staging.document().findFeature(result.featureId);
+    if (changed && changed->reconstructed
+        && !std::holds_alternative<modeling::AddFeatureCommand>(command)
+        && !std::holds_alternative<modeling::SetFeatureSuppressedCommand>(command)) {
+        patch.commands.push_back(modeling::EditFeatureCommand{changed->id, changed->params, true, changed->resizeAnchor});
+    }
+    const auto before = *m_core;
+    const auto applied = m_core->apply(patch);
+    if (!applied.success) {
+        m_lastError = QString::fromStdString(applied.error);
+        return false;
+    }
+    recordHistory(before);
     if (createdId != nullptr) {
         *createdId = result.featureId;
     }
@@ -257,18 +284,73 @@ bool ModelingController::execute(const modeling::ModelCommand& command,
 
 bool ModelingController::rebuildAndPublish()
 {
-    const bool rebuilt = m_core->document().rebuild();
-    if (rebuilt) {
-        m_lastError.clear();
-    } else {
-        m_lastError = QString::fromStdString(m_core->document().lastError());
-    }
-
-    // Publish even after a failed rebuild: the core keeps the last body that
-    // rebuilt successfully, and the viewer shows exactly that shape.
+    m_lastError.clear();
     emit modelRebuilt();
-    if (!rebuilt) {
-        emit modelError(m_lastError);
+    return true;
+}
+
+void ModelingController::recordHistory(modeling::ModelingCore before)
+{
+    if (m_undo.size() >= 50) m_undo.erase(m_undo.begin());
+    m_undo.push_back(std::move(before));
+    m_redo.clear();
+    emit historyChanged();
+}
+
+void ModelingController::clearHistory()
+{
+    m_undo.clear(); m_redo.clear();
+    emit historyChanged();
+}
+
+bool ModelingController::undo()
+{
+    if (!canUndo()) return false;
+    m_redo.push_back(*m_core);
+    m_core->adoptPrepared(std::move(m_undo.back()));
+    m_undo.pop_back(); m_lastError.clear();
+    emit modelRebuilt(); emit historyChanged();
+    return true;
+}
+
+bool ModelingController::redo()
+{
+    if (!canRedo()) return false;
+    m_undo.push_back(*m_core);
+    m_core->adoptPrepared(std::move(m_redo.back()));
+    m_redo.pop_back(); m_lastError.clear();
+    emit modelRebuilt(); emit historyChanged();
+    return true;
+}
+
+bool ModelingController::hasProtectedReconstruction() const
+{
+    for (const auto& f : features()) if (f.reconstructed && f.manuallyEdited) return true;
+    return false;
+}
+
+bool ModelingController::editPrimitive(modeling::FeatureId id, const std::array<double,3>& values,
+                                      modeling::ResizeAnchor anchor,
+                                      modeling::ModelRevision expectedRevision)
+{
+    const auto* feature = m_core->document().findFeature(id);
+    modeling::FeatureParams params;
+    std::string error;
+    if (expectedRevision != revision()) m_lastError = tr("模型已变化，请重新选择特征后编辑。");
+    else if (!feature || feature->suppressed) m_lastError = tr("特征不存在或已抑制。");
+    else if (!modeling::adjustedPrimitive(feature->params, values, anchor, params, error))
+        m_lastError = QString::fromStdString(error);
+    else {
+        std::array<double,3> current{1,1,1};
+        size_t count=0;
+        if (const auto* box=std::get_if<modeling::BoxPrimitiveParams>(&feature->params)) { current={box->sizeX,box->sizeY,box->sizeZ}; count=3; }
+        else if (const auto* hole=std::get_if<modeling::ThroughHolePrimitiveParams>(&feature->params)) { current[0]=hole->radius*2; count=1; }
+        else if (const auto* cylinder=std::get_if<modeling::CylinderPrimitiveParams>(&feature->params)) { current={cylinder->radius,cylinder->height,1}; count=2; }
+        bool unchanged=feature->resizeAnchor==anchor;
+        for (size_t i=0;i<count;++i) unchanged=unchanged && current[i]==values[i];
+        if (unchanged) { m_lastError.clear(); return true; }
+        if (execute(modeling::EditFeatureCommand{id,params,true,anchor})) return rebuildAndPublish();
     }
-    return rebuilt;
+    emit modelError(m_lastError);
+    return false;
 }

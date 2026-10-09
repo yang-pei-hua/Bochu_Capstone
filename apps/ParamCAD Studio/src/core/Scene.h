@@ -9,7 +9,6 @@ enum class SceneNodeType
     Group,
     Model,
     Camera,
-    Light,
     PointCloud
 };
 struct SceneNode

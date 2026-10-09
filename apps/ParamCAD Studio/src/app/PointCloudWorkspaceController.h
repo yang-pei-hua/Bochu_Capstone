@@ -63,6 +63,7 @@ private:
     QThread* m_analysisThread = nullptr;
     CadReconstructionTask* m_cadTask;
     bool m_startingCad = false;
+    bool m_cadOverwriteManual = false;
     bool m_analyseAfterCad = false;
     bool m_guidedQueued = false;
     quint64 m_cadCloudRevision = 0;

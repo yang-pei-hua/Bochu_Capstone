@@ -16,7 +16,10 @@ derived from that history by `PartDocument::rebuild()`.
 - Extrusion supports NewBody, Join, Cut, and Intersect. Multiple NewBody
   features are returned as a compound through `bodyShape()`.
 - Datum, offset-datum, explicit `Plane3d`, and Extrude StartFace/EndFace sketch
-  references. An explicit plane lets a caller sketch on an arbitrary planar face
+  references, Box -X/+X/-Y/+Y/-Z/+Z, and Cylinder base/top support planes.
+  `SemanticFaces.h` resolves primitive support planes from current parameters
+  and exposes the shared sketch-plane resolver. Face-reference dependencies
+  participate in safe/cascade deletion. An explicit plane lets a caller sketch on an arbitrary planar face
   of the current body; it is a world-space snapshot and does not follow that
   face when an upstream feature changes.
 - Feature suppression commands, dependency queries, safe/cascade removal, and
@@ -29,9 +32,11 @@ derived from that history by `PartDocument::rebuild()`.
 - Revision-checked, atomic `ModelPatch` application for automated producers;
   failed commands or rebuilds restore the previous document state.
 
-Stable naming of arbitrary boolean-result faces and versioned Feature Graph
-serialization are intentionally not part of this revision; both require a
-separate persistent-schema design.
+Stable naming of arbitrary boolean-result faces remains outside this revision.
+Primitive roles refer to source support planes, including after downstream
+booleans; they do not guarantee a surviving bounded face. The client persists
+Feature History in `.pcad` version 2 and can read version 1. The core itself
+remains independent of the client archive format and JSON libraries.
 
 ## Build
 

@@ -16,6 +16,8 @@ find_package(OpenCASCADE REQUIRED COMPONENTS
 add_library(CadModelCore
     src/ModelingCore.cpp
     src/PartDocument.cpp
+    src/PrimitiveEditing.cpp
+    src/SemanticFaces.cpp
     src/RebuildEngine.cpp
     src/SketchValidation.cpp
     src/StepExporter.cpp

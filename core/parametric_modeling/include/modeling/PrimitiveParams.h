@@ -6,6 +6,8 @@
 
 namespace modeling {
 
+enum class ResizeAnchor { Center, XMin, XMax, YMin, YMax, ZMin, ZMax, Base, Top };
+
 // A world-space right-handed frame. The modeling core normalizes the axes and
 // rejects degenerate or non-orthogonal input before creating derived geometry.
 struct Pose3d {

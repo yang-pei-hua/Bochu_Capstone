@@ -22,6 +22,7 @@ class ProjectController;
 class PointCloudDocument;
 class PointCloudWorkspaceController;
 class SketchWorkspaceController;
+class FeatureEditingController;
 
 // Composition root: window layout, navigation and application feedback.
 // Each workspace owns its editing state and connects its own panel intents.
@@ -73,6 +74,9 @@ private:
     QLabel* m_statusLabel = nullptr;
 
     SketchWorkspaceController* m_sketchWorkspace = nullptr;
+    FeatureEditingController* m_featureEditing = nullptr;
+    QAction* m_undoCadAction = nullptr;
+    QAction* m_redoCadAction = nullptr;
     PointCloudWorkspaceController* m_pointCloudWorkspace = nullptr;
     CaptureWorkspaceController* m_captureWorkspace = nullptr;
     ModelViewController* m_modelViewController = nullptr;

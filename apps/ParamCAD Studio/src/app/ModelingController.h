@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <vector>
+#include <array>
 
 // Front-end orchestration layer. It turns UI intents into modeling commands and
 // publishes the resulting body; it contains no geometry code of its own.
@@ -53,7 +54,8 @@ public:
     // author of the same feature graph, so it enters through the core's atomic
     // patch boundary rather than through the sketch commands.
     bool commitReconstructedBox(const reconstruction::BoxCandidate& candidate);
-    bool commitReconstructedCompound(const reconstruction::CompoundCandidate& candidate);
+    bool commitReconstructedCompound(const reconstruction::CompoundCandidate& candidate,
+                                     bool overwriteManual = false);
     bool commitReconstructedBoxWithThroughHoles(
         const reconstruction::BoxWithThroughHolesCandidate& candidate);
 
@@ -73,10 +75,19 @@ public:
     modeling::ModelRevision revision() const noexcept;
     const QString& lastError() const noexcept;
     void adoptProject(modeling::ModelingCore&& prepared);
+    bool editPrimitive(modeling::FeatureId id, const std::array<double,3>& values,
+                       modeling::ResizeAnchor anchor, modeling::ModelRevision expectedRevision);
+    bool undo();
+    bool redo();
+    bool canUndo() const { return !m_undo.empty(); }
+    bool canRedo() const { return !m_redo.empty(); }
+    void clearHistory();
+    bool hasProtectedReconstruction() const;
 
 signals:
     void modelRebuilt();
     void modelError(const QString& message);
+    void historyChanged();
 
 private:
     bool addFeatureCommand(const modeling::FeatureParams& params,
@@ -85,7 +96,9 @@ private:
                  modeling::FeatureId* createdId = nullptr,
                  modeling::SketchEntityId* createdEntityId = nullptr);
     bool rebuildAndPublish();
+    void recordHistory(modeling::ModelingCore before);
 
     std::unique_ptr<modeling::ModelingCore> m_core;
     QString m_lastError;
+    std::vector<modeling::ModelingCore> m_undo, m_redo;
 };

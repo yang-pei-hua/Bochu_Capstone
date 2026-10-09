@@ -7,8 +7,6 @@ Scene::Scene()
           {QStringLiteral("model"), QStringLiteral("Model"), SceneNodeType::Model, QStringLiteral("models")},
           {QStringLiteral("cameras"), QStringLiteral("Cameras"), SceneNodeType::Group, QStringLiteral("scene")},
           {QStringLiteral("camera-01"), QStringLiteral("Camera01"), SceneNodeType::Camera, QStringLiteral("cameras")},
-          {QStringLiteral("lights"), QStringLiteral("Lights"), SceneNodeType::Group, QStringLiteral("scene")},
-          {QStringLiteral("light-01"), QStringLiteral("Light01"), SceneNodeType::Light, QStringLiteral("lights")},
           {QStringLiteral("point-clouds"), QStringLiteral("Point Clouds"), SceneNodeType::Group, QStringLiteral("scene")},
           {QStringLiteral("point-cloud-01"), QStringLiteral("PointCloud"), SceneNodeType::PointCloud, QStringLiteral("point-clouds")}}
 {

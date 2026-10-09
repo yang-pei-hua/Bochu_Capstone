@@ -1,4 +1,5 @@
 #include "modeling/PartDocument.h"
+#include "modeling/PrimitiveEditing.h"
 
 #include "RebuildEngine.h"
 
@@ -169,6 +170,8 @@ FeatureId PartDocument::addFeature(const FeatureParams& params, bool reconstruct
         true,
         {},
         reconstructed,
+        false,
+        type == FeatureType::CylinderPrimitive ? ResizeAnchor::Base : ResizeAnchor::Center,
     });
     lastError_.clear();
     return id;
@@ -184,7 +187,9 @@ bool PartDocument::restoreFeatures(const std::vector<Feature>& features) {
             return false;
         }
         std::string error;
-        if (!validateFeatureParams(feature.params, error)) {
+        if (!validateFeatureParams(feature.params, error)
+            || !validResizeAnchor(feature.params, feature.resizeAnchor)) {
+            if (error.empty()) error = "Invalid feature resize anchor";
             lastError_ = error;
             return false;
         }
@@ -225,7 +230,8 @@ bool PartDocument::restoreFeatures(const std::vector<Feature>& features) {
     return true;
 }
 
-bool PartDocument::editFeature(FeatureId id, const FeatureParams& params) {
+bool PartDocument::editFeature(FeatureId id, const FeatureParams& params, bool markManuallyEdited,
+                               std::optional<ResizeAnchor> anchor) {
     auto iterator = std::find_if(
         features_.begin(), features_.end(),
         [id](const Feature& feature) { return feature.id == id; });
@@ -243,7 +249,13 @@ bool PartDocument::editFeature(FeatureId id, const FeatureParams& params) {
         return false;
     }
 
+    if (anchor && !validResizeAnchor(params, *anchor)) {
+        lastError_ = "Invalid resize anchor for this feature";
+        return false;
+    }
     iterator->params = params;
+    iterator->manuallyEdited = iterator->manuallyEdited || markManuallyEdited;
+    if (anchor) iterator->resizeAnchor = *anchor;
     iterator->valid = true;
     iterator->errorText.clear();
     lastError_.clear();
@@ -401,7 +413,20 @@ bool PartDocument::removeSketchEntity(FeatureId sketchId, SketchEntityId entityI
     return true;
 }
 
-std::vector<FeatureId> PartDocument::dependentsOf(FeatureId id) const {
+std::vector<FeatureId> PartDocument::dependentsOf(FeatureId id, bool transitive) const {
+    if (transitive) {
+        std::unordered_set<FeatureId> visited{id};
+        std::vector<FeatureId> pending{id};
+        while (!pending.empty()) {
+            const auto upstream = pending.back(); pending.pop_back();
+            for (const auto dependent : dependentsOf(upstream))
+                if (visited.insert(dependent).second) pending.push_back(dependent);
+        }
+        std::vector<FeatureId> result;
+        for (const auto& feature : features_)
+            if (feature.id != id && visited.count(feature.id)) result.push_back(feature.id);
+        return result;
+    }
     std::vector<FeatureId> result;
     for (const Feature& feature : features_) {
         if (dependsOn(feature, id)) {

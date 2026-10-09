@@ -97,7 +97,7 @@ SketchPlaneReference planeFromJson(const QJsonObject& json)
             integer(QJsonValue(json["hint"].toDouble() + 1), std::numeric_limits<int>::max() - 1) -
             1;
         return FaceReference{id(json["owner"]),
-                             static_cast<FaceRole>(integer(json["role"], 2)),
+                             static_cast<FaceRole>(integer(json["role"], static_cast<int>(FaceRole::CylinderTop))),
                              vec(v, 0),
                              vec(v, 3),
                              v[6],
@@ -241,6 +241,8 @@ QJsonArray FeatureCodec::encode(const std::vector<modeling::Feature>& features)
                                   {"name", QString::fromStdString(feature.name)},
                                   {"suppressed", feature.suppressed},
                                   {"reconstructed", feature.reconstructed},
+                                  {"manuallyEdited", feature.manuallyEdited},
+                                  {"resizeAnchor", static_cast<int>(feature.resizeAnchor)},
                                   {"params", paramsJson(feature.params)}});
     return result;
 }
@@ -254,13 +256,18 @@ bool FeatureCodec::decode(const QJsonArray& json, std::vector<modeling::Feature>
             const auto feature = item.toObject();
             check(feature["params"].isObject() && feature["name"].isString());
             auto params = paramsFromJson(feature["params"].toObject());
+            const auto anchor = feature.contains("resizeAnchor")
+                ? static_cast<ResizeAnchor>(integer(feature["resizeAnchor"],8))
+                : std::holds_alternative<CylinderPrimitiveParams>(params) ? ResizeAnchor::Base : ResizeAnchor::Center;
             result.push_back({id(feature["id"]),
                               feature["name"].toString().toStdString(),
                               modeling::featureTypeOf(params),
                               std::move(params),
                               boolean(feature["suppressed"]),
                               true,
-                              {}, feature.contains("reconstructed") ? boolean(feature["reconstructed"]) : false});
+                              {}, feature.contains("reconstructed") ? boolean(feature["reconstructed"]) : false,
+                              feature.contains("manuallyEdited") ? boolean(feature["manuallyEdited"]) : false,
+                              anchor});
         }
         features = std::move(result);
         error.clear();
