@@ -67,6 +67,28 @@ double diagonalOf(const reconstruction::PointStore& cloud)
     return std::sqrt(x * x + y * y + z * z);
 }
 
+double robustDiagonalOf(const std::vector<std::array<float, 3>>& positions)
+{
+    std::array<std::vector<float>, 3> coordinates;
+    for (auto& axis : coordinates) axis.reserve(positions.size());
+    for (const auto& point : positions) {
+        if (!finitePoint(point)) continue;
+        for (int axis = 0; axis < 3; ++axis) coordinates[axis].push_back(point[axis]);
+    }
+    if (coordinates[0].size() < 100) return diagonalOf(positions);
+    double squared = 0;
+    for (auto& axis : coordinates) {
+        const auto trim = axis.size() / 100;
+        std::nth_element(axis.begin(), axis.begin() + trim, axis.end());
+        const double lower = axis[trim];
+        std::nth_element(axis.begin(), axis.end() - trim - 1, axis.end());
+        const double extent = axis[axis.size() - trim - 1] - lower;
+        squared += extent * extent;
+    }
+    const double diagonal = std::sqrt(squared);
+    return diagonal > 0 ? diagonal : diagonalOf(positions);
+}
+
 }  // namespace
 
 reconstruction::PointStore PointCloudAdapter::toPointStore(
@@ -114,7 +136,9 @@ reconstruction::PointCloudPreprocessingOptions
 PointCloudAdapter::preprocessingOptionsFor(const PlyCloud& cloud)
 {
     reconstruction::PointCloudPreprocessingOptions options;
-    const double diagonal = diagonalOf(cloud.positions);
+    // A few distant observations must not collapse the part into a handful
+    // of oversized voxels before statistical filtering can remove them.
+    const double diagonal = robustDiagonalOf(cloud.positions);
     if (diagonal > 0.0) {
         // At most roughly 200 samples span the bounding-box diagonal before
         // surface occupancy is considered. This keeps dense COLMAP clouds

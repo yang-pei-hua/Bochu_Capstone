@@ -555,6 +555,18 @@ void fit(const QStringList &args, QJsonObject &report) {
                     {"voxel_duplicates_removed", double(pre.removedByVoxel)},
                     {"statistical_outliers_removed", double(pre.removedAsOutliers)},
                     {"normals_estimated", double(pre.normalsEstimated)},
+                    {"input_normals", double(pre.normalsFromInput)},
+                    {"estimated_normals_oriented", double(pre.estimatedNormalsOriented)},
+                    {"normals_without_orientation", double(pre.normalsWithoutOrientation)},
+                    {"degenerate_neighborhoods", double(pre.degenerateNeighborhoods)},
+                    {"outlier_median_neighbor_distance_mm", pre.outlierMedianNeighborDistance},
+                    {"outlier_distance_threshold_mm", pre.outlierDistanceThreshold},
+                    {"outlier_neighbor_count", double(preprocessingOptions.outlierNeighborCount)},
+                    {"normal_neighbor_count", double(preprocessingOptions.normalNeighborCount)},
+                    {"outlier_robust_median_multiplier", preprocessingOptions.outlierRobustMedianMultiplier},
+                    {"normal_orientation_minimum_alignment", preprocessingOptions.normalOrientationMinimumAlignment},
+                    {"normal_orientation_maximum_tangent_deviation", preprocessingOptions.normalOrientationMaximumTangentDeviation},
+                    {"normal_orientation_maximum_spacing_ratio", preprocessingOptions.normalOrientationMaximumSpacingRatio},
                     {"voxel_size", preprocessingOptions.voxelSize},
                     {"scale_to_mm", pre.appliedScaleToMillimeters}};
     auto planes = PointCloudAdapter::planeOptionsFor(processed);

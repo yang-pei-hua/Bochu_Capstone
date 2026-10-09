@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <queue>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -48,7 +49,7 @@ public:
         std::vector<std::pair<double, std::size_t>> result;
         result.reserve(heap.size());
         while (!heap.empty()) {
-            result.push_back(heap.top());
+            result.emplace_back(std::get<0>(heap.top()), std::get<2>(heap.top()));
             heap.pop();
         }
         std::reverse(result.begin(), result.end());
@@ -63,7 +64,7 @@ private:
         int right = -1;
     };
 
-    using Heap = std::priority_queue<std::pair<double, std::size_t>>;
+    using Heap = std::priority_queue<std::tuple<double, PointId, std::size_t>>;
 
     int build(std::size_t begin, std::size_t end, int depth) {
         if (begin >= end) {
@@ -76,8 +77,8 @@ private:
             order_.begin() + static_cast<std::ptrdiff_t>(middle),
             order_.begin() + static_cast<std::ptrdiff_t>(end),
             [this, axis](std::size_t left, std::size_t right) {
-                return coordinate(points_[left].position, axis) <
-                    coordinate(points_[right].position, axis);
+                return std::make_pair(coordinate(points_[left].position, axis), points_[left].id) <
+                    std::make_pair(coordinate(points_[right].position, axis), points_[right].id);
             });
         const int nodeIndex = static_cast<int>(nodes_.size());
         nodes_.push_back(Node{order_[middle], axis, -1, -1});
@@ -101,11 +102,12 @@ private:
         const Vec3& point = points_[node.pointIndex].position;
         if (node.pointIndex != excludedIndex) {
             const double distance = squaredDistance(query, point);
+            const auto candidate = std::make_tuple(distance, points_[node.pointIndex].id, node.pointIndex);
             if (heap.size() < count) {
-                heap.emplace(distance, node.pointIndex);
-            } else if (distance < heap.top().first) {
+                heap.push(candidate);
+            } else if (candidate < heap.top()) {
                 heap.pop();
-                heap.emplace(distance, node.pointIndex);
+                heap.push(candidate);
             }
         }
 
@@ -114,7 +116,7 @@ private:
         const int nearChild = delta < 0.0 ? node.left : node.right;
         const int farChild = delta < 0.0 ? node.right : node.left;
         search(nearChild, query, excludedIndex, count, heap);
-        if (heap.size() < count || delta * delta < heap.top().first) {
+        if (heap.size() < count || delta * delta <= std::get<0>(heap.top())) {
             search(farChild, query, excludedIndex, count, heap);
         }
     }
@@ -168,10 +170,23 @@ std::vector<PointSample> voxelDownsample(
             continue;
         }
         const Vec3& point = points[index].position;
+        const std::array<double, 3> cells{{std::floor(point.x / voxelSize),
+            std::floor(point.y / voxelSize), std::floor(point.z / voxelSize)}};
+        const double minimumCell = static_cast<double>(std::numeric_limits<std::int64_t>::min());
+        const double maximumCell = static_cast<double>(std::numeric_limits<std::int64_t>::max());
+        if (std::any_of(cells.begin(), cells.end(), [&](double cell) {
+                return !std::isfinite(cell) || cell < minimumCell || cell >= maximumCell;
+            })) {
+            // A robust part-scale voxel can be tiny relative to a far outlier.
+            // Keep unindexable observations for filtering instead of invoking
+            // an overflowing float-to-integer conversion or losing their IDs.
+            selected.push_back(index);
+            continue;
+        }
         const VoxelKey key{
-            static_cast<std::int64_t>(std::floor(point.x / voxelSize)),
-            static_cast<std::int64_t>(std::floor(point.y / voxelSize)),
-            static_cast<std::int64_t>(std::floor(point.z / voxelSize)),
+            static_cast<std::int64_t>(cells[0]),
+            static_cast<std::int64_t>(cells[1]),
+            static_cast<std::int64_t>(cells[2]),
         };
         const Vec3 center{
             (static_cast<double>(key.x) + 0.5) * voxelSize,
@@ -181,7 +196,9 @@ std::vector<PointSample> voxelDownsample(
         const double distance = squaredDistance(point, center);
         auto [entry, inserted] = voxels.emplace(
             key, VoxelRepresentative{index, distance});
-        if (!inserted && distance < entry->second.squaredDistanceToCenter) {
+        if (!inserted && (distance < entry->second.squaredDistanceToCenter ||
+            (distance == entry->second.squaredDistanceToCenter &&
+             points[index].id < points[entry->second.pointIndex].id))) {
             entry->second = VoxelRepresentative{index, distance};
         }
     }
@@ -235,9 +252,26 @@ std::vector<PointSample> removeOutliers(
         variance += delta * delta;
     }
     variance /= static_cast<double>(meanDistances.size());
-    const double threshold = globalMean +
+    double threshold = globalMean +
         options.outlierStandardDeviationMultiplier * std::sqrt(variance);
+    auto orderedDistances = meanDistances;
+    const auto middle = orderedDistances.begin() + orderedDistances.size() / 2;
+    std::nth_element(orderedDistances.begin(), middle, orderedDistances.end());
+    const double median = *middle;
+    std::vector<double> deviations;
+    deviations.reserve(meanDistances.size());
+    for (const double distance : meanDistances) deviations.push_back(std::abs(distance - median));
+    const auto deviationMiddle = deviations.begin() + deviations.size() / 2;
+    std::nth_element(deviations.begin(), deviationMiddle, deviations.end());
+    // Distant points inflate both mean and variance, masking less-distant
+    // outliers. A robust ceiling prevents that without repeatedly trimming
+    // legitimate sparse edges or applying a physical-unit cutoff.
+    if (median > 1.0e-12) {
+        threshold = std::min(threshold, std::max(options.outlierRobustMedianMultiplier * median,
+            median + options.outlierStandardDeviationMultiplier * 1.4826 * *deviationMiddle));
+    }
     report.outlierMeanNeighborDistance = globalMean;
+    report.outlierMedianNeighborDistance = median;
     report.outlierDistanceThreshold = threshold;
 
     std::vector<PointSample> result;
@@ -255,14 +289,7 @@ void estimateNormalsAndCurvature(
     std::vector<PointSample>& points,
     const PointCloudPreprocessingOptions& options,
     PointCloudPreprocessingReport& report) {
-    if (points.size() < 4U || options.normalNeighborCount < 3U) {
-        return;
-    }
-    const std::size_t neighborCount = std::min(
-        options.normalNeighborCount, points.size() - 1U);
-    const KdTree tree(points);
-    for (std::size_t index = 0; index < points.size(); ++index) {
-        PointSample& sample = points[index];
+    for (PointSample& sample : points) {
         if (sample.normal.has_value()) {
             try {
                 // Input normals carry outward/inward orientation needed for
@@ -273,8 +300,26 @@ void estimateNormalsAndCurvature(
                 sample.normal.reset();
             }
         }
+    }
+    if (points.size() < 4U || options.normalNeighborCount < 3U) {
+        for (const auto& sample : points)
+            if (sample.normal && !sample.normalOrientationKnown) ++report.normalsWithoutOrientation;
+        return;
+    }
+    const std::size_t neighborCount = std::min(
+        options.normalNeighborCount, points.size() - 1U);
+    const KdTree tree(points);
+    std::vector<double> spacing(points.size(), 0.0);
+    for (std::size_t index = 0; index < points.size(); ++index) {
+        PointSample& sample = points[index];
 
         const auto neighbors = tree.nearest(index, neighborCount);
+        for (const auto& neighbor : neighbors) {
+            if (neighbor.first > 1.0e-24) {
+                spacing[index] = std::sqrt(neighbor.first);
+                break;
+            }
+        }
         if (neighbors.size() < 3U) {
             continue;
         }
@@ -305,17 +350,78 @@ void estimateNormalsAndCurvature(
                 math3::symmetricEigenDecomposition(covariance);
             const double sum = eigen.values[0] + eigen.values[1] +
                 eigen.values[2];
+            // Rank-one lines and coincident samples have no surface normal,
+            // even though the eigensolver returns a valid unit eigenvector.
+            if (eigen.values[1] <= std::max(1.0e-18, eigen.values[2] * 1.0e-8)) {
+                ++report.degenerateNeighborhoods;
+                continue;
+            }
             if (sum > 1.0e-18) {
                 sample.curvature = eigen.values[0] / sum;
                 ++report.pointsWithCurvature;
             }
             if (!sample.normal.has_value() && options.estimateMissingNormals) {
                 sample.normal = eigen.vectors[0];
+                sample.normalOrientationKnown = false;
                 ++report.normalsEstimated;
             }
         } catch (const std::invalid_argument&) {
             // A coincident or collinear neighbourhood has no stable surface
             // normal. Preserve the point and leave its attributes absent.
+        }
+    }
+
+    if (std::none_of(points.begin(), points.end(), [](const PointSample& point) {
+            return point.normal && !point.normalOrientationKnown;
+        })) return;
+
+    // A multi-source shortest-path forest uses only signed input observations
+    // as roots. Edge weights prefer smooth nearby directions. Tangent tests
+    // prevent jumping across thin parallel walls or across a disconnected gap.
+    // Input signs are immutable; components without a root remain unoriented.
+    using Entry = std::tuple<double, PointId, std::size_t>;
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue;
+    std::vector<double> costs(points.size(), std::numeric_limits<double>::infinity());
+    std::vector<bool> settled(points.size(), false);
+    for (std::size_t index = 0; index < points.size(); ++index) {
+        if (points[index].normal && points[index].normalOrientationKnown) {
+            costs[index] = 0;
+            queue.emplace(0, points[index].id, index);
+        }
+    }
+    while (!queue.empty()) {
+        const auto [cost, id, index] = queue.top();
+        queue.pop();
+        (void)id;
+        if (settled[index] || cost != costs[index]) continue;
+        settled[index] = true;
+        const auto neighbors = tree.nearest(index, neighborCount);
+        for (const auto& [distanceSquared, neighbor] : neighbors) {
+            auto& target = points[neighbor];
+            if (settled[neighbor] || !target.normal || target.normalOrientationKnown) continue;
+            const auto delta = math3::subtract(target.position, points[index].position);
+            const double distance = std::sqrt(distanceSquared);
+            const double alignment = math3::dot(*points[index].normal, *target.normal);
+            if (std::abs(alignment) < options.normalOrientationMinimumAlignment || distance <= 1.0e-12 ||
+                distance > options.normalOrientationMaximumSpacingRatio * std::max(spacing[index], spacing[neighbor]) ||
+                std::abs(math3::dot(delta, *points[index].normal)) > options.normalOrientationMaximumTangentDeviation * distance ||
+                std::abs(math3::dot(delta, *target.normal)) > options.normalOrientationMaximumTangentDeviation * distance) continue;
+            const double nextCost = cost + 1.0 - std::abs(alignment) +
+                1.0e-3 * distance / std::max(spacing[index], spacing[neighbor]);
+            if (nextCost >= costs[neighbor]) continue;
+            costs[neighbor] = nextCost;
+            if (alignment < 0) target.normal = math3::scale(*target.normal, -1);
+            queue.emplace(nextCost, target.id, neighbor);
+        }
+    }
+    for (std::size_t index = 0; index < points.size(); ++index) {
+        auto& point = points[index];
+        if (!point.normal || point.normalOrientationKnown) continue;
+        if (settled[index]) {
+            point.normalOrientationKnown = true;
+            ++report.estimatedNormalsOriented;
+        } else {
+            ++report.normalsWithoutOrientation;
         }
     }
 }
@@ -334,6 +440,15 @@ bool validOptions(
     }
     if (options.estimateMissingNormals && options.normalNeighborCount < 3U) {
         error = "Normal estimation requires at least three neighbors";
+        return false;
+    }
+    if (!std::isfinite(options.outlierRobustMedianMultiplier) || options.outlierRobustMedianMultiplier < 1.0 ||
+        !std::isfinite(options.normalOrientationMinimumAlignment) ||
+        options.normalOrientationMinimumAlignment <= 0 || options.normalOrientationMinimumAlignment > 1 ||
+        !std::isfinite(options.normalOrientationMaximumTangentDeviation) ||
+        options.normalOrientationMaximumTangentDeviation < 0 || options.normalOrientationMaximumTangentDeviation >= 1 ||
+        !std::isfinite(options.normalOrientationMaximumSpacingRatio) || options.normalOrientationMaximumSpacingRatio < 1) {
+        error = "Invalid dimensionless robust filtering or normal orientation gates";
         return false;
     }
     return true;

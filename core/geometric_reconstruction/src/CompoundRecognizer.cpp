@@ -545,6 +545,14 @@ bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOp
                                 const CylinderDetectionOptions &cylinders,
                                 CompoundCandidate &output, std::string &error,
                                 const std::vector<PrimitiveEvidence>& seeds) {
+    if (std::any_of(points.points().begin(), points.points().end(), [](const PointSample& p) {
+            return p.normal && !p.normalOrientationKnown;
+        })) {
+        output = {};
+        error = "Surface normal directions lack material orientation; provide oriented normals "
+                "or additional observations for disconnected surface patches";
+        return false;
+    }
     CompoundRecognitionOptions options;
     options.distanceTolerance = planes.distanceThreshold;
     if (reconstructCompound(points, options, output, error))

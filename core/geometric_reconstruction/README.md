@@ -110,7 +110,13 @@ The compound path supports closed, millimetre-scale surfaces with outward normal
 and a shared orthogonal frame, optionally with a few planar prism faces. Complete
 independent curved primitives may have any axis direction. Normal
 orientation from the input is preserved during preprocessing. Missing-normal
-PCA estimates alone do not establish a consistent outward orientation. Partial
+PCA estimates alone do not establish a consistent outward orientation. A
+deterministic multi-source shortest-path forest propagates signs from existing
+signed observations through compatible tangent neighborhoods. Input signs are
+preserved; directions without a signed root retain `normalOrientationKnown=false`.
+`reconstructParametricSolid()` rejects unresolved orientation before material
+occupancy is evaluated. Thin walls, sharp edges and gaps can deliberately leave
+directions unresolved rather than fabricate an outward sign. Partial
 visibility, independently oriented box components, curved multi-body parts and
 fine features below the sampling/tolerance resolution remain outside this path.
 
@@ -118,16 +124,31 @@ Before detection, `preprocessPointCloud()` provides the scale-aware input path:
 
 - known metre input is converted to the modeling core's millimetres;
 - voxel downsampling retains an original representative `PointId` per voxel;
-- statistical K-nearest-neighbor filtering removes isolated observations;
-- PCA neighborhoods estimate missing normals and local curvature.
+- statistical K-nearest-neighbor filtering removes isolated observations, with
+  a median/MAD ceiling preventing distant outliers from masking closer ones;
+- PCA neighborhoods estimate missing normals and local curvature; rank-one and
+  coincident neighborhoods do not manufacture surface normals;
+- orientation gates and robust filtering ratios are explicit, dimensionless
+  preprocessing options; reports distinguish estimated, oriented and unresolved
+  normals and record the median distance and applied outlier threshold.
 
 The client preserves PLY `nx/ny/nz` attributes and reads the unit from the
 adjacent reconstruction manifest. A cloud without metric metadata requires an
 explicit user confirmation before its source units are interpreted as
 millimetres.
 
-The next steps are partial-visibility handling, consistently orienting estimated
-normals, independently oriented components and richer curved-feature semantics.
+The client derives voxel size from a 1%-trimmed coordinate range, so a small
+number of distant points cannot erase the part before outlier filtering. This
+range only chooses resolution; it does not remove source observations. Protected
+manual observations continue to survive both filters.
+
+Independent stress fixtures and explicitly sourced recorded-cloud replay are
+available through `tools/run_cloud_reliability.py`. See
+[`Cloud_Reliability_Validation.md`](../../docs/Cloud_Reliability_Validation.md)
+for commands, accuracy/rejection contracts and the missing real mechanical dataset.
+The next steps are partial-visibility handling, acquiring orientation when no
+signed observations exist, independently oriented components and richer
+curved-feature semantics.
 
 Direct analytic-cloud regression (no capture or COLMAP):
 

@@ -550,6 +550,11 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
                 .arg(preprocessingReport.removedByVoxel)
                 .arg(preprocessingReport.removedAsOutliers)
                 .arg(preprocessingReport.normalsEstimated));
+        if (preprocessingReport.normalsEstimated) {
+            emit logInfo(workspaceTr("补算法向：已确定方向 %1 个，方向未确定 %2 个。")
+                .arg(preprocessingReport.estimatedNormalsOriented)
+                .arg(preprocessingReport.normalsWithoutOrientation));
+        }
     }
     if (result.outcome == CadReconstructionResult::Outcome::Unsupported) {
         QString message = workspaceTr("No supported solid could be reconstructed in %1: %2")

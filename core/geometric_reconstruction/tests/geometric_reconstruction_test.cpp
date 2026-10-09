@@ -126,6 +126,118 @@ void testPreprocessingPreservesNormalOrientation() {
     }
 }
 
+void testMissingNormalsFollowSignedObservations() {
+    std::vector<reconstruction::PointSample> samples;
+    for (int x = 0; x < 11; ++x) for (int y = 0; y < 11; ++y) {
+        reconstruction::PointSample point;
+        point.id = samples.size() + 1;
+        point.position = {double(x), double(y), 0};
+        if (x == 5 && y == 5) point.normal = modeling::Vec3{0, 0, -2};
+        samples.push_back(point);
+    }
+    reconstruction::PointCloudPreprocessingOptions options;
+    options.removeStatisticalOutliers = false;
+    options.normalNeighborCount = 8;
+    const auto check = [&](const std::vector<reconstruction::PointSample>& observations) {
+        reconstruction::PointStore output({});
+        reconstruction::PointCloudPreprocessingReport report;
+        std::string error;
+        require(reconstruction::preprocessPointCloud(reconstruction::PointStore(observations),
+            options, output, report, error), error);
+        require(report.normalsEstimated == 120 && report.estimatedNormalsOriented == 120 &&
+            report.normalsWithoutOrientation == 0, "One signed observation must orient its connected planar patch");
+        for (const auto& point : output.points())
+            require(point.normal && point.normal->z < -.999 && point.normalOrientationKnown,
+                "Estimated sign must follow the observation, including negative outward normals");
+    };
+    check(samples);
+    std::reverse(samples.begin(), samples.end());
+    check(samples);
+}
+
+void testUnanchoredThinWallIsNotInvented() {
+    std::vector<reconstruction::PointSample> samples;
+    for (int layer = 0; layer < 2; ++layer)
+        for (int x = 0; x < 11; ++x) for (int y = 0; y < 11; ++y) {
+            reconstruction::PointSample point;
+            point.id = samples.size() + 1;
+            point.position = {double(x), double(y), layer * .1};
+            if (!layer) point.normal = modeling::Vec3{0, 0, -1};
+            samples.push_back(point);
+        }
+    reconstruction::PointCloudPreprocessingOptions options;
+    options.removeStatisticalOutliers = false;
+    reconstruction::PointStore output({});
+    reconstruction::PointCloudPreprocessingReport report;
+    std::string error;
+    require(reconstruction::preprocessPointCloud(reconstruction::PointStore(samples), options,
+        output, report, error), error);
+    require(report.normalsWithoutOrientation == 121, "A neighbouring wall must not supply an unknown wall's outward sign");
+    reconstruction::CompoundCandidate candidate;
+    require(!reconstruction::reconstructParametricSolid(output, {}, {}, candidate, error) &&
+        error.find("orientation") != std::string::npos, "Unoriented PCA normals must not become material occupancy");
+}
+
+void testDegenerateNeighborhoodsHaveNoNormals() {
+    for (const bool coincident : {false, true}) {
+        std::vector<reconstruction::PointSample> samples;
+        for (int i = 0; i < 25; ++i)
+            samples.push_back({reconstruction::PointId(i + 1), {coincident ? 0.0 : double(i), 0, 0}, std::nullopt, 1});
+        reconstruction::PointCloudPreprocessingOptions options;
+        options.removeStatisticalOutliers = false;
+        reconstruction::PointStore output({});
+        reconstruction::PointCloudPreprocessingReport report;
+        std::string error;
+        require(reconstruction::preprocessPointCloud(reconstruction::PointStore(samples), options,
+            output, report, error), error);
+        require(report.degenerateNeighborhoods == samples.size() && report.normalsEstimated == 0,
+            "Rank deficient observations must not manufacture surface normals");
+        for (const auto& point : output.points())
+            require(!point.normal && !point.curvature, "A line or coincident points cannot define a surface");
+    }
+}
+
+void testDistantOutliersCannotMaskNearerOutliers() {
+    std::vector<reconstruction::PointSample> samples;
+    for (int x = 0; x < 21; ++x) for (int y = 0; y < 21; ++y)
+        samples.push_back({reconstruction::PointId(samples.size() + 1), {double(x), double(y), 0}, modeling::Vec3{0, 0, 1}, 1});
+    const auto surfaceCount = samples.size();
+    samples.push_back({1000, {100, 100, 100}, std::nullopt, 1});
+    samples.push_back({1001, {10000, 10000, 10000}, std::nullopt, 1});
+    reconstruction::PointCloudPreprocessingOptions options;
+    reconstruction::PointStore output({});
+    reconstruction::PointCloudPreprocessingReport report;
+    std::string error;
+    require(reconstruction::preprocessPointCloud(reconstruction::PointStore(samples), options,
+        output, report, error), error);
+    require(output.size() == surfaceCount && report.removedAsOutliers == 2,
+        "Multiple distance scales must not leave a closer isolated outlier behind");
+    options.protectedPointIds = {1000};
+    require(reconstruction::preprocessPointCloud(reconstruction::PointStore(samples), options,
+        output, report, error), error);
+    require(output.size() == surfaceCount + 1 && report.removedAsOutliers == 1,
+        "Explicit manual observations must survive robust outlier filtering");
+}
+
+void testVoxelIndexOverflowPreservesObservationIdentity() {
+    const reconstruction::PointStore input({
+        {1, {.1, .1, .1}, std::nullopt, 1},
+        {2, {.2, .2, .2}, std::nullopt, 1},
+        {3, {1.0e38, -1.0e38, 1.0e38}, std::nullopt, 1}});
+    reconstruction::PointCloudPreprocessingOptions options;
+    options.voxelSize = 1;
+    options.removeStatisticalOutliers = false;
+    options.estimateMissingNormals = false;
+    reconstruction::PointStore output({});
+    reconstruction::PointCloudPreprocessingReport report;
+    std::string error;
+    require(reconstruction::preprocessPointCloud(input, options, output, report, error), error);
+    require(output.size() == 2 && output.points().back().id == 3,
+        "Finite observations outside the voxel index range must survive for downstream filtering");
+    requireNear(output.points().back().position.x, 1.0e38, 0,
+        "Extreme observation position must not be changed by voxel indexing");
+}
+
 void testCompoundCommitFusesSolidsAtomically() {
     reconstruction::CompoundCandidate candidate;
     reconstruction::BoxCandidate base,upright;
@@ -364,6 +476,7 @@ void testScaleAwarePreprocessingAndNormalEstimation() {
                 "The isolated outlier ID must not survive preprocessing");
         require(point.normal.has_value(),
                 "PCA preprocessing must estimate a plane normal");
+        require(!point.normalOrientationKnown, "Unanchored PCA directions must remain explicitly unoriented");
         require(std::abs(point.normal->z) > 0.999,
                 "Estimated normal must be perpendicular to the XY plane");
         require(point.curvature.has_value() && *point.curvature < 1.0e-10,
@@ -999,6 +1112,11 @@ int main() {
     try {
         testSyntheticBoxToCad(RECONSTRUCTION_TEST_OUTPUT_DIR);
         testPreprocessingPreservesNormalOrientation();
+        testMissingNormalsFollowSignedObservations();
+        testUnanchoredThinWallIsNotInvented();
+        testDegenerateNeighborhoodsHaveNoNormals();
+        testDistantOutliersCannotMaskNearerOutliers();
+        testVoxelIndexOverflowPreservesObservationIdentity();
         testCompoundCommitFusesSolidsAtomically();
         testRecognitionRequiresKnownScale();
         testRotatedNoisyBoxWithOutliers(RECONSTRUCTION_TEST_OUTPUT_DIR);

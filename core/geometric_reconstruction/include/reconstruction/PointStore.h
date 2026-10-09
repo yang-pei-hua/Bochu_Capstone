@@ -29,6 +29,9 @@ struct PointSample {
     std::optional<modeling::Vec3> normal;
     double confidence = 1.0;
     std::optional<double> curvature;
+    // PCA supplies a direction, not an outward/inward sign. Only observations
+    // or propagation from signed observations establish material orientation.
+    bool normalOrientationKnown = true;
 };
 
 // Immutable source observations. Detection results reference PointId values;
