@@ -1,5 +1,6 @@
 #include "ui/panels/FeatureDetailsPanel.h"
 #include "ui/panels/FeatureEditorPanel.h"
+#include "ui/panels/TextParameterPanel.h"
 #include "core/SketchFrame.h"
 #include <modeling/SemanticFaces.h>
 
@@ -133,6 +134,8 @@ FeatureDetailsPanel::FeatureDetailsPanel(QWidget* parent) : QWidget(parent)
     auto* layout = new QVBoxLayout(this); layout->setContentsMargins(6,6,6,6);
     m_editor = new FeatureEditorPanel(this);
     layout->addWidget(m_editor);
+    m_textEditor = new TextParameterPanel(this);
+    layout->addWidget(m_textEditor);
     m_details = new QTextBrowser(this); m_details->setObjectName("featureDetailsText");
     m_details->setOpenLinks(false);
     layout->addWidget(m_details);

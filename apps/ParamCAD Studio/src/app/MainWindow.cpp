@@ -14,6 +14,8 @@
 #include "ui/panels/CapturePanel.h"
 #include "ui/panels/ModelingPanel.h"
 #include "ui/panels/PropertyPanel.h"
+#include "ui/panels/FeatureDetailsPanel.h"
+#include "ui/panels/TextParameterPanel.h"
 #include "ui/panels/PointCloudRelationsPanel.h"
 #include "ui/panels/ReconstructPanel.h"
 #include "ui/panels/RenderPanel.h"
@@ -28,6 +30,7 @@
 #include <QHBoxLayout>
 #include <QFileInfo>
 #include <QLabel>
+#include <QLineEdit>
 #include <QKeySequence>
 #include <QMenu>
 #include <QMenuBar>
@@ -114,6 +117,11 @@ void MainWindow::createWorkspaceControllers()
         {m_viewer, m_propertyPanel, m_scenePanel, m_exportStepAction}, this, this);
     m_featureEditing = new FeatureEditingController(modeling,
         {m_viewer,m_modelingPanel,m_propertyPanel,m_undoCadAction,m_redoCadAction},this,this);
+    connect(m_textEditAction, &QAction::triggered, this, [this] {
+        m_propertyPanel->showFeatureDetails();
+        if (auto* dock = qobject_cast<QDockWidget*>(m_propertyPanel->parentWidget())) { dock->show(); dock->raise(); }
+        m_propertyPanel->featureDetailsPanel()->textEditor()->findChild<QLineEdit*>("textParameterInput")->setFocus();
+    });
     connect(m_scenePanel, &ScenePanel::nodeDeleteRequested, this, [this, modeling](SceneNodeType type) {
         if (type != SceneNodeType::Model) return;
         m_pointCloudWorkspace->prepareProjectReplacement();
@@ -238,6 +246,10 @@ void MainWindow::createActions()
     m_reconstructToolAction = new QAction(tr("Reconstruct Point Cloud"), this);
     m_reconstructToolAction->setCheckable(true);
     m_reconstructToolAction->setToolTip(tr("Reconstruct a point cloud from multi-view images"));
+    m_textEditAction = new QAction(tr("文字修改参数"), this);
+    m_textEditAction->setObjectName("textParameterEditAction");
+    m_textEditAction->setToolTip(tr("打开中文尺寸修改与预览"));
+    m_textEditAction->setShortcut(QKeySequence("Ctrl+Shift+E"));
 }
 
 void MainWindow::createMenus()
@@ -255,6 +267,7 @@ void MainWindow::createMenus()
     fileMenu->addAction(m_exitAction);
     auto* editMenu=menuBar()->addMenu(tr("&Edit"));
     editMenu->addAction(m_undoCadAction); editMenu->addAction(m_redoCadAction);
+    editMenu->addSeparator(); editMenu->addAction(m_textEditAction);
 
     QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(m_resetCameraAction);
@@ -302,15 +315,11 @@ void MainWindow::createToolBar()
     reconstructCadButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
     toolBar->addWidget(reconstructCadButton);
 
-    const QStringList reservedStages{tr("AI Edit")};
-    for (const QString& stage : reservedStages) {
-        auto* button = new QToolButton(toolBar);
-        button->setText(stage);
-        button->setEnabled(false);
-        button->setToolTip(tr("Reserved for a future version"));
-        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        toolBar->addWidget(button);
-    }
+    auto* textEditButton = new QToolButton(toolBar);
+    textEditButton->setObjectName("textParameterEditButton");
+    textEditButton->setDefaultAction(m_textEditAction);
+    textEditButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    toolBar->addWidget(textEditButton);
 }
 
 void MainWindow::createCentralArea()

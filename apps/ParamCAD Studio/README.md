@@ -7,6 +7,12 @@ created through the core's command API and displayed as a tessellated solid.
 Point-cloud preprocessing and CGAL Efficient RANSAC live in
 `core/geometric_reconstruction` and expose only project-owned evidence types.
 
+Version 0.2.2 adds bounded Chinese text parameter commands in the feature tab:
+preview edits to boxes, cylinders and through holes, validate the dependency
+rebuild on a separate model, then apply through the existing undoable editor.
+Examples, unit/anchor semantics and limits are documented in
+[`Text_Parameter_Editing.md`](../../docs/Text_Parameter_Editing.md).
+
 ## Requirements
 
 - Visual Studio 2022 with **Desktop development with C++**

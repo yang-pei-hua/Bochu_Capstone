@@ -354,3 +354,26 @@ bool ModelingController::editPrimitive(modeling::FeatureId id, const std::array<
     emit modelError(m_lastError);
     return false;
 }
+
+bool ModelingController::validatePrimitiveEdit(modeling::FeatureId id, const std::array<double,3>& values,
+    modeling::ResizeAnchor anchor, modeling::ModelRevision expectedRevision, QString& error) const
+{
+    error.clear();
+    const auto* feature = m_core->document().findFeature(id);
+    modeling::FeatureParams params;
+    std::string failure;
+    if (expectedRevision != revision()) error = tr("模型已变化，请重新预览文字修改。");
+    else if (!feature || feature->suppressed || !feature->valid) error = tr("特征不存在、已抑制或无效。");
+    else if (!modeling::adjustedPrimitive(feature->params, values, anchor, params, failure))
+        error = QString::fromStdString(failure);
+    else {
+        auto trial = *m_core;
+        modeling::ModelPatch patch;
+        patch.expectedRevision = expectedRevision;
+        patch.commands.push_back(modeling::EditFeatureCommand{id, params, true, anchor});
+        const auto result = trial.apply(patch);
+        if (result.success) return true;
+        error = QString::fromStdString(result.error);
+    }
+    return false;
+}

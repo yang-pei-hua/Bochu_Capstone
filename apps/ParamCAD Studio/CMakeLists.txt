@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(CadPointCloudClient VERSION 0.2.1 LANGUAGES CXX)
+project(CadPointCloudClient VERSION 0.2.2 LANGUAGES CXX)
 
 option(CAD_CLIENT_BUILD_TESTS "Build ParamCAD Studio I/O tests" OFF)
 option(CAD_CLIENT_BUILD_VALIDATION_TOOLS "Build standard STEP and CAD validation tools" OFF)
@@ -101,6 +101,7 @@ qt_add_executable(CadPointCloudClient WIN32
     src/core/OrbitCamera.cpp
     src/core/SketchFrame.h
     src/core/SketchFrame.cpp
+    src/core/TextParameterCommand.h src/core/TextParameterCommand.cpp
     src/io/FeatureCodec.h
     src/io/FeatureCodec.cpp
     src/io/ProjectStore.h
@@ -143,6 +144,7 @@ qt_add_executable(CadPointCloudClient WIN32
     src/ui/panels/FeatureDetailsPanel.cpp
     src/ui/panels/FeatureEditorPanel.h
     src/ui/panels/FeatureEditorPanel.cpp
+    src/ui/panels/TextParameterPanel.h src/ui/panels/TextParameterPanel.cpp
     src/ui/panels/ScenePanel.h
     src/ui/panels/ScenePanel.cpp
     src/ui/panels/PropertyPanel.h
@@ -259,7 +261,17 @@ endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(text_parameter_command_test tests/text_parameter_command_test.cpp src/core/TextParameterCommand.cpp)
+    target_include_directories(text_parameter_command_test PRIVATE src)
+    target_link_libraries(text_parameter_command_test PRIVATE Qt6::Core CadModelCore::CadModelCore)
+    if(MSVC)
+        target_compile_options(text_parameter_command_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME text_parameter_command_test COMMAND text_parameter_command_test)
+    set_tests_properties(text_parameter_command_test PROPERTIES TIMEOUT 60
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(feature_details_test tests/feature_details_test.cpp
+        src/ui/panels/TextParameterPanel.h src/ui/panels/TextParameterPanel.cpp
         src/ui/panels/FeatureEditorPanel.h src/ui/panels/FeatureEditorPanel.cpp
         src/ui/panels/FeatureDetailsPanel.h src/ui/panels/FeatureDetailsPanel.cpp
         src/ui/panels/ModelingPanel.h src/ui/panels/ModelingPanel.cpp
@@ -361,7 +373,7 @@ if(CAD_CLIENT_BUILD_TESTS)
     # wiring of the same widgets maintained only for tests.
     get_target_property(CAD_CLIENT_TEST_SOURCES CadPointCloudClient SOURCES)
     list(REMOVE_ITEM CAD_CLIENT_TEST_SOURCES src/main.cpp)
-    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test project_interaction_test scene_interaction_test parameter_editing_test semantic_face_reference_test)
+    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test project_interaction_test scene_interaction_test parameter_editing_test semantic_face_reference_test text_parameter_editing_test)
         add_executable(${interaction_test}
             tests/${interaction_test}.cpp ${CAD_CLIENT_TEST_SOURCES})
         target_include_directories(${interaction_test} PRIVATE src)

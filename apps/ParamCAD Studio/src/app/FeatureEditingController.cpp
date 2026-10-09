@@ -2,6 +2,7 @@
 #include "app/ModelingController.h"
 #include "ui/panels/FeatureDetailsPanel.h"
 #include "ui/panels/FeatureEditorPanel.h"
+#include "ui/panels/TextParameterPanel.h"
 #include "ui/panels/ModelingPanel.h"
 #include "ui/panels/PropertyPanel.h"
 #include "ui/viewport/VTKViewer.h"
@@ -10,7 +11,8 @@
 FeatureEditingController::FeatureEditingController(ModelingController* model,
     const FeatureEditingUi& ui, QWidget* dialogParent, QObject* parent)
     : WorkspaceController(dialogParent,parent), m_model(model), m_ui(ui),
-      m_editor(ui.properties->featureDetailsPanel()->editor()) {}
+      m_editor(ui.properties->featureDetailsPanel()->editor()),
+      m_textEditor(ui.properties->featureDetailsPanel()->textEditor()) {}
 
 bool FeatureEditingController::editable() const
 {
@@ -23,12 +25,14 @@ void FeatureEditingController::connectUi()
     connect(m_model,&ModelingController::modelRebuilt,this,&FeatureEditingController::refresh);
     connect(m_model,&ModelingController::historyChanged,this,&FeatureEditingController::updateHistoryActions);
     connect(m_ui.viewer,&VTKViewer::sketchInteractionChanged,this,[this] {
+        invalidateTextPreview(); m_textEditor->setEditingAllowed(editable());
         m_editor->setEditingAllowed(editable()); updateHistoryActions();
     });
     connect(m_ui.viewer,&VTKViewer::bodyShapeChanged,this,[this](const TopoDS_Shape& shape) {
         const auto& body=m_model->bodyShape();
         m_modelDisplayed=shape.IsNull() ? body.IsNull() : !body.IsNull() && shape.IsSame(body);
         if (!m_modelDisplayed) m_model->clearHistory();
+        invalidateTextPreview(); m_textEditor->setEditingAllowed(editable());
         m_editor->setEditingAllowed(editable()); updateHistoryActions();
     });
     connect(m_editor,&FeatureEditorPanel::applyRequested,this,
@@ -58,17 +62,58 @@ void FeatureEditingController::connectUi()
     connect(m_editor,&FeatureEditorPanel::cancelRequested,m_ui.viewer,&VTKViewer::endBoxReferenceSelection);
     connect(m_ui.undo,&QAction::triggered,this,[this] { if (editable()) m_model->undo(); });
     connect(m_ui.redo,&QAction::triggered,this,[this] { if (editable()) m_model->redo(); });
+    connect(m_textEditor, &TextParameterPanel::inputChanged, this, [this] { m_textProposal.reset(); });
+    connect(m_textEditor, &TextParameterPanel::previewRequested, this, [this] {
+        invalidateTextPreview();
+        if (!editable()) { m_textEditor->setEditingAllowed(false); return; }
+        textcad::PrimitiveEdit proposal;
+        QString error;
+        if (!textcad::parsePrimitiveEdit(m_textEditor->input(), m_model->features(),
+                m_ui.features->selectedFeatureId(), m_model->revision(), proposal, error)
+            || !m_model->validatePrimitiveEdit(proposal.featureId, proposal.values,
+                proposal.anchor, proposal.expectedRevision, error)) {
+            m_textEditor->invalidatePreview(error);
+            return;
+        }
+        const auto dependents = m_model->dependentsOf(proposal.featureId);
+        if (!dependents.empty()) proposal.summary += workspaceTr("\n已验证 %1 个依赖特征的重建。").arg(dependents.size());
+        m_textProposal = proposal;
+        m_textEditor->setPreview(proposal.summary);
+    });
+    connect(m_textEditor, &TextParameterPanel::applyRequested, this, [this] {
+        if (!editable() || !m_textProposal) return;
+        const auto proposal = *m_textProposal;
+        m_ui.viewer->endBoxReferenceSelection();
+        if (!m_model->editPrimitive(proposal.featureId, proposal.values, proposal.anchor, proposal.expectedRevision)) {
+            m_textProposal.reset();
+            m_textEditor->invalidatePreview(m_model->lastError());
+            return;
+        }
+        m_textProposal.reset();
+        m_ui.features->selectFeature(proposal.featureId);
+        m_textEditor->invalidatePreview(workspaceTr("文字修改已应用，可使用 CAD 撤销 / 重做。"));
+        emit logInfo(workspaceTr("文字参数修改 #%1：\n%2").arg(proposal.featureId).arg(proposal.summary));
+    });
     refresh();
 }
 
 void FeatureEditingController::refresh()
 {
+    invalidateTextPreview();
+    m_textEditor->setEditingAllowed(editable());
     m_ui.viewer->endBoxReferenceSelection();
     const auto id=m_ui.features->selectedFeatureId();
     const modeling::Feature* selected=nullptr;
     for (const auto& feature:m_model->features()) if (feature.id==id) { selected=&feature; break; }
     m_editor->setFeature(selected,m_model->revision());
     m_editor->setEditingAllowed(editable()); updateHistoryActions();
+}
+
+void FeatureEditingController::invalidateTextPreview()
+{
+    const bool hadPreview = m_textProposal.has_value();
+    m_textProposal.reset();
+    m_textEditor->invalidatePreview(hadPreview ? workspaceTr("模型、选中目标或编辑状态已变化，请重新预览。") : QString{});
 }
 
 void FeatureEditingController::updateHistoryActions()

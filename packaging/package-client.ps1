@@ -5,7 +5,7 @@ param(
     [string]$QtRoot = $env:QTDIR,
     [string]$VcpkgRoot = $env:VCPKG_ROOT,
     [string]$VCRuntimeRoot,
-    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$')][string]$Version = '0.2.1',
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$')][string]$Version = '0.2.2',
     [string]$OutputDirectory,
     [string]$BuildDirectory,
     [string]$LocalColmapPath,

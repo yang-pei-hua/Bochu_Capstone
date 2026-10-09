@@ -77,6 +77,7 @@ private:
     FeatureEditingController* m_featureEditing = nullptr;
     QAction* m_undoCadAction = nullptr;
     QAction* m_redoCadAction = nullptr;
+    QAction* m_textEditAction = nullptr;
     PointCloudWorkspaceController* m_pointCloudWorkspace = nullptr;
     CaptureWorkspaceController* m_captureWorkspace = nullptr;
     ModelViewController* m_modelViewController = nullptr;

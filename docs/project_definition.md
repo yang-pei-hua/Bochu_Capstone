@@ -1,6 +1,6 @@
 # 多视角图像到 CAD 重建系统架构说明
 
-> 本文保留最初的目标架构。当前 CAD 后端是项目内的 OpenCASCADE 参数化核心，已支持 STEP 导出和 `.pcad` 工程；自然语言与 SolidWorks MCP 尚未接入。实际实现范围以根目录 README 为准。
+> 本文保留最初的目标架构。当前 CAD 后端是项目内的 OpenCASCADE 参数化核心，支持 STEP 导出、`.pcad` 工程和限定中文参数修改；自由自然语言理解与 SolidWorks MCP 尚未接入。实际实现范围以根目录 README 为准。
 
 ## 1. 项目目标
 
