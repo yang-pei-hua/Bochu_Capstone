@@ -4,6 +4,7 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QFileInfo>
+#include <QIcon>
 #include <QSurfaceFormat>
 #include <QVTKOpenGLNativeWidget.h>
 
@@ -15,6 +16,7 @@ int main(int argc, char* argv[])
     QApplication::setApplicationName(QStringLiteral("ParamCAD Studio"));
     QApplication::setOrganizationName(QStringLiteral("ECE4500J"));
     QApplication::setApplicationVersion(QStringLiteral("0.2.2"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/paramcad-studio.png")));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("ParamCAD Studio"));

@@ -61,6 +61,7 @@ find_package(VTK REQUIRED COMPONENTS
 
 qt_add_executable(CadPointCloudClient WIN32
     src/main.cpp
+    resources/app.qrc
     src/app/MainWindow.h
     src/app/MainWindow.cpp
     src/app/WorkspaceController.h
@@ -172,6 +173,14 @@ qt_add_executable(CadPointCloudClient WIN32
 set_target_properties(CadPointCloudClient PROPERTIES
     OUTPUT_NAME "ParamCAD Studio"
 )
+
+if(WIN32)
+    configure_file(resources/app-icon.rc.in
+        "${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc" @ONLY)
+    target_sources(CadPointCloudClient PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc")
+    set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc" APPEND PROPERTY
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/paramcad-studio.ico")
+endif()
 
 target_include_directories(CadPointCloudClient PRIVATE src)
 # The STEP importer names OCCT toolkits directly; CadModelCore already

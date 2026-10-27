@@ -60,6 +60,12 @@ Do not copy or move the executable out of `build/msvc-debug/Release`: it must st
 beside the staged DLLs, otherwise startup fails with errors such as
 `找不到 vtkInteractionWidgets-9.7.dll`.
 
+The application icon is embedded in both the Windows executable and the Qt
+window. Editable SVG, PNG and multi-size ICO assets live in `resources/icons/`.
+To regenerate them, run `python tools/generate_client_icon.py` from the repository
+root with Pillow installed, then rebuild the client. Desktop shortcuts should
+target the executable above and use its Release directory as the working directory.
+
 The binary SDKs under the repository-root `deps/` directory are intentionally
 excluded from Git and AI context. See [`../../deps/README.md`](../../deps/README.md)
 for the canonical dependency layout and verification commands.
