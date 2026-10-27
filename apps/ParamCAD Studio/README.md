@@ -75,6 +75,14 @@ increases the step and **Ctrl+Down** decreases it for both axes. The default is
 Text fields, numeric inputs, lists and menus keep their normal arrow-key behavior.
 Loading a file focuses the viewport; use Tab to return to it after editing a field.
 
+Mouse navigation updates the camera immediately and coalesces requests within
+the Qt event queue without a software frame-rate cap. Qt/OpenGL handles display
+presentation, allowing high-refresh monitors to use their native refresh rate.
+Camera-property feedback updates at 20 Hz during a drag;
+releasing the mouse flushes the final pose and pending frame immediately. Wheel
+bursts share the frame scheduler. Explicit rendering and image captures remain
+synchronous so screenshots always use the latest camera and scene.
+
 Drag one local **STEP/STP or PLY** file into any part of the window to load it with
 the existing importer and fit the view. Extension case, spaces and Unicode paths
 are supported. PLY imports stay centered on the cloud even when it is away from

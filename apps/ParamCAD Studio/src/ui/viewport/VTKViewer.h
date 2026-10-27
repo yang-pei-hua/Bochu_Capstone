@@ -13,6 +13,7 @@
 #include <QColor>
 #include <QSize>
 #include <QString>
+#include <QTimer>
 #include <QVTKOpenGLNativeWidget.h>
 
 #include <vtkSmartPointer.h>
@@ -65,6 +66,8 @@ public:
     // Imported/replaced bodies may change without a feature-history command.
     quint64 bodyRevision() const noexcept { return m_bodyRevision; }
     void renderNow();
+    // Coalesce navigation frames without delaying camera updates or captures.
+    void requestRender();
     bool beginBoxReferenceSelection(const modeling::BoxPrimitiveParams& box);
     void endBoxReferenceSelection();
     bool boxReferenceSelectionActive() const { return m_referenceSelection; }
@@ -209,6 +212,9 @@ private:
     static void onCameraModified(vtkObject* caller, unsigned long eventId,
                                  void* clientData, void* callData);
     void createOrientationAxes();
+    void publishCameraChange();
+    void beginCameraInteraction();
+    void endCameraInteraction();
 
     void onLeftButtonPressed(int x, int y);
     void onMouseMoved(int x, int y);
@@ -256,6 +262,10 @@ private:
     vtkSmartPointer<vtkOrientationMarkerWidget> m_orientationWidget;
     vtkSmartPointer<vtkCallbackCommand> m_cameraCallback;
     unsigned long m_cameraObserverTag = 0;
+    QTimer m_cameraNotifyTimer;
+    QTimer m_renderTimer;
+    bool m_cameraDirty = false;
+    bool m_cameraInteracting = false;
 
     ViewportTool m_tool = ViewportTool::Select;
     bool m_sketchInteraction = false;

@@ -29,6 +29,8 @@ public:
     void OnRightButtonDown() override;
     void OnRightButtonUp() override;
     void OnMouseMove() override;
+    void OnMouseWheelForward() override;
+    void OnMouseWheelBackward() override;
     void OnKeyPress() override;
 
     // Display-pixel position of the left-button press.
@@ -41,6 +43,12 @@ public:
     // A pan drag is under way and the camera is about to move. Reported before
     // the camera does, so a listener can get out of the way of the pan.
     std::function<void()> panMoved;
+    // The viewer coalesces camera rendering and panel feedback on the Qt loop.
+    // These callbacks apply only to camera gestures; modeling widgets retain
+    // their own rendering and picking behavior.
+    std::function<void()> cameraInteractionStarted;
+    std::function<void()> cameraInteractionFinished;
+    std::function<void()> renderRequested;
     // VTK key symbol of a key pressed while the viewport has focus, such as
     // "Delete". The style only reports it; the viewer decides what it means.
     std::function<void(const std::string&)> keyPressed;

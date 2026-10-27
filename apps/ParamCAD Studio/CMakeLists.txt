@@ -382,7 +382,7 @@ if(CAD_CLIENT_BUILD_TESTS)
     # wiring of the same widgets maintained only for tests.
     get_target_property(CAD_CLIENT_TEST_SOURCES CadPointCloudClient SOURCES)
     list(REMOVE_ITEM CAD_CLIENT_TEST_SOURCES src/main.cpp)
-    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test project_interaction_test scene_interaction_test parameter_editing_test semantic_face_reference_test text_parameter_editing_test navigation_import_test)
+    foreach(interaction_test IN ITEMS point_cloud_interaction_test workspace_interaction_test project_interaction_test scene_interaction_test parameter_editing_test semantic_face_reference_test text_parameter_editing_test navigation_import_test camera_interaction_test)
         add_executable(${interaction_test}
             tests/${interaction_test}.cpp ${CAD_CLIENT_TEST_SOURCES})
         target_include_directories(${interaction_test} PRIVATE src)

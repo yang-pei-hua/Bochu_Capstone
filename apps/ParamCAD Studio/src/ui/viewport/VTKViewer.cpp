@@ -32,6 +32,7 @@
 namespace {
 
 constexpr double kPiOver180 = 3.14159265358979323846 / 180.0;
+constexpr int kCameraPanelIntervalMs = 50;
 
 // How far from a sketch entity a click still counts as hitting it, in screen
 // pixels. Sketch lines are hairline-thin, so a few pixels is what makes them
@@ -82,6 +83,15 @@ VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
     setMinimumSize(480, 320);
     setFocusPolicy(Qt::StrongFocus);
 
+    m_renderTimer.setSingleShot(true);
+    m_renderTimer.setTimerType(Qt::PreciseTimer);
+    connect(&m_renderTimer, &QTimer::timeout, this, &VTKViewer::renderNow);
+    m_cameraNotifyTimer.setSingleShot(true);
+    m_cameraNotifyTimer.setTimerType(Qt::PreciseTimer);
+    connect(&m_cameraNotifyTimer, &QTimer::timeout, this, [this] {
+        if (m_cameraDirty) publishCameraChange();
+    });
+
     setRenderWindow(m_renderWindow);
     m_renderWindow->AddRenderer(m_renderer);
     m_renderer->SetBackground(0.10, 0.11, 0.13);
@@ -98,6 +108,9 @@ VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
     m_interactorStyle->mouseMoved = [this](int x, int y) { onMouseMoved(x, y); };
     m_interactorStyle->cancelRequested = [this]() { onCancelRequested(); };
     m_interactorStyle->panMoved = [this]() { emit cameraPanned(); };
+    m_interactorStyle->cameraInteractionStarted = [this]() { beginCameraInteraction(); };
+    m_interactorStyle->cameraInteractionFinished = [this]() { endCameraInteraction(); };
+    m_interactorStyle->renderRequested = [this]() { requestRender(); };
     m_interactorStyle->keyPressed = [this](const std::string& keySym) {
         onKeyPressed(keySym);
     };
@@ -220,7 +233,39 @@ void VTKViewer::endBoxReferenceSelection()
 
 void VTKViewer::renderNow()
 {
+    m_renderTimer.stop();
     m_renderWindow->Render();
+}
+
+void VTKViewer::requestRender()
+{
+    if (m_renderTimer.isActive()) return;
+    // Merge requests already in the Qt event queue, without imposing a frame
+    // interval. Qt/OpenGL presentation can then use the monitor's full refresh
+    // rate instead of being held below it by a 17 ms software timer.
+    m_renderTimer.start(0);
+}
+
+void VTKViewer::publishCameraChange()
+{
+    m_cameraNotifyTimer.stop();
+    m_cameraDirty = false;
+    emit cameraChanged(cameraParameters());
+}
+
+void VTKViewer::beginCameraInteraction()
+{
+    if (m_cameraDirty) publishCameraChange();
+    m_cameraInteracting = true;
+}
+
+void VTKViewer::endCameraInteraction()
+{
+    m_cameraInteracting = false;
+    // Deliver the exact final pose and image even for a gesture shorter than
+    // either timer interval. renderNow/captureImage also cancel stale frames.
+    if (m_cameraDirty) publishCameraChange();
+    if (m_renderTimer.isActive()) renderNow();
 }
 
 double VTKViewer::parallelScale() const { return m_renderer->GetActiveCamera()->GetParallelScale(); }
@@ -840,7 +885,7 @@ void VTKViewer::resetCameraToPointCloud()
     m_renderer->ResetCamera(bounds);
     m_renderer->ResetCameraClippingRange();
     renderNow();
-    emit cameraChanged(cameraParameters());
+    publishCameraChange();
 }
 
 bool VTKViewer::loadBodyTexture(const QString& imagePath, QString& error)
@@ -962,8 +1007,8 @@ void VTKViewer::rotateCamera(double azimuthDegrees, double elevationDegrees)
     camera->Elevation(elevationDegrees);
     camera->OrthogonalizeViewUp();
     m_renderer->ResetCameraClippingRange();
-    renderNow();
-    emit cameraChanged(cameraParameters());
+    requestRender();
+    publishCameraChange();
 }
 
 void VTKViewer::resetCamera()
@@ -978,7 +1023,7 @@ void VTKViewer::resetCamera()
     }
     m_renderer->ResetCameraClippingRange();
     renderNow();
-    emit cameraChanged(cameraParameters());
+    publishCameraChange();
 }
 
 bool VTKViewer::sceneBounds(double bounds[6])
@@ -1014,7 +1059,7 @@ void VTKViewer::setStandardView(CameraController::StandardView view)
     }
     m_renderer->ResetCameraClippingRange();
     renderNow();
-    emit cameraChanged(cameraParameters());
+    publishCameraChange();
 }
 
 void VTKViewer::applyCamera(const CameraParameters& parameters)
@@ -1022,14 +1067,14 @@ void VTKViewer::applyCamera(const CameraParameters& parameters)
     CameraController::apply(m_renderer->GetActiveCamera(), parameters);
     m_renderer->ResetCameraClippingRange();
     renderNow();
-    emit cameraChanged(cameraParameters());
+    publishCameraChange();
 }
 
 void VTKViewer::setParallelProjection(bool enabled)
 {
     m_renderer->GetActiveCamera()->SetParallelProjection(enabled ? 1 : 0);
     renderNow();
-    emit cameraChanged(cameraParameters());
+    publishCameraChange();
 }
 
 void VTKViewer::setObjectTransform(double px, double py, double pz,
@@ -1109,7 +1154,14 @@ void VTKViewer::onCameraModified(vtkObject*, unsigned long, void* clientData, vo
 {
     auto* viewer = static_cast<VTKViewer*>(clientData);
     if (viewer) {
-        emit viewer->cameraChanged(viewer->cameraParameters());
+        viewer->m_cameraDirty = true;
+        // A VTK camera gesture changes position, up and clipping separately.
+        // Publish the completed pose once on the event loop, or at 20 Hz while
+        // dragging, instead of updating Qt widgets for every intermediate edit.
+        if (!viewer->m_cameraNotifyTimer.isActive()) {
+            viewer->m_cameraNotifyTimer.start(
+                viewer->m_cameraInteracting ? kCameraPanelIntervalMs : 0);
+        }
     }
 }
 

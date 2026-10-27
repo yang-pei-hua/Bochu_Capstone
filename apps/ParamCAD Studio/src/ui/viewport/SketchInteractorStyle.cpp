@@ -13,6 +13,27 @@ namespace {
 // the cancel the right button has always sent survives the pan binding.
 constexpr int kRightClickSlop = 3;
 
+// The base camera style renders synchronously from Rotate/Pan/Dolly and from
+// EndState. Suppress only those calls, restoring the previous interactor flag
+// before handing the render request back to the Qt-owned viewer.
+class DeferredCameraRender
+{
+public:
+    DeferredCameraRender(vtkRenderWindowInteractor* interactor, bool defer)
+        : m_interactor(defer ? interactor : nullptr)
+        , m_enabled(m_interactor ? m_interactor->GetEnableRender() : false)
+    {
+        if (m_interactor) m_interactor->EnableRenderOff();
+    }
+    ~DeferredCameraRender()
+    {
+        if (m_interactor) m_interactor->SetEnableRender(m_enabled);
+    }
+private:
+    vtkRenderWindowInteractor* m_interactor;
+    bool m_enabled;
+};
+
 }  // namespace
 
 vtkStandardNewMacro(SketchInteractorStyle);
@@ -41,6 +62,7 @@ void SketchInteractorStyle::OnMiddleButtonDown()
         return;
     }
     this->GrabFocus(this->EventCallbackCommand);
+    if (cameraInteractionStarted) cameraInteractionStarted();
     this->StartRotate();
 }
 
@@ -48,10 +70,18 @@ void SketchInteractorStyle::OnMiddleButtonUp()
 {
     // The camera only follows the mouse while the button is down, so the rotate
     // started on the press is closed here no matter what else is going on.
-    if (this->State == VTKIS_ROTATE) {
-        this->EndRotate();
+    const bool rotating = this->State == VTKIS_ROTATE;
+    {
+        DeferredCameraRender defer(this->Interactor, bool(renderRequested));
+        if (rotating) this->EndRotate();
+        vtkInteractorStyleTrackballCamera::OnMiddleButtonUp();
     }
-    vtkInteractorStyleTrackballCamera::OnMiddleButtonUp();
+    // The base middle-button handler only releases a pan, whereas this binding
+    // owns a rotate. Release the focus grabbed on our middle-button press.
+    if (rotating) {
+        this->ReleaseFocus();
+        if (cameraInteractionFinished) cameraInteractionFinished();
+    }
 }
 
 void SketchInteractorStyle::OnRightButtonDown()
@@ -68,15 +98,22 @@ void SketchInteractorStyle::OnRightButtonDown()
     m_rightPressX = position[0];
     m_rightPressY = position[1];
     this->GrabFocus(this->EventCallbackCommand);
+    if (cameraInteractionStarted) cameraInteractionStarted();
     this->StartPan();
 }
 
 void SketchInteractorStyle::OnRightButtonUp()
 {
-    if (this->State == VTKIS_PAN) {
-        this->EndPan();
+    const bool panning = this->State == VTKIS_PAN;
+    {
+        DeferredCameraRender defer(this->Interactor, bool(renderRequested));
+        if (panning) this->EndPan();
+        vtkInteractorStyleTrackballCamera::OnRightButtonUp();
     }
-    vtkInteractorStyleTrackballCamera::OnRightButtonUp();
+    if (panning) {
+        this->ReleaseFocus();
+        if (cameraInteractionFinished) cameraInteractionFinished();
+    }
 
     if (this->Interactor == nullptr || cancelRequested == nullptr) {
         return;
@@ -103,7 +140,31 @@ void SketchInteractorStyle::OnMouseMove()
             panMoved();
         }
     }
-    vtkInteractorStyleTrackballCamera::OnMouseMove();
+    const bool navigating = this->State == VTKIS_ROTATE || this->State == VTKIS_PAN
+        || this->State == VTKIS_DOLLY || this->State == VTKIS_SPIN;
+    {
+        DeferredCameraRender defer(this->Interactor, navigating && bool(renderRequested));
+        vtkInteractorStyleTrackballCamera::OnMouseMove();
+    }
+    if (navigating && renderRequested) renderRequested();
+}
+
+void SketchInteractorStyle::OnMouseWheelForward()
+{
+    {
+        DeferredCameraRender defer(this->Interactor, bool(renderRequested));
+        vtkInteractorStyleTrackballCamera::OnMouseWheelForward();
+    }
+    if (renderRequested) renderRequested();
+}
+
+void SketchInteractorStyle::OnMouseWheelBackward()
+{
+    {
+        DeferredCameraRender defer(this->Interactor, bool(renderRequested));
+        vtkInteractorStyleTrackballCamera::OnMouseWheelBackward();
+    }
+    if (renderRequested) renderRequested();
 }
 
 void SketchInteractorStyle::OnKeyPress()
