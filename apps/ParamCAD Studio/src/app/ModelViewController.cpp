@@ -5,6 +5,7 @@
 #include "io/StepModelLoader.h"
 #include "io/StepModelExporter.h"
 #include "ui/panels/PropertyPanel.h"
+#include "ui/panels/CameraPanel.h"
 #include "ui/panels/RenderPanel.h"
 #include "ui/panels/ScenePanel.h"
 #include "ui/viewport/VTKViewer.h"
@@ -81,6 +82,12 @@ void ModelViewController::openModel()
         return;
     }
 
+    loadModelFromFile(filePath);
+}
+
+void ModelViewController::loadModelFromFile(const QString& filePath)
+{
+
     const QString fileName = QFileInfo(filePath).fileName();
     StepModelLoader stepLoader;
     if (!stepLoader.canLoad(filePath)) {
@@ -107,6 +114,7 @@ void ModelViewController::openModel()
     m_loadedModel = loaded;
     m_ui.viewer->setObjectVisible(true);
     m_ui.viewer->setBodyShape(m_loadedModel.shape);
+    m_ui.propertyPanel->cameraPanel()->releaseOriginLock();
     m_ui.viewer->resetCamera();
     m_ui.viewer->renderNow();
     emit sceneFramed();
@@ -122,6 +130,7 @@ void ModelViewController::openModel()
                 .arg(m_loadedModel.faceCount)
                 .arg(m_loadedModel.edgeCount)
                 .arg(m_loadedModel.vertexCount));
+    m_ui.viewer->setFocus(Qt::OtherFocusReason);
 }
 
 void ModelViewController::chooseTexture()

@@ -1,0 +1,2 @@
+# Preserve imported CAD fixtures byte for byte and omit generated STEP diffs.
+*.step binary

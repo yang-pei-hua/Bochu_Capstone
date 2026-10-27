@@ -147,6 +147,7 @@ public:
 
 public slots:
     void resetCamera();
+    void rotateCamera(double azimuthDegrees, double elevationDegrees);
     void setStandardView(CameraController::StandardView view);
     void applyCamera(const CameraParameters& parameters);
     void setParallelProjection(bool enabled);

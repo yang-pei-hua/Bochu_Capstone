@@ -7,6 +7,7 @@
 #include "io/PointCloudAdapter.h"
 #include "io/PointCloudAnalysis.h"
 #include "ui/panels/ModelingPanel.h"
+#include "ui/panels/CameraPanel.h"
 #include "ui/panels/PropertyPanel.h"
 #include "ui/panels/PointCloudPanel.h"
 #include "ui/panels/PointCloudRelationsPanel.h"
@@ -332,6 +333,7 @@ void PointCloudWorkspaceController::onReconstructionFinished(const QString& poin
 
     // The freshly built cloud is now what the recognized-model entry works on.
     updateCadActions();
+    m_ui.propertyPanel->cameraPanel()->releaseOriginLock();
     m_ui.viewer->resetCameraToPointCloud();
     emit sceneFramed();
     m_ui.scenePanel->updateNodeLabel(
@@ -363,6 +365,12 @@ void PointCloudWorkspaceController::openPointCloud()
         return;
     }
 
+    loadPointCloudFromFile(filePath);
+}
+
+void PointCloudWorkspaceController::loadPointCloudFromFile(const QString& filePath)
+{
+
     QString error;
     if (!m_document->load(filePath, error)) {
         emit logError(error);
@@ -375,6 +383,7 @@ void PointCloudWorkspaceController::openPointCloud()
     // A cloud is now in the viewport, so the recognized-model entry becomes
     // usable and works on this file.
     updateCadActions();
+    m_ui.propertyPanel->cameraPanel()->releaseOriginLock();
     m_ui.viewer->resetCameraToPointCloud();
     emit sceneFramed();
     m_ui.scenePanel->updateNodeLabel(
@@ -385,6 +394,7 @@ void PointCloudWorkspaceController::openPointCloud()
                                     m_ui.viewer->cameraParameters().parallelProjection
                                         ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
     emit logInfo(workspaceTr("Point cloud loaded from %1: %2 points").arg(info.fileName()).arg(pointCount));
+    m_ui.viewer->setFocus(Qt::OtherFocusReason);
 }
 
 void PointCloudWorkspaceController::reconstructCad()

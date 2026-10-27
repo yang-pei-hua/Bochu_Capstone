@@ -953,6 +953,19 @@ void VTKViewer::setPointCloudPointSize(double size)
     renderNow();
 }
 
+void VTKViewer::rotateCamera(double azimuthDegrees, double elevationDegrees)
+{
+    auto* camera = m_renderer->GetActiveCamera();
+    // Orbit around the existing focal point, including off-origin clouds.
+    // Camera-local axes also allow rotation through the top and bottom views.
+    camera->Azimuth(azimuthDegrees);
+    camera->Elevation(elevationDegrees);
+    camera->OrthogonalizeViewUp();
+    m_renderer->ResetCameraClippingRange();
+    renderNow();
+    emit cameraChanged(cameraParameters());
+}
+
 void VTKViewer::resetCamera()
 {
     // The datum planes are large fixed-size reference geometry, so they are left

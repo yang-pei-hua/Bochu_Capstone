@@ -42,6 +42,7 @@ public:
     ~PointCloudWorkspaceController() override;
     void connectUi();
     void openPointCloud();
+    void loadPointCloudFromFile(const QString& filePath);
     void reconstructCad();
     void cancelCadReconstruction();
     void prepareProjectReplacement();

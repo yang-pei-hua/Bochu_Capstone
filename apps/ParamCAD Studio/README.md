@@ -66,6 +66,21 @@ To regenerate them, run `python tools/generate_client_icon.py` from the reposito
 root with Pillow installed, then rebuild the client. Desktop shortcuts should
 target the executable above and use its Release directory as the working directory.
 
+### Keyboard navigation and file drops
+
+With the viewport focused, use the **arrow keys** to rotate around the current
+camera target. Tap for one step or hold a key to rotate repeatedly. **Ctrl+Up**
+increases the step and **Ctrl+Down** decreases it for both axes. The default is
+5 degrees per press; the status bar displays the current step (0.1–45 degrees).
+Text fields, numeric inputs, lists and menus keep their normal arrow-key behavior.
+Loading a file focuses the viewport; use Tab to return to it after editing a field.
+
+Drag one local **STEP/STP or PLY** file into any part of the window to load it with
+the existing importer and fit the view. Extension case, spaces and Unicode paths
+are supported. PLY imports stay centered on the cloud even when it is away from
+the origin. File drops do not start CAD reconstruction. Folders, remote URLs and
+multiple-file drops are rejected; the source file is never moved.
+
 The binary SDKs under the repository-root `deps/` directory are intentionally
 excluded from Git and AI context. See [`../../deps/README.md`](../../deps/README.md)
 for the canonical dependency layout and verification commands.

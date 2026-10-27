@@ -8,6 +8,8 @@ class QAction;
 class QDockWidget;
 class QLabel;
 class QPlainTextEdit;
+class QDragEnterEvent;
+class QDropEvent;
 class QTabWidget;
 class ModelingPanel;
 class PointCloudRelationsPanel;
@@ -46,7 +48,13 @@ public slots:
     void logWarning(const QString& message);
     void logError(const QString& message);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
+
 private:
+    void updateRotationStep();
     void createActions();
     void createMenus();
     void createToolBar();
@@ -72,6 +80,8 @@ private:
     QDockWidget* m_bottomDock = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QLabel* m_rotationStepLabel = nullptr;
+    double m_rotationStepDegrees = 5.0;
 
     SketchWorkspaceController* m_sketchWorkspace = nullptr;
     FeatureEditingController* m_featureEditing = nullptr;

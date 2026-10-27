@@ -48,6 +48,9 @@ coverage/
 /data/fountain-p11/images/
 /data/fountain-p11/raw/
 
+# Local real-workpiece image dataset
+/data/real-workpieces/
+
 # Generated reconstruction outputs (README stays tracked)
 /outputs/*
 !/outputs/.gitignore

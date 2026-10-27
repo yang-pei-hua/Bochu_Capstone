@@ -25,27 +25,67 @@
 #include "ui/viewport/VTKViewer.h"
 
 #include <QAction>
+#include <QAbstractItemView>
+#include <QAbstractSlider>
+#include <QAbstractSpinBox>
 #include <QApplication>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
 #include <QKeySequence>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QPlainTextEdit>
+#include <QComboBox>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
+#include <QTextEdit>
+#include <QUrl>
+
+#include <algorithm>
+
+namespace {
+QString droppedAssetPath(const QMimeData* mimeData)
+{
+    if (!mimeData || !mimeData->hasUrls()) return {};
+    const auto urls = mimeData->urls();
+    // The scene owns one model and one cloud; do not silently replace assets
+    // several times when a whole folder or a multi-file selection is dropped.
+    if (urls.size() != 1 || !urls.first().isLocalFile()) return {};
+    const QFileInfo file(urls.first().toLocalFile());
+    const auto suffix = file.suffix().toLower();
+    if (!file.isFile() || !file.isReadable()
+        || (suffix != "step" && suffix != "stp" && suffix != "ply")) return {};
+    return file.absoluteFilePath();
+}
+
+bool consumesArrowKeys(QWidget* widget)
+{
+    for (auto* current = widget; current; current = current->parentWidget()) {
+        if (qobject_cast<QLineEdit*>(current) || qobject_cast<QAbstractSpinBox*>(current)
+            || qobject_cast<QTextEdit*>(current) || qobject_cast<QPlainTextEdit*>(current)
+            || qobject_cast<QComboBox*>(current) || qobject_cast<QAbstractItemView*>(current)
+            || qobject_cast<QAbstractSlider*>(current)) return true;
+    }
+    return false;
+}
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
     setWindowTitle(tr("CAD & Point Cloud Studio"));
+    setAcceptDrops(true);
     resize(1500, 920);
     setDockNestingEnabled(true);
     setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
@@ -60,6 +100,7 @@ MainWindow::MainWindow(QWidget* parent)
     createWorkspaceControllers();
     connectUi();
     applyDarkTheme();
+    qApp->installEventFilter(this);
 
     m_scenePanel->setScene(m_scene);
     m_scenePanel->setNodeState(SceneNodeType::Model, m_viewer->hasBody(), m_viewer->objectVisible());
@@ -76,6 +117,7 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow()
 {
+    qApp->removeEventFilter(this);
     // Workspaces borrow widgets: destroy them (and join analysis) before Qt tears
     // down the window's child widgets and command controllers.
     delete m_pointCloudWorkspace;
@@ -87,6 +129,90 @@ MainWindow::~MainWindow()
     delete m_viewer;
     delete m_pointCloudDocument;
     delete m_projectController;
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    auto* widget = qobject_cast<QWidget*>(watched);
+    if (!widget || widget->window() != this) return QMainWindow::eventFilter(watched, event);
+
+    // Handle file drops across the whole window, including text and VTK widgets.
+    if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove
+        || event->type() == QEvent::Drop) {
+        auto* drop = static_cast<QDropEvent*>(event);
+        if (drop->mimeData()->hasUrls()) {
+            if (event->type() == QEvent::Drop) {
+                dropEvent(drop);
+            } else if (!droppedAssetPath(drop->mimeData()).isEmpty()
+                       && drop->possibleActions().testFlag(Qt::CopyAction)) {
+                drop->setDropAction(Qt::CopyAction);
+                drop->accept();
+            } else {
+                drop->ignore();
+            }
+            return true;
+        }
+    }
+
+    if ((event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride)
+        && !QApplication::activePopupWidget() && !consumesArrowKeys(widget)
+        && !consumesArrowKeys(QApplication::focusWidget())) {
+        auto* key = static_cast<QKeyEvent*>(event);
+        const bool arrow = key->key() == Qt::Key_Left || key->key() == Qt::Key_Right
+                           || key->key() == Qt::Key_Up || key->key() == Qt::Key_Down;
+        const bool adjust = key->modifiers() == Qt::ControlModifier
+                            && (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down);
+        if (arrow && (key->modifiers() == Qt::NoModifier || adjust)) {
+            key->accept();
+            if (event->type() == QEvent::ShortcutOverride) return true;
+            // Windows key repeat supplies repeated presses while a key is held.
+            if (adjust) {
+                m_rotationStepDegrees = std::clamp(m_rotationStepDegrees
+                    * (key->key() == Qt::Key_Up ? 1.25 : 0.8), 0.1, 45.0);
+                updateRotationStep();
+            } else {
+                const double yaw = key->key() == Qt::Key_Left ? m_rotationStepDegrees
+                                   : key->key() == Qt::Key_Right ? -m_rotationStepDegrees : 0.0;
+                const double pitch = key->key() == Qt::Key_Up ? m_rotationStepDegrees
+                                     : key->key() == Qt::Key_Down ? -m_rotationStepDegrees : 0.0;
+                m_viewer->rotateCamera(yaw, pitch);
+            }
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (!droppedAssetPath(event->mimeData()).isEmpty()
+        && event->possibleActions().testFlag(Qt::CopyAction)) {
+        event->setDropAction(Qt::CopyAction);
+        event->accept();
+    } else {
+        event->ignore();
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent* event)
+{
+    const auto path = droppedAssetPath(event->mimeData());
+    if (path.isEmpty() || !event->possibleActions().testFlag(Qt::CopyAction)) {
+        event->ignore();
+        statusBar()->showMessage(tr("请一次拖入一个本地 STEP/STP 或 PLY 文件。"), 4000);
+        return;
+    }
+    event->setDropAction(Qt::CopyAction);
+    event->accept();
+    if (QFileInfo(path).suffix().compare("ply", Qt::CaseInsensitive) == 0)
+        m_pointCloudWorkspace->loadPointCloudFromFile(path);
+    else
+        m_modelViewController->loadModelFromFile(path);
+}
+
+void MainWindow::updateRotationStep()
+{
+    m_rotationStepLabel->setText(tr("旋转步长：%1°").arg(m_rotationStepDegrees, 0, 'f', 2));
 }
 
 bool MainWindow::runPerformanceCapture(const QString& modelPath,
@@ -406,6 +532,11 @@ void MainWindow::createStatusBar()
 {
     m_statusLabel = new QLabel(tr("Ready | Model: None | Camera: Perspective"), this);
     statusBar()->addWidget(m_statusLabel, 1);
+    m_rotationStepLabel = new QLabel(this);
+    m_rotationStepLabel->setObjectName("keyboardRotationStep");
+    m_rotationStepLabel->setToolTip(tr("方向键旋转视角，按住连续旋转；Ctrl+↑/↓ 调整步长（0.1°–45°）。输入框内保持正常键盘操作。"));
+    statusBar()->addPermanentWidget(m_rotationStepLabel);
+    updateRotationStep();
 }
 
 void MainWindow::connectUi()

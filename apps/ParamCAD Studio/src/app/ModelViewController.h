@@ -27,6 +27,7 @@ public:
                         QWidget* dialogParent, QObject* parent = nullptr);
     void connectUi();
     void openModel();
+    void loadModelFromFile(const QString& filePath);
     void closeModel();
     void deleteModel();
     void exportModel();
