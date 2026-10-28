@@ -323,7 +323,16 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
                 return false;
             }, feature.params);
             if (!built) break;
-            appendIndependentSolid(solid, currentBody);
+            const bool join = std::visit([](const auto& p) {
+                using P=std::decay_t<decltype(p)>;
+                if constexpr(std::is_same_v<P,SpherePrimitiveParams> || std::is_same_v<P,CylinderPrimitiveParams> ||
+                    std::is_same_v<P,ConePrimitiveParams> || std::is_same_v<P,TorusPrimitiveParams>) return p.join;
+                else return false;
+            },feature.params);
+            if(join && !currentBody.IsNull()) {
+                ExtrudeFeatureParams operation; operation.operation=ExtrudeOperation::Join;
+                if(!applyExtrudeOperation(operation,solid,currentBody,error)) break;
+            } else appendIndependentSolid(solid, currentBody);
             if (feature.type == FeatureType::CylinderPrimitive)
                 states.emplace(feature.id, PrimitiveBuildState{feature.params});
             continue;

@@ -2,6 +2,7 @@
 
 #include "app/WorkspaceController.h"
 #include <modeling/ModelPatch.h>
+#include <reconstruction/analysis/SurfaceAnalysis.h>
 
 class QAction;
 class CadReconstructionTask;
@@ -71,4 +72,5 @@ private:
     quint64 m_cadBodyRevision = 0;
     modeling::ModelRevision m_cadModelRevision = 0;
     QString m_cadSourcePath;
+    std::optional<reconstruction::SurfaceAnalysisResult> m_surfaceAnalysis;
 };

@@ -4,7 +4,7 @@
 #include <modeling/FeatureParams.h>
 #include <modeling/Sketch.h>
 
-#include <reconstruction/ModelingAdapter.h>
+#include <reconstruction/modeling/ModelingAdapter.h>
 
 namespace {
 

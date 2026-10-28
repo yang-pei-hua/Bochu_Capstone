@@ -6,6 +6,7 @@
 #include <iostream>
 #include <set>
 #include <stdexcept>
+#include <limits>
 
 namespace {
 void require(bool condition, const char* message) { if (!condition) throw std::runtime_error(message); }
@@ -33,6 +34,16 @@ int main(int argc, char** argv)
         for(const auto& surface:result.surfaces) for(auto id:surface.points) {
             require(valid.count(id) && assigned.insert(id).second, "stable source IDs are mapped once");
         }
+        auto invalid=cloud;
+        invalid.positions.insert(invalid.positions.begin(),{std::numeric_limits<float>::quiet_NaN(),0,0});
+        invalid.normals.insert(invalid.normals.begin(),{0,0,1});
+        std::vector<vtkIdType> original;
+        for(size_t i=0;i<invalid.positions.size();++i) original.push_back(static_cast<vtkIdType>(i+500));
+        const auto finiteResult=analysePointCloud(invalid,original,0.01);
+        require(finiteResult.error.isEmpty() && finiteResult.assignedPoints==cloud.positions.size(),
+                "invalid source rows do not shift support IDs");
+        for(const auto& surface:finiteResult.surfaces) for(auto id:surface.points)
+            require(id>500,"non-finite original observation is never assigned");
         PlyCloud dense;
         for(int repeat=0;repeat<24;++repeat) {
             dense.positions.insert(dense.positions.end(),cloud.positions.begin(),cloud.positions.end());

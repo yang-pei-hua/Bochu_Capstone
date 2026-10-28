@@ -40,6 +40,24 @@ add_subdirectory(
     "${CMAKE_CURRENT_SOURCE_DIR}/../../core/geometric_reconstruction"
     "${CMAKE_CURRENT_BINARY_DIR}/geometric_reconstruction"
 )
+if(CAD_CLIENT_BUILD_TESTS)
+    enable_testing()
+    add_executable(surface_analysis_test ../../core/geometric_reconstruction/tests/analysis/surface_analysis_test.cpp)
+    target_link_libraries(surface_analysis_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    target_include_directories(surface_analysis_test PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+    target_link_directories(surface_analysis_test PRIVATE ${OpenCASCADE_LIBRARY_DIR})
+    add_test(NAME surface_analysis_test COMMAND surface_analysis_test)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../../core/geometric_reconstruction/cmake/RegressionSources.cmake")
+    add_executable(geometric_reconstruction_regression_test ${GEOMETRIC_RECONSTRUCTION_REGRESSION_SOURCES})
+    target_link_libraries(geometric_reconstruction_regression_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    target_compile_definitions(geometric_reconstruction_regression_test PRIVATE
+        RECONSTRUCTION_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/shared-surface-regression")
+    add_test(NAME geometric_reconstruction_regression_test COMMAND geometric_reconstruction_regression_test)
+    set_tests_properties(surface_analysis_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
+    set_tests_properties(geometric_reconstruction_regression_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
+endif()
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
 # OpenCASCADE is resolved here as well as inside CadModelCore because the client
@@ -326,7 +344,7 @@ if(CAD_CLIENT_BUILD_TESTS)
         src/core/PointCloudRelations.cpp src/io/PlyReader.cpp)
     target_include_directories(point_cloud_document_test PRIVATE src)
     target_link_libraries(point_cloud_document_test PRIVATE
-        Qt6::Core VTK::CommonCore VTK::CommonDataModel)
+        Qt6::Core VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction)
     if(MSVC)
         target_compile_options(point_cloud_document_test PRIVATE /W4 /permissive- /utf-8)
     endif()
@@ -348,7 +366,7 @@ if(CAD_CLIENT_BUILD_TESTS)
     add_executable(point_cloud_relations_test tests/point_cloud_relations_test.cpp
         src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp src/io/PlyWriter.cpp src/core/PointCloudRelations.cpp src/io/PlyReader.cpp)
     target_include_directories(point_cloud_relations_test PRIVATE src)
-    target_link_libraries(point_cloud_relations_test PRIVATE Qt6::Core VTK::CommonCore VTK::CommonDataModel)
+    target_link_libraries(point_cloud_relations_test PRIVATE Qt6::Core VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction)
     add_test(NAME point_cloud_relations_test COMMAND point_cloud_relations_test)
     add_executable(point_cloud_analysis_test tests/point_cloud_analysis_test.cpp
         src/io/PointCloudAnalysis.cpp src/io/PointCloudAdapter.cpp src/io/PlyReader.cpp)
@@ -369,7 +387,7 @@ if(CAD_CLIENT_BUILD_TESTS)
         src/core/PointCloudRelations.cpp
     )
     target_include_directories(point_cloud_selection_test PRIVATE src)
-    target_link_libraries(point_cloud_selection_test PRIVATE Qt6::Core VTK::CommonCore VTK::CommonDataModel)
+    target_link_libraries(point_cloud_selection_test PRIVATE Qt6::Core VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction)
     if(MSVC)
         target_compile_options(point_cloud_selection_test PRIVATE /W4 /permissive- /utf-8)
     endif()

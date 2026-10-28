@@ -1,8 +1,8 @@
 #include "io/PlyReader.h"
 #include "io/PointCloudAdapter.h"
 
-#include <reconstruction/BoxRecognizer.h>
-#include <reconstruction/PrimitiveDetector.h>
+#include <reconstruction/recognition/BoxRecognizer.h>
+#include <reconstruction/detection/PrimitiveDetector.h>
 
 #include <QDir>
 #include <QFile>

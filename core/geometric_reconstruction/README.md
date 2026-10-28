@@ -1,5 +1,61 @@
 # Geometric Reconstruction
 
+## Directory guide
+
+Public headers under `include/reconstruction/` and implementations under `src/`
+use matching functional groups:
+
+| Group | Responsibility |
+| --- | --- |
+| `data/` | Immutable point observations, analytic evidence and basic candidates |
+| `preprocessing/` | Voxel sampling, robust outlier filtering and normal recovery |
+| `detection/` | Primitive proposal API and private `cgal/` backend |
+| `analysis/` | Shared analysis orchestration, snapshot validation, connected patches and relationships |
+| `recognition/` | Box/hole entry points and parametric-solid orchestration |
+| `recognition/compound/` | Local planar frames, material cells, box-cover search and boundary validation |
+| `recognition/curved/` | Parameter fitting, cap detection and complete-boundary scoring |
+| `recognition/guided/` | Manual-region fitting, completion and CAD-face verification |
+| `recognition/mixed/` | Host detection, attached features and material membership |
+| `modeling/` | Atomic candidate-to-modeling-core adaptation |
+| `testing/` | Analytic point-cloud generation |
+
+The public recognition headers stay together in `include/reconstruction/recognition/`;
+the implementation-only subdirectories hold their private helper types and functions.
+`src/common/Math3.h` contains shared numerical helpers. Headers in `src/**/detail/`
+are private implementation contracts; the `src` include directory is not exported
+to library consumers. CGAL types stay inside the private backend.
+
+For example, use `reconstruction/analysis/SurfaceAnalysis.h` and
+`reconstruction/recognition/CompoundRecognizer.h`. The C++ namespace and public
+function signatures are unchanged by this layout reorganization. In-repository
+consumers use the new include paths directly.
+
+Each `.cpp` is a separate translation unit. Large implementations are split by
+responsibility rather than textually including `.cpp`/`.inc` fragments:
+
+- The CGAL detector orchestrates proposals; option checks and plane/cylinder/curved
+  evidence conversion live in separate units.
+- Planar compound recovery separates frame estimation, occupancy classification,
+  exact box-cover selection and final boundary validation. `Arrangement` is their
+  private shared intermediate state.
+- Surface analysis separates snapshot metadata, surface geometry, patch indexing,
+  relation inference and detector orchestration.
+- Guided fitting keeps OpenCASCADE face verification in `HintValidation.cpp`.
+
+`tests/analysis/` covers shared analysis. `tests/regression/` splits the original
+regression suite into preprocessing, box, cylinder, curved, hole and modeling
+cases; `main.cpp` retains the original test order. Both standalone and client
+builds consume `cmake/RegressionSources.cmake` to keep their test source lists aligned.
+
+## Pipeline
+
+The shared pipeline now starts with `analyzeSurfaces()` and passes one typed
+`SurfaceAnalysisResult` to semantic recognizers. See
+[`Shared_Surface_Analysis_Refactor.md`](../../docs/Shared_Surface_Analysis_Refactor.md)
+for the current interfaces, patch/relation semantics, cache validity, mixed-host
+recognition, and verification commands. The low-level joint detector described
+below remains available; shared production analysis gathers families independently.
+
 This module is the Qt/VTK-free boundary between observed point clouds and the
 parametric modeling core. It keeps three kinds of state separate:
 
@@ -76,9 +132,10 @@ reject hemispheres, partial rings and missing end caps; they are a bounded
 coverage check rather than proof that every arbitrarily small gap was observed.
 
 Accepted solids retain typed Sphere/Cylinder/Cone/Torus feature parameters and
-can be edited through `EditFeatureCommand` in an atomic patch. They are new
-independent solids; curved boolean combinations, trimmed patches and automatic
-completion of occluded surfaces are outside this first implementation.
+can be edited through `EditFeatureCommand` in an atomic patch. Their `join` flag
+defaults to false; observed cylinder/frustum bosses on a supported host can now
+be fused. General trimmed curved combinations and unsupported occluded geometry
+remain outside the bounded recognizers.
 
 `reconstructParametricSolid()` is now the shared Studio/validator entry point.
 It first reconstructs a common orthogonal frame from dominant normal families,
@@ -205,3 +262,13 @@ configuration. The test writes `test-output/synthetic_box.step`.
 
 CGAL Shape Detection is GPL-3.0-or-later or commercially licensed. Distribution
 of a closed-source build requires the appropriate commercial-license decision.
+
+### Local recovery and relation fitting
+
+`analysis/SurfaceAnalysis.h` exposes failure diagnostics, bounded source-observation
+recovery, and observation-checked joint parallel/perpendicular/coaxial fitting for
+planes and cylinders. Mixed recognition retries failed regions without changing
+previously recognized host/features; local snapshots and candidate alternatives
+remain available in `SurfaceAnalysisResult::localFailures`. See
+[workflow and limits](../../docs/Shared_Surface_Analysis_Refactor.md) and run
+`python tools/run_local_recovery_tests.py` for the mixed-board acceptance matrix.

@@ -22,18 +22,48 @@ if(NOT TARGET CadModelCore::CadModelCore)
 endif()
 
 add_library(GeometricReconstruction
-    src/AxisAlignedBoxRecognizer.cpp
-    src/BoxRecognizer.cpp
-    src/CgalEfficientRansacDetector.cpp
-    src/CompoundRecognizer.cpp
-    src/CurvedSolidRecognizer.cpp
-    src/GuidedSolidRecognizer.cpp
-    src/ModelingAdapter.cpp
-    src/PointCloudPreprocessor.cpp
-    src/PointStore.cpp
-    src/PrimitiveDetector.cpp
-    src/SyntheticPointCloud.cpp
-    src/ThroughHoleRecognizer.cpp
+    src/analysis/AnalysisSnapshot.cpp
+    src/analysis/LocalRecovery.cpp
+    src/analysis/RelationOptimization.cpp
+    src/analysis/SurfaceAnalysis.cpp
+    src/analysis/SurfaceGeometry.cpp
+    src/analysis/SurfacePatches.cpp
+    src/analysis/SurfaceRelations.cpp
+    src/data/PointStore.cpp
+    src/detection/PrimitiveDetector.cpp
+    src/detection/cgal/CgalEfficientRansacDetector.cpp
+    src/detection/cgal/CurvedEvidence.cpp
+    src/detection/cgal/CylinderEvidence.cpp
+    src/detection/cgal/EvidenceGeometry.cpp
+    src/detection/cgal/PlaneEvidence.cpp
+    src/detection/cgal/RansacOptions.cpp
+    src/modeling/ModelingAdapter.cpp
+    src/preprocessing/Downsampling.cpp
+    src/preprocessing/NormalEstimation.cpp
+    src/preprocessing/OutlierFilter.cpp
+    src/preprocessing/PointCloudPreprocessor.cpp
+    src/recognition/AxisAlignedBoxRecognizer.cpp
+    src/recognition/BoxRecognizer.cpp
+    src/recognition/ParametricSolidRecognizer.cpp
+    src/recognition/ThroughHoleRecognizer.cpp
+    src/recognition/compound/BoundaryValidation.cpp
+    src/recognition/compound/BoxCover.cpp
+    src/recognition/compound/CompoundRecognizer.cpp
+    src/recognition/compound/MaterialCells.cpp
+    src/recognition/compound/PlanarFrame.cpp
+    src/recognition/compound/PlanarGeometry.cpp
+    src/recognition/curved/BoundaryAssessment.cpp
+    src/recognition/curved/CapDetection.cpp
+    src/recognition/curved/CurvedFitting.cpp
+    src/recognition/curved/CurvedSolidRecognizer.cpp
+    src/recognition/guided/GuidedSolidRecognizer.cpp
+    src/recognition/guided/HintFitting.cpp
+    src/recognition/guided/HintValidation.cpp
+    src/recognition/mixed/AttachedFeatures.cpp
+    src/recognition/mixed/HostDetection.cpp
+    src/recognition/mixed/MixedFeatureRecognizer.cpp
+    src/recognition/mixed/MixedMaterial.cpp
+    src/testing/SyntheticPointCloud.cpp
 )
 add_library(GeometricReconstruction::GeometricReconstruction ALIAS
     GeometricReconstruction)
@@ -42,6 +72,7 @@ target_compile_features(GeometricReconstruction PUBLIC cxx_std_17)
 target_include_directories(GeometricReconstruction PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(GeometricReconstruction PUBLIC
     CadModelCore::CadModelCore
@@ -58,8 +89,13 @@ endif()
 
 if(GEOMETRIC_RECONSTRUCTION_BUILD_TESTS)
     include(CTest)
-    add_executable(geometric_reconstruction_test
-        tests/geometric_reconstruction_test.cpp)
+    add_executable(surface_analysis_test tests/analysis/surface_analysis_test.cpp)
+    target_link_libraries(surface_analysis_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    add_test(NAME surface_analysis_test COMMAND surface_analysis_test)
+    set_tests_properties(surface_analysis_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${OpenCASCADE_BINARY_DIR}")
+    include(cmake/RegressionSources.cmake)
+    add_executable(geometric_reconstruction_test ${GEOMETRIC_RECONSTRUCTION_REGRESSION_SOURCES})
     target_link_libraries(geometric_reconstruction_test PRIVATE
         GeometricReconstruction::GeometricReconstruction)
     target_compile_definitions(geometric_reconstruction_test PRIVATE

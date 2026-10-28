@@ -1,11 +1,12 @@
 #pragma once
 
 #include "core/PointCloudSelection.h"
-#include <reconstruction/GuidedSolidRecognizer.h>
+#include <reconstruction/recognition/GuidedSolidRecognizer.h>
 
 struct PointCloudAnalysisResult
 {
     std::vector<DetectedPointCloudSurface> surfaces;
+    reconstruction::SurfaceAnalysisResult analysis;
     QString error;
     size_t processedPoints = 0;
     size_t assignedPoints = 0;
@@ -16,5 +17,6 @@ struct PointCloudAnalysisResult
 // confusing representative indices with source indices.
 PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
     const std::vector<vtkIdType>& originalIds, double distanceTolerance,
-    const QString& geometry = QString());
+    const QString& geometry = QString(),
+    reconstruction::LengthUnit unit = reconstruction::LengthUnit::Arbitrary);
 PointCloudRegion describeTemplateFit(const reconstruction::TemplateFit& fit, double scaleToMillimeters);

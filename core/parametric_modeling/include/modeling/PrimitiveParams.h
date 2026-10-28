@@ -36,12 +36,13 @@ struct ThroughHolePrimitiveParams {
     double radius = 0.0;
 };
 
-struct SpherePrimitiveParams { Vec3 center{}; double radius = 0.0; };
+struct SpherePrimitiveParams { Vec3 center{}; double radius = 0.0; bool join = false; };
 struct CylinderPrimitiveParams {
     Vec3 baseCenter{};
     Vec3 axisDirection{0.0, 0.0, 1.0};
     double radius = 0.0;
     double height = 0.0;
+    bool join = false;
 };
 // Radii belong to the start and end planes along axisDirection. Either may be
 // zero for a pointed cone; both positive describe a conical frustum.
@@ -51,6 +52,7 @@ struct ConePrimitiveParams {
     double baseRadius = 0.0;
     double topRadius = 0.0;
     double height = 0.0;
+    bool join = false;
 };
 // First version supports complete non-self-intersecting ring tori (R > r > 0).
 struct TorusPrimitiveParams {
@@ -58,6 +60,7 @@ struct TorusPrimitiveParams {
     Vec3 axisDirection{0.0, 0.0, 1.0};
     double majorRadius = 0.0;
     double minorRadius = 0.0;
+    bool join = false;
 };
 using CurvedPrimitiveParams = std::variant<SpherePrimitiveParams, CylinderPrimitiveParams,
                                           ConePrimitiveParams, TorusPrimitiveParams>;

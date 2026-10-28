@@ -154,17 +154,17 @@ QJsonObject paramsJson(const FeatureParams& params)
                          values({p.axisPoint.x, p.axisPoint.y, p.axisPoint.z, p.axisDirection.x,
                                  p.axisDirection.y, p.axisDirection.z, p.radius})}};
             else if constexpr (std::is_same_v<P, SpherePrimitiveParams>)
-                return {{"values", values({p.center.x, p.center.y, p.center.z, p.radius})}};
+                return {{"join", p.join}, {"values", values({p.center.x, p.center.y, p.center.z, p.radius})}};
             else if constexpr (std::is_same_v<P, CylinderPrimitiveParams>)
-                return {{"values",
+                return {{"join", p.join}, {"values",
                          values({p.baseCenter.x, p.baseCenter.y, p.baseCenter.z, p.axisDirection.x,
                                  p.axisDirection.y, p.axisDirection.z, p.radius, p.height})}};
             else if constexpr (std::is_same_v<P, ConePrimitiveParams>)
-                return {{"values", values({p.baseCenter.x, p.baseCenter.y, p.baseCenter.z,
+                return {{"join", p.join}, {"values", values({p.baseCenter.x, p.baseCenter.y, p.baseCenter.z,
                                            p.axisDirection.x, p.axisDirection.y, p.axisDirection.z,
                                            p.baseRadius, p.topRadius, p.height})}};
             else
-                return {{"values", values({p.center.x, p.center.y, p.center.z, p.axisDirection.x,
+                return {{"join", p.join}, {"values", values({p.center.x, p.center.y, p.center.z, p.axisDirection.x,
                                            p.axisDirection.y, p.axisDirection.z, p.majorRadius,
                                            p.minorRadius})}};
         },
@@ -215,19 +215,19 @@ FeatureParams paramsFromJson(const QJsonObject& p)
     }
     case 5: {
         const auto v = numbers(p["values"], 4);
-        return SpherePrimitiveParams{vec(v, 0), v[3]};
+        return SpherePrimitiveParams{vec(v, 0), v[3], p.contains("join") ? boolean(p["join"]) : false};
     }
     case 6: {
         const auto v = numbers(p["values"], 8);
-        return CylinderPrimitiveParams{vec(v, 0), vec(v, 3), v[6], v[7]};
+        return CylinderPrimitiveParams{vec(v, 0), vec(v, 3), v[6], v[7], p.contains("join") ? boolean(p["join"]) : false};
     }
     case 7: {
         const auto v = numbers(p["values"], 9);
-        return ConePrimitiveParams{vec(v, 0), vec(v, 3), v[6], v[7], v[8]};
+        return ConePrimitiveParams{vec(v, 0), vec(v, 3), v[6], v[7], v[8], p.contains("join") ? boolean(p["join"]) : false};
     }
     default: {
         const auto v = numbers(p["values"], 8);
-        return TorusPrimitiveParams{vec(v, 0), vec(v, 3), v[6], v[7]};
+        return TorusPrimitiveParams{vec(v, 0), vec(v, 3), v[6], v[7], p.contains("join") ? boolean(p["join"]) : false};
     }
     }
 }

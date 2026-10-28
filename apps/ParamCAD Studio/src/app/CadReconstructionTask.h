@@ -2,9 +2,9 @@
 
 #include "io/PlyReader.h"
 
-#include <reconstruction/CompoundRecognizer.h>
-#include <reconstruction/PointCloudPreprocessor.h>
-#include <reconstruction/GuidedSolidRecognizer.h>
+#include <reconstruction/recognition/CompoundRecognizer.h>
+#include <reconstruction/preprocessing/PointCloudPreprocessor.h>
+#include <reconstruction/recognition/GuidedSolidRecognizer.h>
 
 #include <QObject>
 
@@ -20,6 +20,8 @@ struct CadReconstructionResult
     bool preprocessingComplete = false;
     reconstruction::PointCloudPreprocessingReport preprocessing;
     reconstruction::CompoundCandidate candidate;
+    reconstruction::SurfaceAnalysisResult analysis;
+    bool analysisReused = false;
     std::vector<reconstruction::TemplateFit> templateFits;
     int failedRegionId = 0;
     QString error;
@@ -37,7 +39,9 @@ public:
     explicit CadReconstructionTask(QObject* parent = nullptr);
     ~CadReconstructionTask() override;
     bool start(PlyCloud cloud, reconstruction::LengthUnit unit,
-               std::vector<reconstruction::TemplateHint> hints = {}, double sourceTolerance = 0);
+               std::vector<reconstruction::TemplateHint> hints = {}, double sourceTolerance = 0,
+               std::optional<reconstruction::SurfaceAnalysisResult> analysis = {},
+               std::vector<reconstruction::SurfaceRelationHint> relations = {});
     bool isRunning() const noexcept;
     bool isCancellationRequested() const noexcept;
     void cancel();

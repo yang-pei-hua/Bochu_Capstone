@@ -3,8 +3,8 @@
 #include <modeling/Feature.h>
 #include <modeling/ModelCommand.h>
 #include <modeling/ModelingCore.h>
-#include <reconstruction/ReconstructionCandidate.h>
-#include <reconstruction/CompoundRecognizer.h>
+#include <reconstruction/data/ReconstructionCandidate.h>
+#include <reconstruction/recognition/CompoundRecognizer.h>
 
 #include <TopoDS_Shape.hxx>
 

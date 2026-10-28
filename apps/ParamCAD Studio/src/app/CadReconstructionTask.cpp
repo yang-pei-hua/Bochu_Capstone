@@ -39,7 +39,9 @@ void CadReconstructionTask::cancel()
 }
 
 bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit unit,
-    std::vector<reconstruction::TemplateHint> hints, double sourceTolerance)
+    std::vector<reconstruction::TemplateHint> hints, double sourceTolerance,
+    std::optional<reconstruction::SurfaceAnalysisResult> analysis,
+    std::vector<reconstruction::SurfaceRelationHint> relations)
 {
     if (m_running) return false;
     auto result = std::make_shared<CadReconstructionResult>();
@@ -47,7 +49,8 @@ bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit uni
     m_cancelled = cancelled;
     m_running = true;
     m_thread = QThread::create([this, cloud = std::move(cloud), unit, result, cancelled,
-                              hints = std::move(hints), sourceTolerance] {
+                              hints = std::move(hints), sourceTolerance, analysis = std::move(analysis),
+                              relations = std::move(relations)] {
         try {
             if (cancelled->load()) return;
             const auto source = PointCloudAdapter::toPointStore(cloud, unit);
@@ -73,19 +76,27 @@ bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit uni
             }, Qt::QueuedConnection);
             auto planes=PointCloudAdapter::planeOptionsFor(points);
             auto cylinders=PointCloudAdapter::cylinderOptionsFor(points);
-            if(!hints.empty() && sourceTolerance > 0) {
+            if(sourceTolerance > 0) {
                 planes.distanceThreshold=cylinders.distanceThreshold=
                     sourceTolerance*result->preprocessing.appliedScaleToMillimeters;
             }
+            auto sourceSamples=source.points();
+            const double sourceScale=result->preprocessing.appliedScaleToMillimeters;
+            for(auto& p:sourceSamples) {p.position.x*=sourceScale;p.position.y*=sourceScale;p.position.z*=sourceScale;}
+            const reconstruction::PointStore recoverySource(std::move(sourceSamples),points.unit());
             reconstruction::GuidedSolidResult guided;
             if (!reconstruction::reconstructGuidedSolid(points,planes,cylinders,hints,guided,failure,
-                    [cancelled] { return cancelled->load(); })) {
+                    [cancelled] { return cancelled->load(); }, analysis ? &*analysis : nullptr,relations,&recoverySource)) {
+                result->analysis=std::move(guided.analysis);
+                result->analysisReused=guided.analysisReused;
                 result->outcome = CadReconstructionResult::Outcome::Unsupported;
                 result->failedRegionId = guided.failedRegionId;
                 result->error = QString::fromStdString(failure);
                 return;
             }
             result->candidate=std::move(guided.candidate);
+            result->analysis=std::move(guided.analysis);
+            result->analysisReused=guided.analysisReused;
             result->templateFits=std::move(guided.fits);
             result->outcome = CadReconstructionResult::Outcome::Success;
         } catch (const std::exception& error) {

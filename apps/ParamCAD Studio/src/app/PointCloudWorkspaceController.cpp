@@ -476,8 +476,22 @@ void PointCloudWorkspaceController::reconstructCad()
         return;
     }
     m_analyseAfterCad = false;
+    std::vector<reconstruction::SurfaceRelationHint> relations;
+    for(const auto& relation:m_document->selection().relations()) {
+        if(relation.automatic) continue;
+        reconstruction::SurfaceRelationHint hint;
+        bool known=false;
+        for(int i=0;i<=static_cast<int>(reconstruction::SurfaceRelationKind::AxisParallelToPlane);++i) {
+            const auto kind=static_cast<reconstruction::SurfaceRelationKind>(i);
+            if(relation.type==QString::fromLatin1(reconstruction::surfaceRelationName(kind))) {hint.kind=kind;known=true;break;}
+        }
+        if(!known) continue;
+        for(auto id:m_document->selection().regionPoints(relation.first)) if(pointIds.count(id)) hint.firstPoints.push_back(pointIds.at(id));
+        for(auto id:m_document->selection().regionPoints(relation.second)) if(pointIds.count(id)) hint.secondPoints.push_back(pointIds.at(id));
+        relations.push_back(std::move(hint));
+    }
     m_cadTask->start(std::move(cloud), sourceUnit, std::move(hints),
-                     m_ui.relationsPanel->surfaceTolerance());
+                     m_ui.relationsPanel->surfaceTolerance(), m_surfaceAnalysis,std::move(relations));
 }
 
 void PointCloudWorkspaceController::requestGuidedReconstruction()
@@ -533,6 +547,8 @@ void PointCloudWorkspaceController::updateCadActions()
 
 void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconstructionResult& result)
 {
+    // Consumers validate fingerprint, units and settings before reusing this.
+    if (result.analysis.pointFingerprint) m_surfaceAnalysis = result.analysis;
     const auto reportStatus = [this](const QString& message) {
         m_ui.relationsPanel->setStatus(message);
         m_ui.modelingPanel->setStatusText(message);
@@ -644,8 +660,9 @@ void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId, bool r
     const double tolerance = m_ui.relationsPanel->surfaceTolerance();
     auto result = std::make_shared<PointCloudAnalysisResult>();
     m_ui.relationsPanel->setStatus(regionId ? workspaceTr("正在后台重拟合集合…") : workspaceTr("正在后台识别表面，并映射回原始点…"));
-    m_analysisThread = QThread::create([cloud, ids, geometry, tolerance, result] {
-        try { *result = analysePointCloud(cloud, ids, tolerance, geometry); }
+    const auto sourceUnit=cloudUnit(*m_document);
+    m_analysisThread = QThread::create([cloud, ids, geometry, tolerance, result, sourceUnit] {
+        try { *result = analysePointCloud(cloud, ids, tolerance, geometry,sourceUnit); }
         catch (const std::exception& error) { result->error = QString::fromUtf8(error.what()); }
     });
     auto* thread = m_analysisThread;
@@ -659,6 +676,7 @@ void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId, bool r
             m_ui.relationsPanel->setStatus(workspaceTr("工作点云或关系已被修改，本轮识别结果未应用；可重新识别。")); return;
         }
         if (!result->error.isEmpty()) { m_ui.relationsPanel->setStatus(result->error); emit logWarning(result->error); return; }
+        if (!regionId) m_surfaceAnalysis = result->analysis;
         if (result->surfaces.empty()) {
             m_ui.relationsPanel->setStatus(workspaceTr("没有识别到受支持的表面；点保持原有归属，可调整容差或手动分组。")); return;
         }

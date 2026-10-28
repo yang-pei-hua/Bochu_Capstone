@@ -38,15 +38,19 @@
 #include <cmath>
 #include <cstdint>
 #include <gp_Ax2.hxx>
+#include <gp_Ax1.hxx>
+#include <STEPControl_Reader.hxx>
+#include <IFSelect_ReturnStatus.hxx>
+#include <fstream>
 #include <iostream>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <modeling/StepExporter.h>
 #include <random>
-#include <reconstruction/ModelingAdapter.h>
-#include <reconstruction/PrimitiveDetector.h>
-#include <reconstruction/ThroughHoleRecognizer.h>
+#include <reconstruction/modeling/ModelingAdapter.h>
+#include <reconstruction/detection/PrimitiveDetector.h>
+#include <reconstruction/recognition/ThroughHoleRecognizer.h>
 #include <stdexcept>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -379,6 +383,62 @@ TopoDS_Shape fuse(const TopoDS_Shape &a, const TopoDS_Shape &b) {
 std::filesystem::path nativePath(const QString &path) {
     return std::filesystem::path(path.toStdWString());
 }
+TopoDS_Shape readPlacedStep(const QString& path) {
+    // Display imports intentionally center models. Direct analytic clouds retain
+    // their source coordinates, so accuracy comparison must retain STEP placement.
+    STEPControl_Reader reader;std::ifstream input(nativePath(path),std::ios::binary);
+    require(input.good() && reader.ReadStream("reference.step",input)==IFSelect_RetDone,"Cannot read placed reference STEP");
+    require(reader.TransferRoots()>0,"Reference STEP has no transferable roots");
+    return reader.OneShape();
+}
+// Independent source construction from dimensions, never from fitted labels.
+TopoDS_Shape mixedBoardSource(const QJsonObject& definition, double& analyticVolume) {
+    const auto base=definition["base_size"].toArray();
+    const double x=base[0].toDouble(),y=base[1].toDouble(),z=base[2].toDouble();
+    auto shape=BRepPrimAPI_MakeBox(x,y,z).Shape();analyticVolume=x*y*z;
+    for(const auto value:definition["features"].toArray()) {
+        const auto f=value.toObject();const auto kind=f["kind"].toString();
+        const bool subtract=kind.endsWith("through_hole");
+        const auto origin=f.contains("center_xy")?f["center_xy"].toArray():f["origin_xy"].toArray();
+        TopoDS_Shape tool;double volume=0;const double pi=std::acos(-1.0);
+        if(kind=="round_through_hole") {
+            const double r=f["radius"].toDouble();
+            tool=BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0,0,-1),gp_Dir(0,0,1)),r,z+2).Shape();volume=pi*r*r*z;
+        } else if(kind=="square_through_hole") {
+            const auto s=f["size_xy"].toArray();const double w=s[0].toDouble(),d=s[1].toDouble();
+            tool=BRepPrimAPI_MakeBox(gp_Pnt(0,0,-1),w,d,z+2).Shape();volume=w*d*z;
+        } else if(kind=="cube" || kind=="rectangular_boss") {
+            const auto s=f["size"].toArray();const double w=s[0].toDouble(),d=s[1].toDouble(),h=s[2].toDouble();
+            tool=BRepPrimAPI_MakeBox(w,d,h).Shape();volume=w*d*h;
+        } else if(kind=="cylinder_boss") {
+            const double r=f["radius"].toDouble(),h=f["height"].toDouble();
+            tool=BRepPrimAPI_MakeCylinder(r,h).Shape();volume=pi*r*r*h;
+        } else if(kind=="frustum_boss") {
+            const double a=f["base_radius"].toDouble(),b=f["top_radius"].toDouble(),h=f["height"].toDouble();
+            tool=BRepPrimAPI_MakeCone(a,b,h).Shape();volume=pi*h*(a*a+a*b+b*b)/3;
+        } else if(kind=="two_step_boss") {
+            const auto s=f["size_xy"].toArray();const double w=s[0].toDouble(),d=s[1].toDouble();
+            const double h=f["lower_height"].toDouble(),u=f["upper_width"].toDouble(),v=f["upper_height"].toDouble();
+            tool=fuse(BRepPrimAPI_MakeBox(w,d,h).Shape(),BRepPrimAPI_MakeBox(gp_Pnt(0,0,h),u,d,v).Shape());
+            volume=w*d*h+u*d*v;
+        } else if(kind=="l_bracket_gusset") {
+            const auto p=f["parameters"].toObject();
+            const double w=p["width"].toDouble(),d=p["base_depth"].toDouble(),b=p["base_thickness"].toDouble();
+            const double t=p["upright_thickness"].toDouble(),h=p["upright_height"].toDouble();
+            const double r=p["rib_thickness"].toDouble(),run=p["rib_run"].toDouble(),rise=p["rib_rise"].toDouble();
+            BRepBuilderAPI_MakePolygon polygon;
+            polygon.Add(gp_Pnt((w-r)/2,t,b));polygon.Add(gp_Pnt((w-r)/2,t+run,b));polygon.Add(gp_Pnt((w-r)/2,t,b+rise));polygon.Close();
+            const auto rib=BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(polygon.Wire()).Face(),gp_Vec(r,0,0)).Shape();
+            tool=fuse(fuse(BRepPrimAPI_MakeBox(w,d,b).Shape(),BRepPrimAPI_MakeBox(gp_Pnt(0,0,b),w,t,h).Shape()),rib);
+            volume=w*d*b+w*t*h+0.5*r*run*rise;
+        } else throw std::runtime_error("Unsupported mixed source feature");
+        gp_Trsf pose;pose.SetRotation(gp_Ax1(gp_Pnt(0,0,0),gp_Dir(0,0,1)),f["yaw_degrees"].toDouble()*pi/180);
+        pose.SetTranslationPart(gp_Vec(origin[0].toDouble(),origin[1].toDouble(),subtract?0:z));
+        tool=BRepBuilderAPI_Transform(tool,pose,true).Shape();
+        shape=subtract?cut(shape,tool):fuse(shape,tool);analyticVolume+=subtract?-volume:volume;
+    }
+    return shape;
+}
 void generate(const QStringList &args, QJsonObject &report) {
     require(args.size() == 5, "Usage: generate case.json model.step report.json");
     const auto definition = readObject(args[2]);
@@ -391,7 +451,9 @@ void generate(const QStringList &args, QJsonObject &report) {
     };
     TopoDS_Shape shape;
     double analyticVolume = 0;
-    if (definition["geometry"] == "box_through_hole") {
+    if (definition["geometry"] == "mixed_template_board") {
+        shape=mixedBoardSource(definition,analyticVolume);
+    } else if (definition["geometry"] == "box_through_hole") {
         const double x = number("size_x"), y = number("size_y"), z = number("size_z");
         const double radius = number("hole_diameter") / 2;
         require(2 * radius < std::min(x, y), "Hole must stay within the box");
@@ -579,31 +641,58 @@ void fit(const QStringList &args, QJsonObject &report) {
     planes.randomSeed = cylinders.randomSeed = static_cast<std::uint32_t>(seed);
     report["ransac_seed"] = double(seed);
     report["processed_bounds_mm"] = cloudBounds(processed);
+    reconstruction::SurfaceAnalysisResult analysis;
+    checkpoint("surface_analysis");
+    const bool analyzed = reconstruction::analyzeSurfaces(processed,
+        reconstruction::recognitionAnalysisOptions(processed, planes, cylinders), analysis, text);
+    report["surface_analysis"] = QJsonObject{{"surfaces", double(analysis.surfaces.size())},
+        {"patches", double(analysis.patches.size())}, {"relations", double(analysis.relations.size())},
+        {"detection_passes", double(analysis.detectionPasses)},
+        {"point_fingerprint", QString::number(analysis.pointFingerprint)}};
     reconstruction::CompoundCandidate compound;
     checkpoint("compound_reconstruction");
-    const bool compoundRecognized =
-        reconstruction::reconstructParametricSolid(processed, planes, cylinders, compound, text);
+    auto recoverySamples=source.points();
+    for(auto& p:recoverySamples) {p.position.x*=pre.appliedScaleToMillimeters;p.position.y*=pre.appliedScaleToMillimeters;p.position.z*=pre.appliedScaleToMillimeters;}
+    const reconstruction::PointStore recoverySource(std::move(recoverySamples),processed.unit());
+    const bool compoundRecognized = analyzed &&
+        reconstruction::recognizeParametricSolidFromAnalysis(processed, analysis, compound, text, &analysis.localFailures, &recoverySource);
+    auto serializeCandidates=[](const std::vector<reconstruction::PrimitiveEvidence>& candidates) {
+        QJsonArray values;
+        for(const auto& candidate:candidates)std::visit([&](const auto& e) {
+            QJsonArray support;for(auto id:e.supportPointIds)support.append(QString::number(id));
+            QJsonObject v{{"kind",int(reconstruction::primitiveKind(candidate))},{"support_point_ids",support},
+                {"mean_residual_mm",e.meanAbsoluteResidual},{"max_residual_mm",e.maxAbsoluteResidual},{"confidence",e.confidence}};
+            using E=std::decay_t<decltype(e)>;
+            if constexpr(std::is_same_v<E,reconstruction::PlaneEvidence>) {v["normal"]=vector(e.plane.normal);v["offset_mm"]=e.plane.offset;}
+            else if constexpr(std::is_same_v<E,reconstruction::CylinderEvidence>) {v["axis_point_mm"]=vector(e.cylinder.axisPoint);v["axis_direction"]=vector(e.cylinder.axisDirection);v["radius_mm"]=e.cylinder.radius;}
+            else if constexpr(std::is_same_v<E,reconstruction::ConeEvidence>) {v["apex_mm"]=vector(e.cone.apex);v["axis_direction"]=vector(e.cone.axisDirection);v["opening_angle_radians"]=e.cone.openingAngleRadians;}
+            else if constexpr(std::is_same_v<E,reconstruction::SphereEvidence>) {v["center_mm"]=vector(e.sphere.center);v["radius_mm"]=e.sphere.radius;}
+            else {v["center_mm"]=vector(e.torus.center);v["axis_direction"]=vector(e.torus.axisDirection);v["major_radius_mm"]=e.torus.majorRadius;v["minor_radius_mm"]=e.torus.minorRadius;}
+            values.append(v);
+        },candidate);
+        return values;
+    };
+    QJsonArray localFailures;
+    for(const auto& f:analysis.localFailures) {
+        QJsonArray ids,recovered;for(auto id:f.pointIds)ids.append(QString::number(id));
+        for(auto id:f.recoveredPointIds)recovered.append(QString::number(id));
+        localFailures.append(QJsonObject{{"reason",reconstruction::localFailureReasonName(f.reason)},{"message",QString::fromStdString(f.message)},
+            {"point_ids",ids},{"recovered_point_ids",recovered},{"source_fingerprint",QString::number(f.sourceFingerprint)},
+            {"candidates",serializeCandidates(f.candidates)},{"repaired_candidates",serializeCandidates(f.repairedCandidates)},
+            {"rejected_relations",double(f.rejectedRelations.size())},{"detection_passes",double(f.detectionPasses)},{"repaired",f.repaired}});
+    }
+    report["local_analysis_failures"]=localFailures;
     const std::string compoundFailure = text;
     report["detection_options"] =
         QJsonObject{{"plane_distance_threshold_mm", planes.distanceThreshold},
-                    {"plane_minimum_support", double(planes.minimumSupportPoints)},
+                    {"plane_minimum_support", double(analysis.options.detection.plane.minimumSupportPoints)},
                     {"cylinder_distance_threshold_mm", cylinders.distanceThreshold},
-                    {"cylinder_minimum_support", double(cylinders.minimumSupportPoints)},
-                    {"production_maximum_planes", double(planes.maximumPlanes)}};
-    reconstruction::PrimitiveDetectionOptions options;
-    options.randomSeed = planes.randomSeed;
-    options.plane = planes;
-    options.plane.maximumPlanes =
-        32; // diagnostic only; production recognition retains its own defaults
-    options.cylinder = cylinders;
-    options.sphere.distanceThreshold = options.cone.distanceThreshold =
-        options.torus.distanceThreshold = planes.distanceThreshold;
-    options.sphere.minimumSupportPoints = options.cone.minimumSupportPoints =
-        options.torus.minimumSupportPoints = planes.minimumSupportPoints;
+                    {"cylinder_minimum_support", double(analysis.options.detection.cylinder.minimumSupportPoints)},
+                    {"shared_maximum_planes", double(analysis.options.detection.plane.maximumPlanes)}};
     reconstruction::PrimitiveDetectionResult evidence;
-    checkpoint("joint_primitive_detection");
-    const bool detected = compoundRecognized || reconstruction::detectPrimitiveEvidence(
-                                                    processed, options, evidence, text);
+    evidence.evidence = analysis.surfaces;
+    evidence.unassignedPointIds = analysis.unassignedPointIds;
+    const bool detected = analyzed;
     QJsonArray summaries;
     QJsonObject counts{{"planes", 0}, {"cylinders", 0}, {"spheres", 0}, {"cones", 0}, {"tori", 0}};
     const char *keys[] = {"planes", "cylinders", "spheres", "cones", "tori"};
@@ -631,7 +720,8 @@ void fit(const QStringList &args, QJsonObject &report) {
     }
     counts["unassigned_points"] = double(evidence.unassignedPointIds.size());
     counts["detected"] = detected;
-    counts["skipped_for_compound"] = compoundRecognized;
+    counts["skipped_for_compound"] = false;
+    counts["shared_with_recognition"] = true;
     if (!detected)
         counts["reason"] = QString::fromStdString(text);
     report["primitive_proposals"] = counts;
@@ -656,6 +746,19 @@ void fit(const QStringList &args, QJsonObject &report) {
                     {"minimum_box_count_proven", compound.minimumBoxCountProven},
                     {"search_nodes", int(compound.searchNodes)},
                     {"fallback_reason", QString::fromStdString(compoundFailure)}};
+    QJsonArray boxGeometry,prismGeometry;
+    for(const auto& box:compound.boxes) {
+        const auto& p=box.primitive;
+        boxGeometry.append(QJsonObject{{"origin_mm",vector(p.pose.origin)},
+            {"x_direction",vector(p.pose.xDirection)},{"z_direction",vector(p.pose.zDirection)},
+            {"dimensions_mm",QJsonArray{p.sizeX,p.sizeY,p.sizeZ}}});
+    }
+    for(const auto& p:compound.prisms) {
+        QJsonArray polygon;for(auto vertex:p.polygon) polygon.append(QJsonArray{vertex.x,vertex.y});
+        prismGeometry.append(QJsonObject{{"origin_mm",vector(p.plane.origin)},{"normal",vector(p.plane.normal)},
+            {"x_direction",vector(p.plane.xDirection)},{"depth_mm",p.depth},{"subtract",p.subtract},{"polygon_mm",polygon}});
+    }
+    report["boxes"]=boxGeometry;report["prisms"]=prismGeometry;
     const bool boxRecognized = !compound.boxes.empty();
     QJsonObject recognition{
         {"recognized", recognized},
@@ -689,6 +792,7 @@ void fit(const QStringList &args, QJsonObject &report) {
         item["surface_coverage"] = solid.surfaceCoverage;
         item["boundary_coverage"] = solid.boundaryCoverage;
         item["mean_residual_mm"] = solid.meanResidual;
+        item["join"] = std::visit([](const auto& p){return p.join;},solid.primitive);
         curved.append(item);
     }
     report["curved_solids"] = curved;
@@ -728,6 +832,7 @@ void fit(const QStringList &args, QJsonObject &report) {
         StepModelLoader loader;
         require(loader.load(args[5], reference, error), error.toStdString());
         const auto definition = readObject(args[6]);
+        if(definition["geometry"]=="mixed_template_board") reference.shape=readPlacedStep(args[5]);
         const auto expected = definition["expected"].toObject();
         const auto acceptance = definition["acceptance"].toObject();
         const double referenceVolume = volume(reference.shape);

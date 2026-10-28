@@ -1,0 +1,10 @@
+set(GEOMETRIC_RECONSTRUCTION_REGRESSION_SOURCES
+    "${CMAKE_CURRENT_LIST_DIR}/../tests/regression/BoxRecognitionTests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../tests/regression/CurvedDetectionTests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../tests/regression/CylinderDetectionTests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../tests/regression/main.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../tests/regression/ModelingTests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../tests/regression/PreprocessingTests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../tests/regression/TestSupport.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../tests/regression/ThroughHoleTests.cpp"
+)

@@ -3,7 +3,7 @@
 
 #include <QJsonArray>
 #include <QThread>
-#include <reconstruction/PrimitiveDetector.h>
+#include <reconstruction/detection/PrimitiveDetector.h>
 #include <vtkNew.h>
 #include <vtkPoints.h>
 #include <vtkPolyData.h>
@@ -16,36 +16,7 @@
 
 namespace {
 using Vec = modeling::Vec3;
-Vec minus(const Vec& a, const Vec& b) { return {a.x-b.x, a.y-b.y, a.z-b.z}; }
-double dot(const Vec& a, const Vec& b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
-double length(const Vec& a) { return std::sqrt(dot(a,a)); }
 QJsonArray array(const Vec& p) { return {p.x, p.y, p.z}; }
-double residual(const reconstruction::PrimitiveEvidence& evidence, const Vec& p)
-{
-    return std::visit([&](const auto& surface) {
-        using T = std::decay_t<decltype(surface)>;
-        if constexpr (std::is_same_v<T, reconstruction::PlaneEvidence>) {
-            return std::abs(dot(surface.plane.normal, p)+surface.plane.offset);
-        } else if constexpr (std::is_same_v<T, reconstruction::SphereEvidence>) {
-            return std::abs(length(minus(p, surface.sphere.center))-surface.sphere.radius);
-        } else if constexpr (std::is_same_v<T, reconstruction::CylinderEvidence>) {
-            const auto delta = minus(p, surface.cylinder.axisPoint);
-            const double axial = dot(delta, surface.cylinder.axisDirection);
-            return std::abs(std::sqrt(std::max(0.0, dot(delta,delta)-axial*axial))-surface.cylinder.radius);
-        } else if constexpr (std::is_same_v<T, reconstruction::ConeEvidence>) {
-            const auto delta = minus(p, surface.cone.apex);
-            const double axial = dot(delta, surface.cone.axisDirection);
-            if (axial < 0) return std::numeric_limits<double>::infinity();
-            const double radial = std::sqrt(std::max(0.0, dot(delta,delta)-axial*axial));
-            return std::abs(radial*std::cos(surface.cone.openingAngleRadians)-axial*std::sin(surface.cone.openingAngleRadians));
-        } else {
-            const auto delta = minus(p, surface.torus.center);
-            const double axial = dot(delta, surface.torus.axisDirection);
-            const double radial = std::sqrt(std::max(0.0, dot(delta,delta)-axial*axial));
-            return std::abs(std::hypot(radial-surface.torus.majorRadius, axial)-surface.torus.minorRadius);
-        }
-    }, evidence);
-}
 PointCloudRegion describe(const reconstruction::PrimitiveEvidence& evidence, int index)
 {
     PointCloudRegion region;
@@ -79,7 +50,8 @@ PointCloudRegion describe(const reconstruction::PrimitiveEvidence& evidence, int
 }
 
 PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
-    const std::vector<vtkIdType>& originalIds, double distanceTolerance, const QString& geometry)
+    const std::vector<vtkIdType>& originalIds, double distanceTolerance, const QString& geometry,
+    reconstruction::LengthUnit unit)
 {
     PointCloudAnalysisResult result;
     if (cloud.positions.size() < 20 || cloud.positions.size() != originalIds.size()) {
@@ -88,11 +60,11 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
     if (!std::isfinite(distanceTolerance) || distanceTolerance <= 0) {
         result.error = QStringLiteral("表面识别距离容差必须大于零。"); return result;
     }
-    const auto source = PointCloudAdapter::toPointStore(cloud, reconstruction::LengthUnit::Arbitrary);
+    const auto source = PointCloudAdapter::toPointStore(cloud, unit);
     auto preprocessing = PointCloudAdapter::preprocessingOptionsFor(cloud);
     preprocessing.convertKnownUnitsToMillimeters = false;
     if (cloud.positions.size() < 50000) preprocessing.voxelSize = 0;
-    reconstruction::PointStore points({}, reconstruction::LengthUnit::Arbitrary);
+    reconstruction::PointStore points({}, unit);
     reconstruction::PointCloudPreprocessingReport report;
     std::string error;
     if (!reconstruction::preprocessPointCloud(source, preprocessing, points, report, error)) {
@@ -119,10 +91,22 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
         options.detectPlanes = geometry == "plane"; options.detectCylinders = geometry == "cylinder";
         options.detectSpheres = geometry == "sphere"; options.detectCones = geometry == "cone";
         options.detectTori = geometry == "ring";
-    }
-    reconstruction::PrimitiveDetectionResult detection;
-    if (!reconstruction::detectPrimitiveEvidence(points, options, detection, error)) {
+    } else options = reconstruction::recognitionAnalysisOptions(points,options.plane,options.cylinder).detection;
+    reconstruction::SurfaceAnalysisOptions analysisOptions;
+    analysisOptions.detection=options;
+    analysisOptions.relations.distanceTolerance=distanceTolerance*4;
+    reconstruction::SurfaceAnalysisResult analysis;
+    if (!reconstruction::analyzeSurfaces(points, analysisOptions, analysis, error, {}, [] {
+            return QThread::currentThread()->isInterruptionRequested(); })) {
         result.error = QString::fromStdString(error); return result;
+    }
+    result.analysis = analysis;
+    // Display connected patches independently, even when they share an equation.
+    reconstruction::PrimitiveDetectionResult detection;
+    for (const auto& patch : analysis.patches) {
+        auto evidence=analysis.surfaces.at(static_cast<size_t>(patch.surfaceId-1));
+        std::visit([&](auto& surface) { surface.supportPointIds=patch.supportPointIds; },evidence);
+        detection.evidence.push_back(std::move(evidence));
     }
     std::vector<vtkSmartPointer<vtkStaticPointLocator>> supports;
     std::vector<std::vector<vtkIdType>> owners(detection.evidence.size());
@@ -146,12 +130,16 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
             result.error = "识别已取消。"; return result;
         }
         const auto& coordinate = cloud.positions[i];
+        if(!std::isfinite(coordinate[0]) || !std::isfinite(coordinate[1]) || !std::isfinite(coordinate[2])) continue;
         Vec point{coordinate[0], coordinate[1], coordinate[2]};
         double best = distanceTolerance*1.5;
         size_t chosen = owners.size();
         for (size_t j = 0; j < detection.evidence.size(); ++j) {
-            const double distance = residual(detection.evidence[j], point);
+            const double distance = reconstruction::surfaceResidual(detection.evidence[j], point);
             if (distance > best || supports[j]->GetDataSet()->GetNumberOfPoints() == 0) continue;
+            // Near-identical candidates remain in the core pool, but a UI label
+            // must not fragment a perfect plane into accidental curved patches.
+            if (chosen != owners.size() && distance >= best-distanceTolerance*0.05) continue;
             double p[3]{point.x,point.y,point.z}, q[3];
             const auto nearest = supports[j]->FindClosestPoint(p);
             supports[j]->GetDataSet()->GetPoint(nearest, q);

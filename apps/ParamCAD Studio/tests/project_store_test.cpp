@@ -93,6 +93,22 @@ QJsonObject manifest(const QByteArray& archive)
     return QJsonDocument::fromJson(archive.mid(12, length)).object();
 }
 
+void joinedPrimitiveProject(QTemporaryDir& temp) {
+    using namespace modeling;
+    ProjectSnapshot state;
+    state.features={{1,"plate",FeatureType::BoxPrimitive,BoxPrimitiveParams{{},20,20,3,true}},
+        {2,"boss",FeatureType::CylinderPrimitive,CylinderPrimitiveParams{{10,10,3},{0,0,1},3,8,true}}};
+    ModelingCore core;
+    require(core.restoreFeatures(state.features),"build joined curved history");
+    state.currentBody=core.bodyShape();
+    QString error;const auto path=temp.filePath("joined-curved.pcad");
+    require(ProjectStore::save(path,state,error),"save joined curve history");
+    const auto loaded=ProjectStore::load(path,error);
+    require(loaded && std::get<CylinderPrimitiveParams>(loaded->model.features()[1].params).join,
+            "curved join operation survives project round trip");
+    require(std::abs(volume(loaded->model.bodyShape())-volume(core.bodyShape()))<1e-6,
+            "joined history preserves material volume");
+}
 void primitiveProjects(QTemporaryDir& temp)
 {
     using namespace modeling;
@@ -296,6 +312,7 @@ int main(int argc, char** argv)
                     blank->texture.isNull(),
                 "load empty project");
         primitiveProjects(temp);
+        joinedPrimitiveProject(temp);
         std::cout << "Project store tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

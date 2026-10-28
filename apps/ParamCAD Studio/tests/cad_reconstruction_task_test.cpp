@@ -61,7 +61,9 @@ PlyCloud cappedCloud(bool cone)
 
 CadReconstructionResult run(PlyCloud cloud, int cancellation = 0,
     const std::vector<reconstruction::TemplateHint>& hints = {},
-    reconstruction::LengthUnit unit = reconstruction::LengthUnit::Millimeter)
+    reconstruction::LengthUnit unit = reconstruction::LengthUnit::Millimeter,
+    std::optional<reconstruction::SurfaceAnalysisResult> analysis = {},
+    std::vector<reconstruction::SurfaceRelationHint> relations = {})
 {
     CadReconstructionTask task;
     std::optional<CadReconstructionResult> result;
@@ -83,7 +85,7 @@ CadReconstructionResult run(PlyCloud cloud, int cancellation = 0,
             stages.push_back(stage);
             if(cancellation==3 && stage==CadReconstructionTask::Stage::FittingTemplates) task.cancel();
         });
-    require(task.start(cloud, unit,hints), "start worker");
+    require(task.start(cloud, unit,hints,0,std::move(analysis),std::move(relations)), "start worker");
     cloud.positions.clear();
     cloud.normals.clear();
     require(task.isRunning() && !result, "start returns before queued result delivery");
@@ -126,6 +128,26 @@ int main(int argc, char** argv)
                 && success.preprocessingComplete && success.preprocessing.inputPointCount == 600
                 && success.candidate.boxes.size() == 1, "snapshot reconstructs supported box");
         const auto& box = success.candidate.boxes.front().primitive;
+        const auto cached=run(boxCloud(),0,{},reconstruction::LengthUnit::Millimeter,success.analysis);
+        require(cached.outcome==CadReconstructionResult::Outcome::Success && cached.analysisReused,
+                "matching snapshot and settings reuse the shared analysis");
+        auto stale=success.analysis;stale.options.detection.cylinder.minimumRadius+=0.1;
+        const auto refreshed=run(boxCloud(),0,{},reconstruction::LengthUnit::Millimeter,stale);
+        require(refreshed.outcome==CadReconstructionResult::Outcome::Success && !refreshed.analysisReused,
+                "different analysis settings trigger a refresh");
+        const auto parallel=std::find_if(success.analysis.relations.begin(),success.analysis.relations.end(),[](const auto& r){
+            return r.kind==reconstruction::SurfaceRelationKind::Parallel;
+        });
+        require(parallel!=success.analysis.relations.end(),"shared box has parallel planes");
+        reconstruction::SurfaceRelationHint relation;
+        relation.firstPoints=success.analysis.patches[parallel->first-1].supportPointIds;
+        relation.secondPoints=success.analysis.patches[parallel->second-1].supportPointIds;
+        relation.kind=reconstruction::SurfaceRelationKind::Parallel;
+        require(run(boxCloud(),0,{},reconstruction::LengthUnit::Millimeter,success.analysis,{relation}).outcome==
+                CadReconstructionResult::Outcome::Success,"manual relationships reach the CAD task");
+        relation.kind=reconstruction::SurfaceRelationKind::Coplanar;
+        require(run(boxCloud(),0,{},reconstruction::LengthUnit::Millimeter,success.analysis,{relation}).outcome==
+                CadReconstructionResult::Outcome::Unsupported,"conflicting manual relation rejects reconstruction");
         require(std::abs(box.sizeX - 6) < 0.01 && std::abs(box.sizeY - 6) < 0.01
                 && std::abs(box.sizeZ - 6) < 0.01, "background fit preserves dimensions");
         reconstruction::TemplateHint planeHint{7,reconstruction::TemplateKind::Plane,{}};

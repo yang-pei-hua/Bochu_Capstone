@@ -97,7 +97,6 @@ reconstruction::PointStore PointCloudAdapter::toPointStore(
     std::vector<reconstruction::PointSample> samples;
     samples.reserve(cloud.positions.size());
 
-    reconstruction::PointId nextId = 1;
     const bool hasNormals = cloud.normals.size() == cloud.positions.size();
     for (std::size_t index = 0; index < cloud.positions.size(); ++index) {
         const std::array<float, 3>& position = cloud.positions[index];
@@ -105,7 +104,8 @@ reconstruction::PointStore PointCloudAdapter::toPointStore(
             continue;
         }
         reconstruction::PointSample sample;
-        sample.id = nextId++;
+        // IDs refer to original rows even when a non-finite row is skipped.
+        sample.id = static_cast<reconstruction::PointId>(index)+1;
         sample.position = modeling::Vec3{position[0], position[1], position[2]};
         if (hasNormals && finitePoint(cloud.normals[index])) {
             const std::array<float, 3>& normal = cloud.normals[index];
@@ -140,10 +140,11 @@ PointCloudAdapter::preprocessingOptionsFor(const PlyCloud& cloud)
     // of oversized voxels before statistical filtering can remove them.
     const double diagonal = robustDiagonalOf(cloud.positions);
     if (diagonal > 0.0) {
-        // At most roughly 200 samples span the bounding-box diagonal before
-        // surface occupancy is considered. This keeps dense COLMAP clouds
-        // tractable without erasing the edges of ordinary mechanical parts.
-        options.voxelSize = diagonal * 5.0e-3;
+        // Preserve thin walls in mixed-scale scenes. The former diagonal/200
+        // voxel erased most axial samples of a small hole in a large plate.
+        // This coarse budget is still explicit; fine local analysis can use
+        // the original observations without changing the recognition contract.
+        options.voxelSize = diagonal * 2.0e-3;
     }
     return options;
 }
