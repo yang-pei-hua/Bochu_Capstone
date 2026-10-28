@@ -58,11 +58,16 @@ struct LocalAnalysisFailure {
     std::uint64_t localFingerprint = 0;
     std::uint64_t sourceFingerprint = 0;
     std::size_t detectionPasses = 0;
+    std::vector<PointSample> observations;
     bool repaired = false;
 };
 struct RelationOptimizationReport {
     std::vector<SurfaceRelation> accepted, rejected;
     double beforeError = 0, afterError = 0;
+};
+struct SurfaceIdMapping {
+    std::uint64_t localFingerprint = 0;
+    SurfaceId local = 0, global = 0;
 };
 struct SurfaceAnalysisResult {
     std::uint64_t pointFingerprint = 0;
@@ -74,9 +79,15 @@ struct SurfaceAnalysisResult {
     std::vector<PointId> unassignedPointIds;
     std::size_t detectionPasses = 0;
     std::vector<LocalAnalysisFailure> localFailures;
+    std::uint64_t baseFingerprint = 0, recoverySourceFingerprint = 0;
+    std::vector<PointSample> supplementalPoints;
+    std::vector<SurfaceIdMapping> repairMappings, repairPatchMappings;
 };
 
 std::uint64_t pointStoreFingerprint(const PointStore& points) noexcept;
+bool analysisInputMatches(const PointStore& points, const SurfaceAnalysisResult& analysis) noexcept;
+bool materializeAnalysisPoints(const PointStore& base, const SurfaceAnalysisResult& analysis,
+                              PointStore& output, std::string& error);
 bool analysisMatches(const PointStore& points, const SurfaceAnalysisResult& analysis) noexcept;
 bool analysisSettingsMatch(const SurfaceAnalysisOptions& a, const SurfaceAnalysisOptions& b);
 bool hasSurfaceRelation(const SurfaceAnalysisResult& analysis, SurfaceId first, SurfaceId second,

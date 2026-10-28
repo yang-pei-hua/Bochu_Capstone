@@ -16,15 +16,17 @@ bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOption
     output = {};
     if (hints.empty()) {
         const auto options = recognitionAnalysisOptions(points, planes, cylinders);
-        if (sharedAnalysis && analysisMatches(points, *sharedAnalysis) &&
+        if (sharedAnalysis && analysisInputMatches(points, *sharedAnalysis) &&
             analysisSettingsMatch(options,sharedAnalysis->options)) {
             output.analysis = *sharedAnalysis;
             output.analysisReused = true;
         }
         else if (!analyzeSurfaces(points, options,
                                   output.analysis, error, {}, cancelled)) return false;
-        if(!applySurfaceRelationHints(points,relationHints,output.analysis,error)) return false;
-        return recognizeParametricSolidFromAnalysis(points, output.analysis, output.candidate, error, &output.analysis.localFailures, source);
+        RepairTransactionReport transaction;
+        const bool recognized=recognizeAndRepairParametricSolid(points, output.analysis, output.candidate, error, source, &transaction, relationHints);
+        if(!recognized)output.analysis.localFailures=std::move(transaction.failures);
+        return recognized;
     }
     auto samples = points.points();
     std::map<PointId, std::size_t> indices;

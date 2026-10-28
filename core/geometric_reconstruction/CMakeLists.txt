@@ -23,6 +23,8 @@ endif()
 
 add_library(GeometricReconstruction
     src/analysis/AnalysisSnapshot.cpp
+    src/analysis/RepairSnapshot.cpp
+    src/recognition/RepairTransaction.cpp
     src/analysis/LocalRecovery.cpp
     src/analysis/RelationOptimization.cpp
     src/analysis/SurfaceAnalysis.cpp
@@ -90,6 +92,7 @@ endif()
 if(GEOMETRIC_RECONSTRUCTION_BUILD_TESTS)
     include(CTest)
     add_executable(surface_analysis_test tests/analysis/surface_analysis_test.cpp)
+    target_include_directories(surface_analysis_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(surface_analysis_test PRIVATE GeometricReconstruction::GeometricReconstruction)
     add_test(NAME surface_analysis_test COMMAND surface_analysis_test)
     set_tests_properties(surface_analysis_test PROPERTIES TIMEOUT 120

@@ -81,7 +81,7 @@ bool recognizeMixedFeatures(const PointStore& points,const SurfaceAnalysisResult
                 else if(std::none_of(restricted.relations.begin(),restricted.relations.end(),[](const auto& r){return r.kind==SurfaceRelationKind::AxisNormalToPlane;}))failure.reason=LocalFailureReason::InvalidRelation;
             }
             PointStore recovered({},points.unit());SurfaceAnalysisResult repaired;
-            const bool detected=recoverLocalSurfaces(points,source?*source:points,analysis,failure,recovered,repaired,error);
+            const bool detected=!analysis.baseFingerprint && recoverLocalSurfaces(points,source?*source:points,analysis,failure,recovered,repaired,error);
             if(detected && recovered.size()>=20) failure.repaired=attempt(recovered,repaired);
             if(!failure.repaired) error=failure.message+"; local recovery rejected: "+error;
             const bool success=failure.repaired;

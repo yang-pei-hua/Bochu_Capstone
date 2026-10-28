@@ -24,7 +24,7 @@ bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOp
     output={};
     SurfaceAnalysisResult analysis;
     if (!analyzeSurfaces(points, recognitionAnalysisOptions(points, planes, cylinders), analysis, error, seeds)) return false;
-    return recognizeParametricSolidFromAnalysis(points, analysis, output, error);
+    return recognizeAndRepairParametricSolid(points, analysis, output, error);
 }
 
 bool recognizeParametricSolidFromAnalysis(const PointStore& points, const SurfaceAnalysisResult& analysis,

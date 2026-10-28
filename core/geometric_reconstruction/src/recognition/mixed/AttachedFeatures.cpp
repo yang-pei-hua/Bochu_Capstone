@@ -88,12 +88,17 @@ bool rectangularCut(const PointStore& local,const SurfaceAnalysisResult& a,const
     // hypotheses against every observed cavity point before choosing one.
     if(walls.size()>12)walls.resize(12);
     auto testWalls=[&](const std::vector<PlaneEvidence>& selected) {
-    const auto x=normalized(selected.front().plane.normal),y=normalized(cross(host.z,x));
+    // Observed wall normals may tilt with noise. The cut frame must remain
+    // exactly orthogonal to the host axis so its bottom and top coincide with
+    // the observed host planes, independently of world-space XY coordinates.
+    const auto wallNormal=selected.front().plane.normal;
+    const auto x=normalized(subtract(wallNormal,scale(host.z,dot(wallNormal,host.z)))),y=normalized(cross(host.z,x));
     std::array<std::vector<double>,2> levels;
     for(const auto& p:selected) {
         const double dx=dot(p.plane.normal,x),dy=dot(p.plane.normal,y);
-        if(std::abs(dx)>0.995) levels[0].push_back(-p.plane.offset/dx);
-        else if(std::abs(dy)>0.995) levels[1].push_back(-p.plane.offset/dy);
+        const double offset=p.plane.offset+dot(p.plane.normal,host.z)*(host.c[0]+host.c[1])*0.5;
+        if(std::abs(dx)>0.995) levels[0].push_back(-offset/dx);
+        else if(std::abs(dy)>0.995) levels[1].push_back(-offset/dy);
         else return false;
     }
     if(levels[0].size()!=2 || levels[1].size()!=2) return false;

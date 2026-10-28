@@ -5,6 +5,8 @@
 #include "reconstruction/modeling/ModelingAdapter.h"
 #include "reconstruction/testing/SyntheticPointCloud.h"
 #include <BRepGProp.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include "../../src/recognition/mixed/detail/MixedInternal.h"
 #include <GProp_GProps.hxx>
 #include <TopExp_Explorer.hxx>
 #include <cmath>
@@ -166,10 +168,27 @@ void localRecoveryAndConstraints() {
     require(!repairedFailure->recoveredPointIds.empty() && !repairedFailure->candidates.empty() && !repairedFailure->repairedCandidates.empty(),"failure keeps observations and alternative candidates");
     require(before==pointStoreFingerprint(working),"recovery never mutates working observations");
     require(result.boxes.size()==1 && result.throughHoles.size()==1 && result.curvedSolids.size()==1,"recovery preserves host and hole");
+    RepairTransactionReport transaction;
+    require(recognizeAndRepairParametricSolid(working,analysis,result,error,&source,&transaction),error);
+    require(transaction.committed && !analysis.supplementalPoints.empty() && !analysis.repairMappings.empty() && !analysis.repairPatchMappings.empty(),"publish repaired global snapshot with mappings");
+    const auto surfaceCount=analysis.surfaces.size(),patchCount=analysis.patches.size(),added=analysis.supplementalPoints.size();
+    const auto mergedFingerprint=analysis.pointFingerprint;
+    PointStore combined({});require(materializeAnalysisPoints(working,analysis,combined,error),error);
+    require(analysisMatches(combined,analysis) && analysisInputMatches(working,analysis),"base and augmented fingerprints have distinct valid roles");
+    require(recognizeAndRepairParametricSolid(working,analysis,result,error,&source,&transaction),error);
+    require(transaction.reused && !transaction.committed && analysis.surfaces.size()==surfaceCount && analysis.patches.size()==patchCount && analysis.supplementalPoints.size()==added && analysis.pointFingerprint==mergedFingerprint,"repeat reuses snapshot without duplicate points or candidates");
+    auto changed=source.points();changed.back().position.z+=0.01;
+    const PointStore changedSource(changed);
+    require(!recognizeAndRepairParametricSolid(working,analysis,result,error,&changedSource,&transaction),"changed source must invalidate repair cache");
+    require(analysis.pointFingerprint==mergedFingerprint && analysis.surfaces.size()==surfaceCount && result.boxes.empty(),"rejected transaction keeps analysis and clears candidate");
     const auto missing=mixedCloud(true);
     require(analyzeSurfaces(missing,options,analysis,error),error);failures.clear();
     require(!recognizeMixedFeatures(missing,analysis,result,error,&failures,&missing),"recovery cannot invent unobserved cap");
     require(!failures.empty() && !failures.back().repaired && failures.back().reason==LocalFailureReason::MissingEndFace,"missing-end diagnostic survives failure");
+    const auto rejectedFingerprint=analysis.pointFingerprint;const auto rejectedSurfaces=analysis.surfaces.size();
+    require(!recognizeAndRepairParametricSolid(missing,analysis,result,error,&missing,&transaction),"missing observations reject publication");
+    require(analysis.pointFingerprint==rejectedFingerprint && analysis.surfaces.size()==rejectedSurfaces && analysis.baseFingerprint==0 && result.boxes.empty(),"incomplete model rolls back analysis transaction");
+    require(!transaction.failures.empty() && !transaction.failures.back().repaired,"rollback exposes failure diagnostics separately");
     LocalAnalysisFailure bad;bad.pointIds={999999999};PointStore local({});SurfaceAnalysisResult repaired;
     require(!recoverLocalSurfaces(missing,missing,analysis,bad,local,repaired,error),"foreign recovery ID rejected");
     bad.pointIds={missing.points()[0].id};
@@ -235,8 +254,69 @@ void localRecoveryAndConstraints() {
 
 }
 
+void extendedRelations() {
+    std::vector<PointSample> samples;PlaneEvidence plane;plane.confidence=1;plane.plane={{0.01,0,std::sqrt(1-0.0001)},-12};
+    ConeEvidence cone;cone.confidence=1;cone.cone={{0,0,0},{0,0,1},0.302};
+    for(int x=-8;x<=8;++x)for(int y=-8;y<=8;++y) {
+        PointSample p;p.id=samples.size()+1;p.position={double(x),double(y),12};p.normal=modeling::Vec3{0,0,1};samples.push_back(p);plane.supportPointIds.push_back(p.id);
+    }
+    for(int t=5;t<12;++t)for(int a=0;a<72;++a) {
+        const double angle=2*std::acos(-1.0)*a/72,r=t*std::tan(0.3);
+        PointSample p;p.id=samples.size()+1;p.position={r*std::cos(angle),r*std::sin(angle),double(t)};
+        p.normal=modeling::Vec3{std::cos(angle)*std::cos(0.3),std::sin(angle)*std::cos(0.3),-std::sin(0.3)};samples.push_back(p);cone.supportPointIds.push_back(p.id);
+    }
+    PointStore points(samples);SurfaceAnalysisOptions settings;settings.connectivityDistance=3;SurfaceAnalysisResult analysis;std::string error;RelationOptimizationReport report;
+    require(indexSurfaceEvidence(points,{plane,cone},settings,analysis,error),error);
+    require(optimizeSurfaceRelations(points,analysis,{{1,2,SurfaceRelationKind::AxisNormalToPlane,0,1,true}},report,error),error);
+    require(report.accepted.size()==1 && report.afterError<report.beforeError,"axis-plane constraint jointly refines cone and observed cap");
+    require(std::abs(std::get<ConeEvidence>(analysis.surfaces[1]).cone.openingAngleRadians-0.3)<0.001,"cone angle is fitted from observations");
+    samples.clear();std::vector<PrimitiveEvidence> planes;
+    for(int face=0;face<2;++face) {
+        PlaneEvidence e;e.confidence=1;e.plane={{0,0,1},0.03+face*0.01};
+        for(int x=0;x<8;++x)for(int y=0;y<8;++y){PointSample p;p.id=samples.size()+1;p.position={double(x+face*20),double(y),0};p.normal=modeling::Vec3{0,0,1};samples.push_back(p);e.supportPointIds.push_back(p.id);}planes.push_back(e);
+    }
+    PointStore coplanar(samples);require(indexSurfaceEvidence(coplanar,planes,settings,analysis,error),error);
+    require(optimizeSurfaceRelations(coplanar,analysis,{{1,2,SurfaceRelationKind::Coplanar,0,1,true}},report,error),error);
+    require(report.accepted.size()==1 && report.afterError<report.beforeError,"coplanar constraints improve separate observed patches");
+    samples.clear();std::vector<PrimitiveEvidence> rounds;
+    for(int part=0;part<2;++part) {
+        CylinderEvidence c;c.confidence=1;c.cylinder={{double(part*20),0,0},{0,0,1},part?3.01:2.99};
+        for(int z=0;z<8;++z)for(int a=0;a<72;++a){double t=2*std::acos(-1.0)*a/72;PointSample p;p.id=samples.size()+1;p.position={part*20+3*std::cos(t),3*std::sin(t),double(z)};p.normal=modeling::Vec3{std::cos(t),std::sin(t),0};samples.push_back(p);c.supportPointIds.push_back(p.id);}rounds.push_back(c);
+    }
+    PointStore equal(samples);require(indexSurfaceEvidence(equal,rounds,settings,analysis,error),error);
+    require(optimizeSurfaceRelations(equal,analysis,{{1,2,SurfaceRelationKind::SameRadius,0,1,true}},report,error),error);
+    require(report.accepted.size()==1 && report.afterError<report.beforeError,"same-radius relation preserves distinct observed cylinder axes");
+}
+
+void tiltedCavityWalls() {
+    using namespace reconstruction::detail::mixed;
+    std::vector<PointSample> samples;std::vector<PrimitiveEvidence> evidence;
+    for(int side=0;side<4;++side) {
+        const bool xWall=side<2;const double sign=(side%2)?-1:1;
+        const double level=xWall?200+(side%2)*44:50+(side%2)*44;
+        Vec3 normal=xWall?Vec3{sign,0,0.001}:Vec3{0,sign,0.001};normal=normalized(normal);
+        PlaneEvidence e;e.confidence=1;e.plane={normal,-sign*level/std::sqrt(1.000001)};
+        for(int u=0;u<44;++u)for(int z=0;z<=8;++z){
+            PointSample p;p.id=samples.size()+1;const double q=level-sign*0.001*z;
+            p.position=xWall?Vec3{q,50+u+0.5,double(z)}:Vec3{200+u+0.5,q,double(z)};
+            p.normal=normal;samples.push_back(p);e.supportPointIds.push_back(p.id);
+        }evidence.push_back(e);
+    }
+    PointStore points(samples);SurfaceAnalysisResult analysis;SurfaceAnalysisOptions options;std::string error;
+    require(indexSurfaceEvidence(points,evidence,options,analysis,error),error);
+    Frame host;host.x={1,0,0};host.y={0,1,0};host.z={0,0,1};host.c={0,8};
+    PrismCandidate cut;require(rectangularCut(points,analysis,host,0.05,cut),"observed noisy walls support a through cut");
+    require(std::abs(dot(cut.plane.xDirection,host.z))<1e-12 && std::abs(dot(cut.plane.origin,host.z))<1e-12,"wall tilt cannot shift through-cut start plane");
+    CompoundCandidate model;BoxCandidate plate;plate.primitive.sizeX=300;plate.primitive.sizeY=150;plate.primitive.sizeZ=8;model.boxes.push_back(plate);model.prisms.push_back(cut);
+    modeling::ModelingCore core;const auto committed=commitCompoundCandidate(model,core);require(committed.success,committed.error);
+    for(double z:{0.001,4.0,7.999}) {
+        BRepClass3d_SolidClassifier classifier(core.bodyShape(),gp_Pnt(222,72,z),1e-7);
+        require(classifier.State()==TopAbs_OUT,"rectangular cavity must remain open across the complete host thickness");
+    }
+}
+
 }
 int main() {
-    try {snapshotsAndPatches();sharedBox();attachedBossAndHole();adaptiveRegions();localRecoveryAndConstraints();std::cout<<"Shared surface analysis tests passed\n";return 0;}
+    try {snapshotsAndPatches();sharedBox();attachedBossAndHole();adaptiveRegions();localRecoveryAndConstraints();extendedRelations();tiltedCavityWalls();std::cout<<"Shared surface analysis tests passed\n";return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

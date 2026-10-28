@@ -654,8 +654,21 @@ void fit(const QStringList &args, QJsonObject &report) {
     auto recoverySamples=source.points();
     for(auto& p:recoverySamples) {p.position.x*=pre.appliedScaleToMillimeters;p.position.y*=pre.appliedScaleToMillimeters;p.position.z*=pre.appliedScaleToMillimeters;}
     const reconstruction::PointStore recoverySource(std::move(recoverySamples),processed.unit());
+    reconstruction::RepairTransactionReport repairTransaction;
     const bool compoundRecognized = analyzed &&
-        reconstruction::recognizeParametricSolidFromAnalysis(processed, analysis, compound, text, &analysis.localFailures, &recoverySource);
+        reconstruction::recognizeAndRepairParametricSolid(processed, analysis, compound, text, &recoverySource, &repairTransaction);
+    if(!compoundRecognized)analysis.localFailures=repairTransaction.failures;
+    report["repair_transaction"]=QJsonObject{{"committed",repairTransaction.committed},{"reused",repairTransaction.reused},
+        {"reason",QString::fromStdString(repairTransaction.reason)},{"before_coverage",repairTransaction.beforeCoverage},
+        {"after_coverage",repairTransaction.afterCoverage},{"supplemental_points",double(analysis.supplementalPoints.size())},
+        {"surface_mappings",double(analysis.repairMappings.size())}};
+    QJsonArray surfaceMappings,patchMappings;
+    for(const auto& m:analysis.repairMappings)surfaceMappings.append(QJsonObject{{"local_fingerprint",QString::number(m.localFingerprint)},{"local",QString::number(m.local)},{"global",QString::number(m.global)}});
+    for(const auto& m:analysis.repairPatchMappings)patchMappings.append(QJsonObject{{"local_fingerprint",QString::number(m.localFingerprint)},{"local",QString::number(m.local)},{"global",QString::number(m.global)}});
+    report["effective_surface_analysis"]=QJsonObject{{"point_fingerprint",QString::number(analysis.pointFingerprint)},
+        {"base_fingerprint",QString::number(analysis.baseFingerprint)},{"surfaces",double(analysis.surfaces.size())},
+        {"patches",double(analysis.patches.size())},{"relations",double(analysis.relations.size())},
+        {"surface_mappings",surfaceMappings},{"patch_mappings",patchMappings}};
     auto serializeCandidates=[](const std::vector<reconstruction::PrimitiveEvidence>& candidates) {
         QJsonArray values;
         for(const auto& candidate:candidates)std::visit([&](const auto& e) {
@@ -803,6 +816,32 @@ void fit(const QStringList &args, QJsonObject &report) {
                            : reconstruction::commitBoxWithThroughHolesCandidate(candidate, core, 0);
     require(commit.success, commit.error);
     require(BRepCheck_Analyzer(core.bodyShape()).IsValid(), "Reconstructed B-Rep is invalid");
+    // A small residual skin can evade a global volume threshold. Verify the
+    // declared through-cut at several depths of the independently fitted host.
+    QJsonArray throughCuts;
+    for(const auto& cut:compound.prisms)if(cut.subtract && !compound.boxes.empty() && !cut.polygon.empty()) {
+        const auto& host=compound.boxes.front().primitive;
+        gp_Vec n(cut.plane.normal.x,cut.plane.normal.y,cut.plane.normal.z),u(cut.plane.xDirection.x,cut.plane.xDirection.y,cut.plane.xDirection.z);
+        n.Normalize();u.Normalize();const auto v=n.Crossed(u);
+        double x=0,y=0;for(const auto& q:cut.polygon){x+=q.x;y+=q.y;}x/=cut.polygon.size();y/=cut.polygon.size();
+        gp_Pnt center(cut.plane.origin.x,cut.plane.origin.y,cut.plane.origin.z);center.Translate(u*x+v*y);
+        gp_Vec bx(host.pose.xDirection.x,host.pose.xDirection.y,host.pose.xDirection.z),bz(host.pose.zDirection.x,host.pose.zDirection.y,host.pose.zDirection.z);
+        bx.Normalize();bz.Normalize();const auto by=bz.Crossed(bx);double low=INFINITY,high=-INFINITY;
+        for(int i=0;i<2;++i)for(int j=0;j<2;++j)for(int k=0;k<2;++k){
+            gp_Pnt p(host.pose.origin.x,host.pose.origin.y,host.pose.origin.z);p.Translate(bx*(i*host.sizeX)+by*(j*host.sizeY)+bz*(k*host.sizeZ));
+            const double t=gp_Vec(gp_Pnt(0,0,0),p).Dot(n);low=std::min(low,t);high=std::max(high,t);
+        }
+        const double height=gp_Vec(gp_Pnt(0,0,0),center).Dot(n);
+        for(double fraction:{0.001,0.5,0.999}) {
+            const auto p=center.Translated(n*(low+(high-low)*fraction-height));
+            for(TopExp_Explorer solid(core.bodyShape(),TopAbs_SOLID);solid.More();solid.Next()) {
+                BRepClass3d_SolidClassifier classifier(solid.Current(),p,1e-7);
+                require(classifier.State()==TopAbs_OUT,"Subtractive through cut retains material within host thickness");
+            }
+        }
+        throughCuts.append(QJsonObject{{"host_span_mm",high-low},{"empty_at_bottom_middle_top",true}});
+    }
+    report["subtractive_through_span_checks"]=throughCuts;
     checkpoint("step_export");
     require(modeling::exportStep(core.bodyShape(), nativePath(args[4]), &text), text);
     LoadedModel exported;

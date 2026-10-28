@@ -15,6 +15,7 @@ bool recoverLocalSurfaces(const PointStore& working, const PointStore& source,
     const SurfaceAnalysisResult& analysis, LocalAnalysisFailure& failure,
     PointStore& local, SurfaceAnalysisResult& repaired, std::string& error) {
     error.clear(); repaired={}; failure.repaired=false;
+    failure.observations.clear();
     failure.recoveredPointIds.clear(); failure.repairedCandidates.clear();failure.candidates.clear();
     failure.repairedPatches.clear();failure.repairedRelations.clear();failure.rejectedRelations.clear();
     failure.sourceFingerprint=0;failure.localFingerprint=0;failure.detectionPasses=0;
@@ -121,6 +122,7 @@ bool recoverLocalSurfaces(const PointStore& working, const PointStore& source,
     failure.repairedCandidates=repaired.surfaces;
     failure.repairedPatches=repaired.patches;failure.repairedRelations=repaired.relations;
     failure.localFingerprint=repaired.pointFingerprint;
+    failure.observations=local.points();
     return true; // Only the solid recognizer may mark the failure repaired.
 }
 } // namespace reconstruction

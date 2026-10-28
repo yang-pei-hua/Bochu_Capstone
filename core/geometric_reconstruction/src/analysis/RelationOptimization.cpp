@@ -8,7 +8,7 @@ using namespace detail::analysis;
 namespace {
 struct Constraint {std::size_t a,b; SurfaceRelation relation;};
 bool supported(const PrimitiveEvidence& e) {
-    return std::holds_alternative<PlaneEvidence>(e) || std::holds_alternative<CylinderEvidence>(e);
+    return std::holds_alternative<PlaneEvidence>(e) || std::holds_alternative<CylinderEvidence>(e) || std::holds_alternative<ConeEvidence>(e);
 }
 // Parameters are local displacements about the observed support centroid. This
 // avoids conditioning the fit on the distance of the part from the world origin.
@@ -20,6 +20,7 @@ std::vector<PrimitiveEvidence> decode(const Eigen::VectorXd& x,
         if(length(a)<1e-8) continue;
         a=normalized(a);
         if(auto p=std::get_if<PlaneEvidence>(&result[i])) p->plane={a,x[k+3]-dot(a,origins[i])};
+        if(auto cone=std::get_if<ConeEvidence>(&result[i]))cone->cone={add(origins[i],Vec3{x[k+3],x[k+4],x[k+5]}),a,x[k+6]};
         if(auto c=std::get_if<CylinderEvidence>(&result[i])) {
             auto center=add(origins[i],Vec3{x[k+3],x[k+4],x[k+5]});
             c->cylinder={subtract(center,scale(a,dot(center,a))),a,x[k+6]};
@@ -31,7 +32,7 @@ std::vector<PrimitiveEvidence> decode(const Eigen::VectorXd& x,
 bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& analysis,
     const std::vector<SurfaceRelation>& proposals, RelationOptimizationReport& report,std::string& error) {
     report={};error.clear();
-    if(!analysisMatches(points,analysis)) {error="Stale optimization snapshot";return false;}
+    if(!analysisMatches(points,analysis) || !detail::analysis::valid(analysis.options)) {error="Stale optimization snapshot";return false;}
     const auto map=pointMap(points);
     const auto original=analysis.surfaces;
     std::vector<Vec3> origins(original.size());
@@ -55,11 +56,16 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
     auto sorted=proposals;
     std::stable_sort(sorted.begin(),sorted.end(),[](const auto& a,const auto& b){return a.confidence>b.confidence;});
     for(const auto& r:sorted) {
-        if(r.kind!=SurfaceRelationKind::Parallel && r.kind!=SurfaceRelationKind::Perpendicular && r.kind!=SurfaceRelationKind::Coaxial) continue;
+        if(r.kind!=SurfaceRelationKind::Parallel && r.kind!=SurfaceRelationKind::Perpendicular && r.kind!=SurfaceRelationKind::Coaxial && r.kind!=SurfaceRelationKind::Coplanar && r.kind!=SurfaceRelationKind::SameRadius && r.kind!=SurfaceRelationKind::AxisNormalToPlane) continue;
         if(!r.first || !r.second || r.first>analysis.patches.size() || r.second>analysis.patches.size()) {report.rejected.push_back(r);continue;}
         const auto a=std::size_t(analysis.patches[r.first-1].surfaceId-1),b=std::size_t(analysis.patches[r.second-1].surfaceId-1);
+        const auto plane=[](const auto& e){return std::holds_alternative<PlaneEvidence>(e);};
+        const auto cylindrical=[](const auto& e){return std::holds_alternative<CylinderEvidence>(e);};
         if(a>=original.size() || b>=original.size() || a==b || !supported(original[a]) || !supported(original[b]) ||
-           (r.kind==SurfaceRelationKind::Coaxial && (!std::holds_alternative<CylinderEvidence>(original[a]) || !std::holds_alternative<CylinderEvidence>(original[b])))) {
+           (r.kind==SurfaceRelationKind::Coaxial && (plane(original[a]) || plane(original[b]))) ||
+           (r.kind==SurfaceRelationKind::Coplanar && (!plane(original[a]) || !plane(original[b]))) ||
+           (r.kind==SurfaceRelationKind::SameRadius && (!cylindrical(original[a]) || !cylindrical(original[b]))) ||
+           (r.kind==SurfaceRelationKind::AxisNormalToPlane && plane(original[a])==plane(original[b]))) {
             report.rejected.push_back(r);continue;
         }
         if(!seen.emplace(std::min(a,b),std::max(a,b),r.kind).second)continue;
@@ -72,6 +78,7 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
         for(auto i:active) {
             auto k=Eigen::Index(i*7);const auto u=axis(fitted[i]);initial[k]=u.x;initial[k+1]=u.y;initial[k+2]=u.z;
             if(const auto* p=std::get_if<PlaneEvidence>(&fitted[i])) initial[k+3]=dot(u,origins[i])+p->plane.offset;
+            else if(const auto* cone=std::get_if<ConeEvidence>(&fitted[i])) {auto d=subtract(cone->cone.apex,origins[i]);initial[k+3]=d.x;initial[k+4]=d.y;initial[k+5]=d.z;initial[k+6]=cone->cone.openingAngleRadians;}
             else {const auto& c=std::get<CylinderEvidence>(fitted[i]);auto d=subtract(c.cylinder.axisPoint,origins[i]);d=subtract(d,scale(u,dot(d,u)));initial[k+3]=d.x;initial[k+4]=d.y;initial[k+5]=d.z;initial[k+6]=c.cylinder.radius;}
         }
         std::vector<Eigen::Index> variables;
@@ -88,7 +95,12 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
                 const auto k=Eigen::Index(i*7);values.push_back((std::sqrt(x[k]*x[k]+x[k+1]*x[k+1]+x[k+2]*x[k+2])-1));
             }
             for(const auto& c:constraints) {
+                if(c.relation.kind==SurfaceRelationKind::SameRadius) {values.push_back((radius(decoded[c.a])-radius(decoded[c.b]))/tolerance*5);continue;}
                 const auto u=axis(decoded[c.a]),v=axis(decoded[c.b]);
+                if(c.relation.kind==SurfaceRelationKind::Coplanar) {
+                    const auto& pa=std::get<PlaneEvidence>(decoded[c.a]).plane;const auto& pb=std::get<PlaneEvidence>(decoded[c.b]).plane;
+                    values.push_back((pa.offset-(dot(u,v)<0?-pb.offset:pb.offset))/tolerance*5);
+                }
                 const auto d=c.relation.kind==SurfaceRelationKind::Perpendicular ? Vec3{dot(u,v),0,0} : cross(u,v);
                 values.push_back(d.x/angleTolerance*5);values.push_back(d.y/angleTolerance*5);values.push_back(d.z/angleTolerance*5);
                 if(c.relation.kind==SurfaceRelationKind::Coaxial) {
@@ -119,8 +131,14 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
             valid &= inliers>=ids(e).size()*0.9 && meanError(e)<=meanError(original[i])+tolerance*0.15 &&
                 std::abs(dot(axis(e),axis(original[i])))>=std::cos(angleTolerance);
             if(const auto* c=std::get_if<CylinderEvidence>(&e))valid &= c->cylinder.radius>0;
+            if(const auto* c=std::get_if<ConeEvidence>(&e))valid &= c->cone.openingAngleRadians>0.001 && c->cone.openingAngleRadians<1.56;
         }
         for(const auto& c:constraints) {
+            if(c.relation.kind==SurfaceRelationKind::SameRadius) {valid &= std::abs(radius(trial[c.a])-radius(trial[c.b]))<=tolerance*0.25;continue;}
+            if(c.relation.kind==SurfaceRelationKind::Coplanar) {
+                const auto& pa=std::get<PlaneEvidence>(trial[c.a]).plane;const auto& pb=std::get<PlaneEvidence>(trial[c.b]).plane;
+                valid &= std::abs(pa.offset-(dot(pa.normal,pb.normal)<0?-pb.offset:pb.offset))<=tolerance*0.25;
+            }
             const double alignment=std::abs(dot(axis(trial[c.a]),axis(trial[c.b])));
             valid &= c.relation.kind==SurfaceRelationKind::Perpendicular ? alignment<=std::sin(angleTolerance)*0.25 : alignment>=std::cos(angleTolerance*0.25);
             if(c.relation.kind==SurfaceRelationKind::Coaxial) {
@@ -145,6 +163,7 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
             if(q.x<lo.x-tolerance || q.x>hi.x+tolerance || q.y<lo.y-tolerance || q.y>hi.y+tolerance || q.z<lo.z-tolerance || q.z>hi.z+tolerance)continue;
             if(!p.normal || surfaceResidual(fitted[i],q)>tolerance*2)continue;
             auto n=axis(fitted[i]);
+            if(std::holds_alternative<ConeEvidence>(fitted[i])) {const auto d=subtract(q,center(fitted[i]));const auto radial=normalized(subtract(d,scale(n,dot(d,n))));n=normalized(subtract(radial,scale(n,std::tan(std::get<ConeEvidence>(fitted[i]).cone.openingAngleRadians))));}
             if(std::holds_alternative<CylinderEvidence>(fitted[i])) {const auto d=subtract(q,center(fitted[i]));n=normalized(subtract(d,scale(n,dot(d,n))));}
             if(std::abs(dot(normalized(*p.normal),n))>=0.9)support.push_back(p.id);
         }
@@ -158,6 +177,10 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
             for(auto id:c->supportPointIds) {const double t=dot(subtract(map.at(id)->position,c->cylinder.axisPoint),c->cylinder.axisDirection);c->axialMinimum=std::min(c->axialMinimum,t);c->axialMaximum=std::max(c->axialMaximum,t);}
         }
     }
+    for(auto& e:fitted)if(auto* cone=std::get_if<ConeEvidence>(&e)) {
+        cone->axialMinimum=INFINITY;cone->axialMaximum=-INFINITY;
+        for(auto id:cone->supportPointIds){const auto t=dot(subtract(map.at(id)->position,cone->cone.apex),cone->cone.axisDirection);cone->axialMinimum=std::min(cone->axialMinimum,t);cone->axialMaximum=std::max(cone->axialMaximum,t);}
+    }
     for(auto& e:fitted) {
         const auto mean=meanError(e);report.afterError+=mean;
         std::visit([&](auto& s){s.meanAbsoluteResidual=mean;s.maxAbsoluteResidual=0;
@@ -165,6 +188,7 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
     }
     SurfaceAnalysisResult indexed;
     if(!indexSurfaceEvidence(points,fitted,analysis.options,indexed,error))return false;
+    indexed.baseFingerprint=analysis.baseFingerprint;indexed.recoverySourceFingerprint=analysis.recoverySourceFingerprint;indexed.supplementalPoints=analysis.supplementalPoints;indexed.repairMappings=analysis.repairMappings;indexed.repairPatchMappings=analysis.repairPatchMappings;
     indexed.detectionPasses=analysis.detectionPasses;indexed.localFailures=analysis.localFailures;
     std::vector<SurfaceRelationHint> manual;
     for(const auto& r:analysis.relations)if(!r.automatic && r.first && r.second && r.first<=analysis.patches.size() && r.second<=analysis.patches.size())
