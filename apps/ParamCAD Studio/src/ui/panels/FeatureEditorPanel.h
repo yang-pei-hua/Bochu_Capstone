@@ -25,12 +25,15 @@ signals:
                         modeling::ResizeAnchor anchor, quint64 revision);
     void selectReferenceRequested();
     void cancelRequested();
+    void bodyCavityApplyRequested(modeling::FeatureId id,int index,double startDiameter,double endDiameter,double depth,quint64 revision);
 private:
     void resetFields();
     void updateControls();
     std::optional<modeling::Feature> m_feature;
     modeling::ModelRevision m_revision = 0;
     QComboBox* m_anchor;
+    QComboBox* m_target;
+    QLabel* m_targetLabel;
     std::array<QDoubleSpinBox*,3> m_values;
     std::array<QLabel*,3> m_labels;
     std::array<double,3> m_committedValues{}, m_displayedValues{};

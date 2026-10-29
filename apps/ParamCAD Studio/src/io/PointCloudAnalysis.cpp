@@ -63,6 +63,11 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
     const auto source = PointCloudAdapter::toPointStore(cloud, unit);
     auto preprocessing = PointCloudAdapter::preprocessingOptionsFor(cloud);
     preprocessing.convertKnownUnitsToMillimeters = false;
+    // A scene-wide voxel can exceed a small hole's diameter. Analysis resolution
+    // follows the requested fit tolerance, and density differences between faces
+    // are not evidence of outliers. RANSAC still requires supported surfaces.
+    preprocessing.voxelSize=std::min(preprocessing.voxelSize,distanceTolerance*0.5);
+    if(geometry.isEmpty())preprocessing.removeStatisticalOutliers=false;
     if (cloud.positions.size() < 50000) preprocessing.voxelSize = 0;
     reconstruction::PointStore points({}, unit);
     reconstruction::PointCloudPreprocessingReport report;
@@ -79,6 +84,7 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
     options.plane.distanceThreshold = distanceTolerance;
     options.plane.maximumPlanes = geometry.isEmpty() ? 128 : 1;
     options.cylinder.distanceThreshold = distanceTolerance;
+    options.cylinder.minimumRadius = distanceTolerance*2;
     options.cylinder.minimumSupportPoints = support;
     options.cylinder.maximumCylinders = geometry.isEmpty() ? 32 : 1;
     options.sphere.distanceThreshold = distanceTolerance; options.sphere.minimumSupportPoints = support;
@@ -92,8 +98,14 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
         options.detectSpheres = geometry == "sphere"; options.detectCones = geometry == "cone";
         options.detectTori = geometry == "ring";
     } else options = reconstruction::recognitionAnalysisOptions(points,options.plane,options.cylinder).detection;
+    const auto seedText=qEnvironmentVariable("PCAD_RANSAC_SEED");
+    if(!seedText.isEmpty()) {
+        bool valid=false;options.randomSeed=seedText.toUInt(&valid);
+        if(!valid){result.error="Invalid PCAD_RANSAC_SEED";return result;}
+    }
     reconstruction::SurfaceAnalysisOptions analysisOptions;
     analysisOptions.detection=options;
+    analysisOptions.recoverResidualSurfaces=geometry.isEmpty();
     analysisOptions.relations.distanceTolerance=distanceTolerance*4;
     reconstruction::SurfaceAnalysisResult analysis;
     if (!reconstruction::analyzeSurfaces(points, analysisOptions, analysis, error, {}, [] {
@@ -135,11 +147,24 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
         double best = distanceTolerance*1.5;
         size_t chosen = owners.size();
         for (size_t j = 0; j < detection.evidence.size(); ++j) {
-            const double distance = reconstruction::surfaceResidual(detection.evidence[j], point);
+            const auto& patch=analysis.patches[j];
+            if(point.x<patch.lower.x-supportRadius || point.x>patch.upper.x+supportRadius ||
+               point.y<patch.lower.y-supportRadius || point.y>patch.upper.y+supportRadius ||
+               point.z<patch.lower.z-supportRadius || point.z>patch.upper.z+supportRadius)continue;
+            double distance = reconstruction::surfaceResidual(detection.evidence[j], point);
+            if(cloud.normals.size()==cloud.positions.size()) {
+                const auto& normal=cloud.normals[i];const Vec n{normal[0],normal[1],normal[2]};
+                const double magnitude=std::hypot(std::hypot(n.x,n.y),n.z);
+                if(std::isfinite(magnitude) && magnitude>1e-12) {
+                    const double alignment=reconstruction::surfaceNormalAlignment(detection.evidence[j],point,n);
+                    if(alignment<0.9)continue;
+                    distance+=distanceTolerance*(1-alignment);
+                }
+            }
             if (distance > best || supports[j]->GetDataSet()->GetNumberOfPoints() == 0) continue;
             // Near-identical candidates remain in the core pool, but a UI label
             // must not fragment a perfect plane into accidental curved patches.
-            if (chosen != owners.size() && distance >= best-distanceTolerance*0.05) continue;
+            if (chosen != owners.size() && distance >= best-distanceTolerance*1e-4) continue;
             double p[3]{point.x,point.y,point.z}, q[3];
             const auto nearest = supports[j]->FindClosestPoint(p);
             supports[j]->GetDataSet()->GetPoint(nearest, q);

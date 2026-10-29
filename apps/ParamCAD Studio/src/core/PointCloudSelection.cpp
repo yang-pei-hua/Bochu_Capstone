@@ -21,7 +21,7 @@
 bool PointCloudSelection::validGeometry(const QString& geometry)
 {
     return geometry == "cuboid" || geometry == "sphere" || geometry == "cylinder"
-        || geometry == "plane" || geometry == "ring" || geometry == "cone";
+        || geometry == "plane" || geometry == "ring" || geometry == "cone" || geometry == "part";
 }
 
 PointCloudSelection::PointCloudSelection()
@@ -316,6 +316,8 @@ bool PointCloudSelection::load(const QString& path, QString& error)
                     return n.isDouble() && std::isfinite(n.toDouble()) && (!positive || n.toDouble() > 0);
                 };
                 bool valid = false;
+                if(surface.geometry=="part")valid=surface.parameters["status"].isString()&&surface.parameters["closed"].isBool()
+                    && validVector("lower",false)&&validVector("upper",false)&&validNumber("open_edges",false);
                 if (surface.geometry == "plane") valid = validVector("normal", true) && validNumber("offset", false);
                 if (surface.geometry == "sphere") valid = validVector("center", false) && validNumber("radius", true);
                 if (surface.geometry == "cylinder") valid = validVector("center", false) && validVector("axis", true) && validNumber("radius", true);

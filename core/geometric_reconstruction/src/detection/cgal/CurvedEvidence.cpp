@@ -103,6 +103,57 @@ bool makeConeEvidence(
         return false;
     }
 
+    // A minimal RANSAC cone is a proposal, especially on a narrow chamfer.
+    // Its oriented tangent planes intersect at the apex and its normals lie
+    // on a circle. Refit both from all compatible assigned observations before
+    // scoring, using a centered system to avoid large-placement cancellation.
+    std::vector<std::size_t> refinement;
+    modeling::Vec3 positionMean{},normalMean{};
+    for(auto index:shape.indices_of_assigned_points()) {
+        const auto p=toVec3(std::get<0>(input[index]));
+        const auto d=math3::subtract(p,cone.apex);
+        const double t=math3::dot(d,cone.axisDirection);
+        const auto radial=math3::subtract(d,math3::scale(cone.axisDirection,t));
+        const double r=math3::length(radial);
+        if(r<1e-12 || t<0)continue;
+        const auto expected=math3::subtract(math3::scale(radial,std::cos(cone.openingAngleRadians)/r),
+            math3::scale(cone.axisDirection,std::sin(cone.openingAngleRadians)));
+        auto n=math3::normalized(toVec3(std::get<1>(input[index])));
+        if(std::abs(r*std::cos(cone.openingAngleRadians)-t*std::sin(cone.openingAngleRadians))>options.distanceThreshold*4 ||
+           std::abs(math3::dot(n,expected))<options.minimumNormalAlignment)continue;
+        if(math3::dot(n,expected)<0)n=math3::scale(n,-1);
+        refinement.push_back(index);positionMean=math3::add(positionMean,p);normalMean=math3::add(normalMean,n);
+    }
+    if(refinement.size()>=options.minimumSupportPoints) {
+        const double count=double(refinement.size());
+        positionMean=math3::scale(positionMean,1/count);normalMean=math3::scale(normalMean,1/count);
+        Eigen::Matrix3d covariance=Eigen::Matrix3d::Zero(),matrix=Eigen::Matrix3d::Zero();
+        Eigen::Vector3d rhs=Eigen::Vector3d::Zero();
+        for(auto index:refinement) {
+            const auto p=toVec3(std::get<0>(input[index]));
+            const auto d=math3::subtract(p,cone.apex);const double t=math3::dot(d,cone.axisDirection);
+            const auto radial=math3::subtract(d,math3::scale(cone.axisDirection,t));
+            const auto expected=math3::subtract(math3::scale(radial,std::cos(cone.openingAngleRadians)/math3::length(radial)),
+                math3::scale(cone.axisDirection,std::sin(cone.openingAngleRadians)));
+            auto n=math3::normalized(toVec3(std::get<1>(input[index])));
+            if(math3::dot(n,expected)<0)n=math3::scale(n,-1);
+            const Eigen::Vector3d v(n.x,n.y,n.z),delta(n.x-normalMean.x,n.y-normalMean.y,n.z-normalMean.z);
+            covariance+=delta*delta.transpose();matrix+=v*v.transpose();
+            rhs+=v*math3::dot(n,math3::subtract(p,positionMean));
+        }
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(covariance);
+        if(solver.info()==Eigen::Success && solver.eigenvalues()[1]>count*1e-5 && matrix.fullPivLu().isInvertible()) {
+            const Eigen::Vector3d a=solver.eigenvectors().col(0),shift=matrix.fullPivLu().solve(rhs);
+            auto axis=modeling::Vec3{a[0],a[1],a[2]};
+            const auto apex=math3::add(positionMean,{shift[0],shift[1],shift[2]});
+            if(math3::dot(math3::subtract(positionMean,apex),axis)<0)axis=math3::scale(axis,-1);
+            const double angle=std::asin(std::clamp(std::abs(math3::dot(normalMean,axis)),0.0,1.0));
+            if(shift.allFinite() && std::abs(math3::dot(axis,cone.axisDirection))>0.95 &&
+               std::abs(angle-cone.openingAngleRadians)<0.15 && angle>=options.minimumOpeningAngleRadians && angle<=options.maximumOpeningAngleRadians)
+                cone={apex,axis,angle};
+        }
+    }
+
     modeling::Vec3 basisU;
     try {
         basisU = math3::normalized(math3::cross(
@@ -125,7 +176,7 @@ bool makeConeEvidence(
     std::vector<double> angles;
     double residualSum = 0.0;
     double alignmentSum = 0.0;
-    for (const std::size_t index : shape.indices_of_assigned_points()) {
+    for (std::size_t index=0;index<input.size();++index) {
         const modeling::Vec3 offset = math3::subtract(
             toVec3(std::get<0>(input[index])), cone.apex);
         const double axial = math3::dot(offset, cone.axisDirection);

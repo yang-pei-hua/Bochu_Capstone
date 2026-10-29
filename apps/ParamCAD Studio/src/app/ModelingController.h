@@ -77,6 +77,7 @@ public:
     void adoptProject(modeling::ModelingCore&& prepared);
     bool editPrimitive(modeling::FeatureId id, const std::array<double,3>& values,
                        modeling::ResizeAnchor anchor, modeling::ModelRevision expectedRevision);
+    bool editProfileCavity(modeling::FeatureId id,int index,const std::array<double,3>& values,modeling::ModelRevision expectedRevision);
     // Rebuild an isolated copy, including dependent features. No history,
     // document state, body, revision or error signals change during validation.
     bool validatePrimitiveEdit(modeling::FeatureId id, const std::array<double,3>& values,

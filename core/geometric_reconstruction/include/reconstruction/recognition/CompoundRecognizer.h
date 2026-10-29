@@ -28,6 +28,7 @@ struct CompoundCandidate {
     std::vector<PrismCandidate> prisms;
     std::vector<ThroughHoleCandidate> throughHoles;
     std::vector<CurvedSolidCandidate> curvedSolids;
+    std::vector<modeling::ProfileBodyParams> profileBodies;
     double occupancyError = 0;
     double surfaceCoverage = 0;
     double confidence = 0;

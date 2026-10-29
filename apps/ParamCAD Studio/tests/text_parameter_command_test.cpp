@@ -45,6 +45,10 @@ void contracts() {
     require(!textcad::parsePrimitiveEdit("高度改为40mm", suppressed, 1, 42, output, error), "suppressed targets are unavailable");
     suppressed[0].suppressed=false; suppressed[0].valid=false;
     require(!textcad::parsePrimitiveEdit("高度改为40mm", suppressed, 1, 42, output, error), "invalid targets are unavailable");
+    ProfileBodyParams body;body.sizeX=100;body.sizeY=80;body.sizeZ=20;
+    const std::vector<Feature> profile{feature(8,body)};
+    require(textcad::parsePrimitiveEdit("高度增加 2 mm，固定中心",profile,8,42,output,error)&&near(output.values[2],22)&&output.summary.contains("孔与槽"),
+        "profile text editing states whole-body scaling semantics");
 }
 }
 int main(int argc, char** argv) {

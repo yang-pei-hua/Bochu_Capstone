@@ -53,6 +53,24 @@ int main(int argc, char** argv)
         result=analysePointCloud(dense,ids,0.01);
         require(result.error.isEmpty() && result.processedPoints<dense.positions.size()
             && result.assignedPoints>=dense.positions.size()*0.99, "voxel downsampling does not lose original point memberships");
+        PlyCloud mixedScale;
+        for(int x=0;x<250;++x)for(int y=0;y<220;++y) {
+            mixedScale.positions.push_back({float(x*20),float(y*20),0});mixedScale.normals.push_back({0,0,1});
+        }
+        const auto smallStart=mixedScale.positions.size();
+        for(int ring=0;ring<6;++ring)for(int angle=0;angle<96;++angle) {
+            const double t=2*std::acos(-1.0)*angle/96;
+            mixedScale.positions.push_back({float(100+2*std::cos(t)),float(100+2*std::sin(t)),float(20+ring)});
+            mixedScale.normals.push_back({float(std::cos(t)),float(std::sin(t)),0});
+        }
+        ids.resize(mixedScale.positions.size());for(size_t i=0;i<ids.size();++i)ids[i]=vtkIdType(i);
+        result=analysePointCloud(mixedScale,ids,0.02);
+        require(result.error.isEmpty(),"mixed-scale scene analysis succeeds");
+        size_t smallCylinder=0;
+        for(const auto& surface:result.surfaces)if(surface.surface.geometry=="cylinder")
+            for(auto id:surface.points)smallCylinder+=size_t(id)>=smallStart;
+        require(smallCylinder>=(mixedScale.positions.size()-smallStart)*0.98,
+            "large scene diagonal must not erase or exclude a radius-2 cylinder");
         if(argc>1) {
             PlyCloud input; QString error;
             require(PlyReader::read(QString::fromLocal8Bit(argv[1]),input,error), "load sample cloud");

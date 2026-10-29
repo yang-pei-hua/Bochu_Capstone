@@ -85,8 +85,31 @@ bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit uni
             for(auto& p:sourceSamples) {p.position.x*=sourceScale;p.position.y*=sourceScale;p.position.z*=sourceScale;}
             const reconstruction::PointStore recoverySource(std::move(sourceSamples),points.unit());
             reconstruction::GuidedSolidResult guided;
-            if (!reconstruction::reconstructGuidedSolid(points,planes,cylinders,hints,guided,failure,
-                    [cancelled] { return cancelled->load(); }, analysis ? &*analysis : nullptr,relations,&recoverySource)) {
+            const bool recognized=reconstruction::reconstructGuidedSolid(points,planes,cylinders,hints,guided,failure,
+                    [cancelled] { return cancelled->load(); }, analysis ? &*analysis : nullptr,relations,&recoverySource);
+            if(cancelled->load())return;
+            // Decompose failed/multiple-body observations before attempting
+            // finite-shell closure. Explicit user constraints stay authoritative.
+            const size_t bodies=guided.candidate.boxes.size()+guided.candidate.prisms.size()+guided.candidate.curvedSolids.size();
+            if(hints.empty() && relations.empty() && (!recognized || bodies>1)) {
+                QMetaObject::invokeMethod(this,[this,cancelled]{if(m_running&&m_cancelled==cancelled&&!cancelled->load())emit stageChanged(Stage::SeparatingParts);},Qt::QueuedConnection);
+                reconstruction::AssemblyOptions options;
+                // The decomposition estimates local noise independently of the
+                // coarse, whole-cloud detection tolerance.
+                result->assembly.emplace();std::string decompositionError;
+                if(reconstruction::reconstructAssembly(recoverySource,options,*result->assembly,decompositionError,[cancelled]{return cancelled->load();})) {
+                    const auto& separated=result->assembly->candidate;
+                    if(!separated.profileBodies.empty() || !separated.curvedSolids.empty()) {
+                        result->candidate=separated;result->analysis=std::move(guided.analysis);
+                        result->outcome=CadReconstructionResult::Outcome::Success;return;
+                    }
+                    result->analysis=std::move(guided.analysis);
+                    result->outcome=CadReconstructionResult::Outcome::Unsupported;
+                    result->error=QStringLiteral("Separated %1 candidates; no verified closed solid").arg(result->assembly->parts.size());
+                    return;
+                } else if(!recognized)failure += "; decomposition: "+decompositionError;
+            }
+            if (!recognized) {
                 result->analysis=std::move(guided.analysis);
                 result->analysisReused=guided.analysisReused;
                 result->outcome = CadReconstructionResult::Outcome::Unsupported;

@@ -168,7 +168,7 @@ void FeatureDetailsPanel::setFeature(const std::vector<Feature>& features, Featu
     Details d;
     d.html = "<h3>" + QString::fromStdString(feature->name).toHtmlEscaped() + "</h3><table cellspacing=\"6\">";
     d.row("特征 ID", QString::number(feature->id));
-    d.row("来源", feature->reconstructed ? "点云重建" : "手动建模");
+    d.row("来源", feature->reconstructed ? feature->type==FeatureType::ProfileBody?"已保存的参数实体":"点云重建" : "手动建模");
     if (feature->manuallyEdited) d.row("调整状态", "已手动修改；重拟合覆盖需要确认");
     d.row("状态", feature->suppressed ? "已抑制" : feature->valid ? "有效" : "无效");
     if (!feature->errorText.empty()) d.row("错误", QString::fromStdString(feature->errorText));
@@ -226,6 +226,17 @@ void FeatureDetailsPanel::setFeature(const std::vector<Feature>& features, Featu
         } else if constexpr (std::is_same_v<T, TorusPrimitiveParams>) {
             d.section("圆环体参数"); d.row("中心（mm）",vector(p.center)); d.row("轴向",vector(p.axisDirection));
             d.length("主半径",p.majorRadius); d.length("管截面半径",p.minorRadius);
+        } else if constexpr(std::is_same_v<T,ProfileBodyParams>) {
+            d.section("轮廓实体参数");d.length("整体局部 X",p.sizeX);d.length("整体局部 Y",p.sizeY);d.length("整体局部 Z",p.sizeZ);
+            d.row("解析轮廓边数",QString::number(p.outline.size()));d.row("回转外形段数",QString::number(p.envelope.size()));d.row("孔 / 腔段数",QString::number(p.cavities.size()));
+            d.row("异形贯通孔数",QString::number(p.profileVoids.size()));
+            if(p.boundary)d.row("拟合裁剪曲面数",QString::number(p.boundary->faces.size()));
+            d.note("整体尺寸按局部坐标缩放整个零件。孔段参数为缩放前的基准值，可在参数调整中单独修改。");
+            for(std::size_t i=0;i<p.cavities.size();++i) {
+                const auto& c=p.cavities[i];d.section(QStringLiteral("孔 / 腔段 %1").arg(i+1));
+                d.length("起始直径",c.startRadius*2);d.length("终止直径",c.endRadius*2);d.length("段深度",c.end-c.start);
+                if(std::max(c.innerStartRadius,c.innerEndRadius)>0){d.length("环形腔起始内径",c.innerStartRadius*2);d.length("环形腔终止内径",c.innerEndRadius*2);}
+            }
         }
     },feature->params);
     m_details->setHtml(d.html + "</table>");

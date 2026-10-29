@@ -57,13 +57,15 @@ bool parsePrimitiveEdit(const QString& input, const std::vector<Feature>& featur
     if (const auto* box = std::get_if<BoxPrimitiveParams>(&feature->params)) {
         proposed.values = {box->sizeX, box->sizeY, box->sizeZ};
         labels = {"长（局部 X）", "宽（局部 Y）", "高（局部 Z）"};
+    } else if(const auto* body=std::get_if<ProfileBodyParams>(&feature->params)) {
+        proposed.values={body->sizeX,body->sizeY,body->sizeZ};labels={"整体局部 X","整体局部 Y","整体局部 Z"};
     } else if (const auto* cylinder = std::get_if<CylinderPrimitiveParams>(&feature->params)) {
         proposed.values = {cylinder->radius, cylinder->height, 1};
         labels = {"半径", "高度"};
     } else if (const auto* hole = std::get_if<ThroughHolePrimitiveParams>(&feature->params)) {
         proposed.values[0] = 2 * hole->radius;
         labels = {"孔直径"};
-    } else return fail(QStringLiteral("当前支持长方体、圆柱和贯穿孔的尺寸指令。"));
+    } else return fail(QStringLiteral("当前支持长方体、轮廓实体、圆柱和贯穿孔的尺寸指令。"));
     const auto before = proposed.values;
     auto clauses = text.split(QRegularExpression(QStringLiteral("[，,、]")), Qt::KeepEmptyParts);
     if (clauses.empty() || clauses.size() > 4) return fail(QStringLiteral("每次最多修改三个尺寸和一个固定参照。"));
@@ -92,7 +94,7 @@ bool parsePrimitiveEdit(const QString& input, const std::vector<Feature>& featur
         const auto property = match.captured(1).toUpper();
         int index = -1;
         double factor = 1;
-        if (std::holds_alternative<BoxPrimitiveParams>(feature->params)) {
+        if (std::holds_alternative<BoxPrimitiveParams>(feature->params) || std::holds_alternative<ProfileBodyParams>(feature->params)) {
             if (property.startsWith(QStringLiteral("长")) || property.startsWith('X')) index = 0;
             else if (property.startsWith(QStringLiteral("宽")) || property.startsWith('Y')) index = 1;
             else if (property.startsWith(QStringLiteral("高")) || property.startsWith('Z')) index = 2;
@@ -135,6 +137,7 @@ bool parsePrimitiveEdit(const QString& input, const std::vector<Feature>& featur
     for (const int index : changed)
         proposed.summary += QStringLiteral("%1：%2 → %3 mm\n").arg(labels[index], number(before[index]), number(proposed.values[index]));
     proposed.summary += QStringLiteral("固定参照：%1").arg(anchorName(proposed.anchor));
+    if(std::holds_alternative<ProfileBodyParams>(feature->params))proposed.summary+=QStringLiteral("\n整体尺寸缩放会一同缩放孔与槽；单个孔段请使用数值参数编辑器。");
     output = std::move(proposed);
     return true;
 }

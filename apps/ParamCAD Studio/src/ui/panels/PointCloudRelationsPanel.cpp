@@ -40,6 +40,7 @@ const std::vector<std::pair<QString, QString>> relationTypes{
     {"same_radius", "等半径"}, {"coplanar", "共面"}};
 QString label(const std::vector<std::pair<QString, QString>>& values, const QString& key)
 {
+    if(key=="part")return QStringLiteral("部件候选");
     for (const auto& [value, text] : values) if (value == key) return text;
     return key;
 }
@@ -359,7 +360,9 @@ void PointCloudRelationsPanel::setDocument(const PointCloudSelection& document, 
                 if (param.value().isArray()) {
                     QStringList components; for (const auto& component : param.value().toArray()) components << QString::number(component.toDouble(), 'g', 6);
                     text = components.join(", ");
-                } else text = QString::number(param.value().toDouble(), 'g', 6);
+                } else if(param.value().isString())text=param.value().toString();
+                else if(param.value().isBool())text=param.value().toBool()?tr("是"):tr("否");
+                else text = QString::number(param.value().toDouble(), 'g', 6);
                 const auto found = names.find(param.key());
                 node(item, {found == names.end() ? param.key() : found->second, text}, Region, region.id);
             }

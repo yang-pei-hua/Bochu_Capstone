@@ -291,6 +291,13 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
             states.emplace(feature.id, PrimitiveBuildState{feature.params});
             continue;
         }
+        case FeatureType::ProfileBody: {
+            const auto* params=std::get_if<ProfileBodyParams>(&feature.params);
+            TopoDS_Shape solid;
+            if(!params || !buildProfileBody(*params,solid,error))break;
+            appendIndependentSolid(solid,currentBody);
+            states.emplace(feature.id,PrimitiveBuildState{feature.params});continue;
+        }
         case FeatureType::ThroughHolePrimitive: {
             const auto* params =
                 std::get_if<ThroughHolePrimitiveParams>(&feature.params);

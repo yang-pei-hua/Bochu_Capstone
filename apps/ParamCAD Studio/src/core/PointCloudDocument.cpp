@@ -180,3 +180,8 @@ bool PointCloudDocument::undo()
     notifyEdit();
     return true;
 }
+void PointCloudDocument::replacePartCandidates(const std::vector<DetectedPointCloudSurface>& parts,bool recordUndo)
+{
+    m_selection.replacePartCandidates(parts,recordUndo);
+    notifyEdit();
+}

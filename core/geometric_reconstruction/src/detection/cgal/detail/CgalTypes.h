@@ -14,6 +14,7 @@
 #include <CGAL/number_utils.h>
 #include <CGAL/property_map.h>
 #include <CGAL/Random.h>
+#include "StableCone.h"
 
 #include <algorithm>
 #include <array>
@@ -42,7 +43,7 @@ using Ransac = CGAL::Shape_detection::Efficient_RANSAC<Traits>;
 using CgalPlane = CGAL::Shape_detection::Plane<Traits>;
 using CgalCylinder = CGAL::Shape_detection::Cylinder<Traits>;
 using CgalSphere = CGAL::Shape_detection::Sphere<Traits>;
-using CgalCone = CGAL::Shape_detection::Cone<Traits>;
+using CgalCone = StableCone<Traits>;
 using CgalTorus = CGAL::Shape_detection::Torus<Traits>;
 
 // A pair of perpendicular normals on a box edge can produce a zero-radius
@@ -77,6 +78,7 @@ class SafeCylinder final : public CgalCylinder {
         return this->connected_component_kdTree(indices, epsilon);
     }
 };
+
 
 class ScopedRandomStream {
     CGAL::Random::State previous;

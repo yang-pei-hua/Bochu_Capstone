@@ -8,6 +8,7 @@ from .paths import REPOSITORY_ROOT
 
 
 CLIENT_LOCATIONS = (
+    "apps/ParamCAD Studio/build/msvc-debug/cloud-only/Release/ParamCAD Studio.exe",
     "apps/ParamCAD Studio/build/msvc-debug/Release/ParamCAD Studio.exe",
     "apps/ParamCAD Studio/build/msvc-debug/Debug/ParamCAD Studio.exe",
     "build/paramcad-validation/Release/ParamCAD Studio.exe",

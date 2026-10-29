@@ -268,6 +268,15 @@ vtk_module_autoinit(
 if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
     add_executable(cad_reconstruction_validation
         ../../tools/cad_reconstruction_validation.cpp
+        ../../tools/StepCloudSampler.cpp
+        ../../tools/SurfaceCoverageValidation.cpp
+        ../../tools/PointCloudCadValidation.cpp
+        ../../tools/AssemblyDiagnostics.cpp
+        src/app/CadReconstructionTask.h src/app/CadReconstructionTask.cpp
+        src/io/ProjectStore.cpp src/io/FeatureCodec.cpp src/io/PlyWriter.cpp
+        src/core/PointCloudDocument.h src/core/PointCloudDocument.cpp
+        src/core/PointCloudSelection.cpp src/core/PointCloudEdits.cpp src/core/PointCloudRelations.cpp
+        src/io/PointCloudAnalysis.cpp
         src/io/PlyReader.cpp
         src/io/PointCloudAdapter.cpp
         src/io/StepModelLoader.cpp
@@ -275,7 +284,7 @@ if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
     target_include_directories(cad_reconstruction_validation PRIVATE src)
     target_link_directories(cad_reconstruction_validation PRIVATE ${OpenCASCADE_LIBRARY_DIR})
     target_link_libraries(cad_reconstruction_validation PRIVATE
-        Qt6::Core GeometricReconstruction::GeometricReconstruction TKDE TKXSBase TKDESTEP)
+        Qt6::Core Qt6::Gui VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction TKDE TKXSBase TKDESTEP)
     if(MSVC)
         target_compile_options(cad_reconstruction_validation PRIVATE /W4 /permissive- /utf-8)
         # Native failures get a bounded symbolized JSON stack beside the report.
@@ -288,6 +297,17 @@ endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(assembly_reconstruction_test ../../core/geometric_reconstruction/tests/assembly_reconstruction_test.cpp)
+    target_link_libraries(assembly_reconstruction_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    add_test(NAME assembly_reconstruction_test COMMAND assembly_reconstruction_test)
+    set_tests_properties(assembly_reconstruction_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
+    add_executable(profile_body_test tests/profile_body_test.cpp src/io/FeatureCodec.cpp)
+    target_include_directories(profile_body_test PRIVATE src)
+    target_link_libraries(profile_body_test PRIVATE Qt6::Core CadModelCore::CadModelCore)
+    add_test(NAME profile_body_test COMMAND profile_body_test)
+    set_tests_properties(profile_body_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(text_parameter_command_test tests/text_parameter_command_test.cpp src/core/TextParameterCommand.cpp)
     target_include_directories(text_parameter_command_test PRIVATE src)
     target_link_libraries(text_parameter_command_test PRIVATE Qt6::Core CadModelCore::CadModelCore)

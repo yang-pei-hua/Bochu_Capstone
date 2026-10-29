@@ -5,6 +5,7 @@
 #include <reconstruction/recognition/CompoundRecognizer.h>
 #include <reconstruction/preprocessing/PointCloudPreprocessor.h>
 #include <reconstruction/recognition/GuidedSolidRecognizer.h>
+#include <reconstruction/recognition/AssemblyReconstruction.h>
 
 #include <QObject>
 
@@ -25,6 +26,7 @@ struct CadReconstructionResult
     std::vector<reconstruction::TemplateFit> templateFits;
     int failedRegionId = 0;
     QString error;
+    std::optional<reconstruction::AssemblyReconstructionResult> assembly;
 };
 
 // Computes a candidate from an owned input snapshot. No view or modeling document
@@ -33,7 +35,7 @@ class CadReconstructionTask final : public QObject
 {
     Q_OBJECT
 public:
-    enum class Stage { Preprocessing, FittingTemplates, Recognizing, Cancelling };
+    enum class Stage { Preprocessing, FittingTemplates, Recognizing, SeparatingParts, Cancelling };
     Q_ENUM(Stage)
 
     explicit CadReconstructionTask(QObject* parent = nullptr);

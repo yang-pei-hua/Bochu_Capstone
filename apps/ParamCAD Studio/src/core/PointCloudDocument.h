@@ -49,6 +49,7 @@ public:
     void removeRelation(int id);
     void inferRelations(double distanceTolerance, double angleDegrees, bool recordUndo = true);
     void addSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces, bool recordUndo = true);
+    void replacePartCandidates(const std::vector<DetectedPointCloudSurface>& parts,bool recordUndo=true);
     bool undo();
 
 signals:

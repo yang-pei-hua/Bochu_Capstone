@@ -72,5 +72,6 @@ private:
     quint64 m_cadBodyRevision = 0;
     modeling::ModelRevision m_cadModelRevision = 0;
     QString m_cadSourcePath;
+    std::vector<qint64> m_cadOriginalPointIds;
     std::optional<reconstruction::SurfaceAnalysisResult> m_surfaceAnalysis;
 };

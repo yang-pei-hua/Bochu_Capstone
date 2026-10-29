@@ -1,4 +1,5 @@
 #include "detail/AnalysisInternal.h"
+#include "reconstruction/detection/MultiScaleDetector.h"
 
 namespace reconstruction {
 using namespace detail::analysis;
@@ -14,7 +15,13 @@ bool analyzeSurfaces(const PointStore& points, const SurfaceAnalysisOptions& opt
     const std::array<bool,5> enabled{d.detectPlanes,d.detectCylinders,d.detectSpheres,d.detectCones,d.detectTori};
     if (std::none_of(enabled.begin(),enabled.end(),[](bool x){return x;})) { error = "No surface family enabled"; return false; }
     std::string failure;
-    for (int family = 0; family < (options.independentFamilies ? 5 : 1); ++family) {
+    if(options.recoverResidualSurfaces) {
+        PrimitiveDetectionResult result;MultiScaleDetectionReport report;
+        if(!detectMultiScalePrimitiveEvidence(points,d,result,report,failure,cancelled)) {
+            if(failure=="Cancelled"){error=failure;return false;}
+        }
+        evidence=std::move(result.evidence);passes=report.detectionPasses;
+    } else for (int family = 0; family < (options.independentFamilies ? 5 : 1); ++family) {
         if (cancelled && cancelled()) { error = "Cancelled"; return false; }
         if (options.independentFamilies && !enabled[family]) continue;
         auto detection = d;

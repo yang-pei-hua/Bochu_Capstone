@@ -63,6 +63,10 @@ modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &cand
         const auto added = std::visit([&](const auto& params) { return append(params); }, solid.primitive);
         if (!added.success) return {false, core.revision(), {}, added.error};
     }
+    for(const auto& body:candidate.profileBodies) {
+        const auto added=append(body);
+        if(!added.success)return {false,core.revision(),{},added.error};
+    }
     return core.apply(patch);
 }
 

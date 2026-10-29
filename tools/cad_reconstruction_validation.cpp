@@ -3,6 +3,9 @@
 #include "io/PlyReader.h"
 #include "io/PointCloudAdapter.h"
 #include "io/StepModelLoader.h"
+#include "StepCloudSampler.h"
+#include "SurfaceCoverageValidation.h"
+#include "PointCloudCadValidation.h"
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
@@ -993,6 +996,15 @@ int main(int argc, char **argv) {
     try {
         if (generating) {
             generate(args, report);
+        } else if(args.value(1) == "sample") {
+            sampleStepCloud(args, report);
+        } else if(args.value(1) == "inspect-step") {
+            inspectStepTopology(args,report);
+        } else if(args.value(1) == "reconstruct-cloud") {
+            validatePointCloudCad(args,report);
+            if(!report["cad_constructed"].toBool())exitCode=1;
+        } else if(args.value(1) == "analyze" || args.value(1) == "analyze-client") {
+            validateSurfaceCoverage(args, report);
         } else {
             require(args.value(1) == "fit", "Expected generate or fit mode");
             fit(args, report);

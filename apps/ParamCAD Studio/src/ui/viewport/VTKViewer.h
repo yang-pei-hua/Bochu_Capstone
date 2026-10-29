@@ -20,6 +20,8 @@
 #include <TopoDS_Shape.hxx>
 
 #include <optional>
+#include <array>
+#include <vector>
 #include <string>
 
 class TopoDS_Shape;
@@ -29,6 +31,7 @@ class vtkGenericOpenGLRenderWindow;
 class vtkObject;
 class vtkOrientationMarkerWidget;
 class vtkRenderer;
+class vtkActor;
 class vtkBoxWidget2;
 class vtkBoxRepresentation;
 
@@ -66,6 +69,9 @@ public:
     // Imported/replaced bodies may change without a feature-history command.
     quint64 bodyRevision() const noexcept { return m_bodyRevision; }
     void renderNow();
+    // Presentation-only finite boundary overlay in the source cloud frame.
+    void setAssemblyBoundaries(const std::vector<std::array<double,6>>& lines,const std::vector<bool>& closed);
+    std::size_t assemblyBoundarySegmentCount() const {return m_assemblyBoundarySegments;}
     // Coalesce navigation frames without delaying camera updates or captures.
     void requestRender();
     bool beginBoxReferenceSelection(const modeling::BoxPrimitiveParams& box);
@@ -251,6 +257,9 @@ private:
     QString m_bodyTexturePath;
     quint64 m_bodyRevision = 0;
     PointCloudActor m_pointCloudActor;
+    vtkSmartPointer<vtkActor> m_assemblyBoundaryActor;
+    int m_boundaryPointCount=0;
+    std::size_t m_assemblyBoundarySegments=0;
     PointCloudDocument* const m_pointCloudDocument;
     vtkSmartPointer<vtkBoxWidget2> m_pointBox;
     vtkSmartPointer<vtkBoxRepresentation> m_pointBoxRepresentation;

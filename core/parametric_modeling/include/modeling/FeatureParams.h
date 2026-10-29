@@ -2,6 +2,7 @@
 
 #include "modeling/FaceReference.h"
 #include "modeling/PrimitiveParams.h"
+#include "modeling/ProfileBody.h"
 #include "modeling/Sketch.h"
 
 #include <variant>
@@ -44,6 +45,7 @@ using FeatureParams = std::variant<
     SpherePrimitiveParams,
     CylinderPrimitiveParams,
     ConePrimitiveParams,
-    TorusPrimitiveParams>;
+    TorusPrimitiveParams,
+    ProfileBodyParams>;
 
 }  // namespace modeling

@@ -16,10 +16,14 @@
 #include <modeling/PrimitiveEditing.h>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
+#include <QDir>
 #include <QFile>
 #include <QJsonObject>
 #include <QMessageBox>
@@ -27,6 +31,9 @@
 #include <QSurfaceFormat>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QThread>
+#include <TopExp_Explorer.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <vtkActor.h>
 #include <vtkActorCollection.h>
 #include <vtkGenericOpenGLRenderWindow.h>
@@ -54,6 +61,99 @@ Vec3 boxPoint(const BoxPrimitiveParams& box,double x,double y,double z) {
     return p;
 }
 void samePoint(Vec3 a,Vec3 b,const char* message) { require(near(a.x,b.x)&&near(a.y,b.y)&&near(a.z,b.z),message); }
+
+void cloudOnlyButtonWorkflow() {
+    QTemporaryDir directory;require(directory.isValid(),"cloud-only fixture directory");
+    const auto path=directory.filePath("input.ply");QFile file(path);require(file.open(QIODevice::WriteOnly),"write cloud-only fixture");
+    QByteArray data("ply\nformat ascii 1.0\nelement vertex 600\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nend_header\n");
+    for(int axis=0;axis<3;++axis)for(int sign:{-1,1})for(int i=0;i<10;++i)for(int j=0;j<10;++j) {
+        double p[3]{},n[3]{};p[axis]=3*sign;n[axis]=sign;p[(axis+1)%3]=-3+(i+.5)*.6;p[(axis+2)%3]=-3+(j+.5)*.6;
+        data+=QByteArray::number(p[0])+' '+QByteArray::number(p[1])+' '+QByteArray::number(p[2])+' '+QByteArray::number(n[0])+' '+QByteArray::number(n[1])+' '+QByteArray::number(n[2])+'\n';
+    }
+    require(file.write(data)==data.size(),"save observed box points");file.close();
+    auto write=[&](const QString& name,const QByteArray& bytes){QFile f(directory.filePath(name));require(f.open(QIODevice::WriteOnly)&&f.write(bytes)==bytes.size(),"write neighbor fixture");};
+    write("input.json","{\"unit\":\"mm\"}");
+    // These would previously activate the removed source-model branch. They
+    // must have no effect, even when the source model is unavailable.
+    write("summary.json","{\"schema\":\"paramcad.step-surface-validation\",\"status\":\"passed\",\"cloud\":\"input.ply\",\"source_step\":\"missing.step\"}");
+    write("reference.json","invalid metadata: this file must never be read by reconstruction");
+    MainWindow window;window.setAttribute(Qt::WA_DontShowOnScreen);window.show();
+    auto* workspace=window.findChild<PointCloudWorkspaceController*>();auto* task=window.findChild<CadReconstructionTask*>();
+    auto* model=window.findChild<ModelingController*>();workspace->loadPointCloudFromFile(path);
+    auto* action=window.findChild<QAction*>("reconstructCadAction");require(action->isEnabled() && !action->text().contains("STEP"),"button exposes only point-cloud reconstruction");
+    std::optional<CadReconstructionResult> result;QObject::connect(task,&CadReconstructionTask::finished,&window,[&](const auto& value){result=value;});
+    action->trigger();QElapsedTimer timer;timer.start();while(task->isRunning()&&timer.elapsed()<30000){QApplication::processEvents();QThread::msleep(5);}
+    require(result && result->outcome==CadReconstructionResult::Outcome::Success && !model->features().empty(),"button reconstructs using only observations despite poisoned source-model sidecars");
+    require(near(volume(model->bodyShape()),216),"cloud-only result has observed dimensions");
+    window.findChild<ModelingPanel*>()->selectFeature(model->features().front().id);auto* editor=window.findChild<FeatureEditorPanel*>();
+    editor->findChild<QDoubleSpinBox*>("featureDimension0")->setValue(7);editor->findChild<QPushButton*>("applyFeatureParametersButton")->click();
+    require(near(volume(model->bodyShape()),252)&&model->undo()&&near(volume(model->bodyShape()),216),"cloud-only CAD remains editable and undoable");
+    QString error;auto* project=window.findChild<ProjectController*>();require(project->saveTo(directory.filePath("result.pcad"),error)&&project->loadFrom(directory.filePath("result.pcad"),error),"cloud-only project saves and reopens");
+    require(window.findChild<ModelViewController*>()->exportStepTo(directory.filePath("result.step"),error),"STEP export remains available for reconstructed CAD");
+}
+
+void assemblyButtonWorkflow() {
+    QTemporaryDir directory;require(directory.isValid(),"assembly GUI fixture directory");const auto path=directory.filePath("parts.ply");
+    QByteArray rows;
+    auto add=[&](double cx,double cy,double cz,double sx,double sy,double sz,int missing){const double size[]{sx,sy,sz};
+        for(int axis=0;axis<3;++axis)for(int side=0;side<2;++side){if(axis*2+side==missing)continue;
+            for(int i=0;i<10;++i)for(int j=0;j<10;++j){double p[3]{},n[3]{};p[axis]=(side?.5:-.5)*size[axis];n[axis]=side?1:-1;
+                p[(axis+1)%3]=((i+.5)/10-.5)*size[(axis+1)%3];p[(axis+2)%3]=((j+.5)/10-.5)*size[(axis+2)%3];
+                rows+=QByteArray::number(p[0]+cx)+' '+QByteArray::number(p[1]+cy)+' '+QByteArray::number(p[2]+cz)+' '+QByteArray::number(n[0])+' '+QByteArray::number(n[1])+' '+QByteArray::number(n[2])+'\n';}}};
+    add(0,0,0,6,6,6,-1);add(20,0,0,4,6,8,5);
+    QFile file(path);require(file.open(QIODevice::WriteOnly),"write multiple observed parts");
+    file.write("ply\nformat ascii 1.0\nelement vertex 1100\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nend_header\n");file.write(rows);file.close();
+    QFile unit(directory.filePath("parts.json"));require(unit.open(QIODevice::WriteOnly),"assembly units");unit.write("{\"unit\":\"mm\"}");unit.close();
+    MainWindow window;window.setAttribute(Qt::WA_DontShowOnScreen);window.show();auto* workspace=window.findChild<PointCloudWorkspaceController*>();
+    auto* task=window.findChild<CadReconstructionTask*>();auto* model=window.findChild<ModelingController*>();auto* viewer=window.findChild<VTKViewer*>();
+    workspace->loadPointCloudFromFile(path);auto* document=viewer->pointCloudDocument();document->select({0,3});document->deleteSelectedPoints();
+    std::optional<CadReconstructionResult> result;QObject::connect(task,&CadReconstructionTask::finished,&window,[&](const auto& value){result=value;});
+    window.findChild<QAction*>("reconstructCadAction")->trigger();QElapsedTimer elapsed;elapsed.start();while(task->isRunning()&&elapsed.elapsed()<30000){QApplication::processEvents();QThread::msleep(5);}
+    require(result&&result->assembly&&result->outcome==CadReconstructionResult::Outcome::Success,"actual button separates mixed closed/open components");
+    if(!near(volume(model->bodyShape()),216))std::cerr<<"mixed-component CAD volume="<<volume(model->bodyShape())<<" expected=216\n";
+    require(near(volume(model->bodyShape()),216),"an incomplete neighbor is excluded from publishable CAD");
+    require(document->selection().regions().size()>=2 && viewer->assemblyBoundarySegmentCount()>0,"part collections and finite boundary overlay are visible");
+    bool open=false,closed=false;for(const auto& r:document->selection().regions()){if(r.geometry!="part")continue;
+        if(r.parameters["closed"].toBool())closed=true;else open=true;
+        for(auto id:document->selection().regionPoints(r.id))require(id!=0&&id!=3,"part support maps through noncontiguous original indices");}
+    require(open&&closed,"part annotations preserve closed and unresolved states separately");
+    const auto screenshot=qEnvironmentVariable("PCAD_ASSEMBLY_PREVIEW");if(!screenshot.isEmpty()){QApplication::processEvents();require(window.grab().save(screenshot),"save assembly separation preview");}
+    QString error;auto* project=window.findChild<ProjectController*>();require(project->saveTo(directory.filePath("assembly.pcad"),error)&&project->loadFrom(directory.filePath("assembly.pcad"),error),"part annotations and editable CAD survive project round trip");
+    require(std::count_if(document->selection().regions().begin(),document->selection().regions().end(),[](const auto& r){return r.geometry=="part";})>=2,"saved part candidates retain their semantic type");
+}
+
+// Optional end-to-end acceptance against any user-supplied PLY. No source CAD,
+// expected part count or case-specific dimensions are supplied to reconstruction.
+void observedAssemblyWorkflow() {
+    const auto path=qEnvironmentVariable("PCAD_REAL_CLOUD");if(path.isEmpty())return;
+    const auto output=qEnvironmentVariable("PCAD_REAL_GUI_OUTPUT");require(!output.isEmpty()&&QDir().mkpath(output),"real-cloud GUI output directory");
+    MainWindow window;window.setAttribute(Qt::WA_DontShowOnScreen);window.show();
+    auto* workspace=window.findChild<PointCloudWorkspaceController*>();auto* task=window.findChild<CadReconstructionTask*>();
+    auto* model=window.findChild<ModelingController*>();auto* viewer=window.findChild<VTKViewer*>();
+    workspace->loadPointCloudFromFile(path);require(viewer->pointCloudDocument()->hasCloud(),"load arbitrary real observations");
+    std::optional<CadReconstructionResult> result;QObject::connect(task,&CadReconstructionTask::finished,&window,[&](const auto& value){result=value;});
+    window.findChild<QAction*>("reconstructCadAction")->trigger();QElapsedTimer timer;timer.start();
+    while(task->isRunning()&&timer.elapsed()<180000){QApplication::processEvents();QThread::msleep(5);}
+    require(result&&result->assembly,"real button produces separation diagnostics");
+    const auto closed=std::count_if(result->assembly->parts.begin(),result->assembly->parts.end(),[](const auto& part){return part.closed;});
+    auto* document=viewer->pointCloudDocument();const auto regions=document->selection().regions().size();
+    require(regions>=result->assembly->parts.size()&&viewer->assemblyBoundarySegmentCount()>0,"real part groups and finite boundaries reach the viewport");
+    std::cerr<<"real-cloud candidates="<<result->assembly->parts.size()<<" closed="<<closed<<" boundary_segments="<<viewer->assemblyBoundarySegmentCount()<<'\n';
+    QApplication::processEvents();require(window.grab().save(QDir(output).filePath("separation.png")),"save real separation preview");
+    if(closed){
+        require(result->outcome==CadReconstructionResult::Outcome::Success&&model->features().size()==size_t(closed),"only verified real parts are published");
+        require(BRepCheck_Analyzer(model->bodyShape()).IsValid(),"real published CAD is valid");
+        auto* list=window.findChild<ModelingPanel*>();list->selectFeature(model->features().front().id);QApplication::processEvents();
+        auto* editor=window.findChild<FeatureEditorPanel*>();auto* dimension=editor->findChild<QDoubleSpinBox*>("featureDimension0");
+        const double before=volume(model->bodyShape());dimension->setValue(dimension->value()*1.05);editor->findChild<QPushButton*>("applyFeatureParametersButton")->click();
+        require(std::abs(volume(model->bodyShape())-before)>std::abs(before)*1e-8,"actual real CAD parameter edit changes material");
+        require(model->undo()&&std::abs(volume(model->bodyShape())-before)<std::max(1e-6,std::abs(before)*1e-8),"real CAD edit can be undone");
+        QString error;require(window.findChild<ModelViewController*>()->exportStepTo(QDir(output).filePath("observed.step"),error),"real GUI exports reconstructed STEP");
+    } else require(result->outcome==CadReconstructionResult::Outcome::Unsupported&&model->features().empty(),"unresolved real observations produce diagnostics without a false solid");
+    QString error;auto* project=window.findChild<ProjectController*>();const auto projectPath=QDir(output).filePath("observed.pcad");
+    require(project->saveTo(projectPath,error)&&project->loadFrom(projectPath,error),"real observations, candidate membership and CAD save and reopen");
+    require(document->selection().regions().size()==regions,"reopened real candidates preserve all memberships");
+}
 
 void anchorGeometry() {
     BoxPrimitiveParams box{{{7,11,-3},{0,1,0},{0,0,1}},10,20,30,false};
@@ -127,12 +227,47 @@ void referencePicking() {
     auto* interactor=viewer->renderWindow()->GetInteractor(); interactor->SetKeyEventInformation(0,0,0,0,"Escape"); interactor->KeyPressEvent();
     require(!viewer->boxReferenceSelectionActive(),"Esc exits reference mode");
 }
+void profileBodyEditing() {
+    MainWindow window;window.setAttribute(Qt::WA_DontShowOnScreen);window.show();QApplication::processEvents();
+    auto* model=window.findChild<ModelingController*>();auto* list=window.findChild<ModelingPanel*>();
+    auto* editor=window.findChild<PropertyPanel*>()->featureDetailsPanel()->editor();
+    auto* project=window.findChild<ProjectController*>();
+    ProfileBodyParams body;body.depth=body.sizeZ=8;body.referenceSizeX=body.referenceSizeY=body.sizeX=body.sizeY=20;
+    body.envelope={{0,0,0,8,10,10}};body.cavities={{0,0,0,8,3,3},{0,0,6,8,8,8,6,6}};
+    ModelingCore prepared;require(prepared.restoreFeatures({{1,"ring",FeatureType::ProfileBody,body,false,true,{},true},
+        {2,"other",FeatureType::BoxPrimitive,BoxPrimitiveParams{{{40,0,0}},5,5,5,false}}}),"profile editor fixture");
+    model->adoptProject(std::move(prepared));list->selectFeature(1);QApplication::processEvents();
+    auto* target=editor->findChild<QComboBox*>("profileBodyEditTarget");auto* apply=editor->findChild<QPushButton*>("applyFeatureParametersButton");
+    auto* first=editor->findChild<QDoubleSpinBox*>("featureDimension0");auto* second=editor->findChild<QDoubleSpinBox*>("featureDimension1");
+    require(editor->isVisible()&&target->isVisible()&&target->findData(3)>=0,"profile editor exposes an annular inner boundary");
+    const double original=volume(model->bodyShape());
+    target->setCurrentIndex(target->findData(0));first->setValue(8);second->setValue(8);apply->click();
+    require(near(original-volume(model->bodyShape()),56*std::acos(-1.0))&&std::get<ProfileBodyParams>(feature(model,1).params).cavities[0].startRadius==4,
+        "UI hole edit changes real material");
+    require(model->undo()&&near(volume(model->bodyShape()),original),"profile edit undo restores solid");
+    require(model->redo(),"profile edit redo");
+    target->setCurrentIndex(target->findData(3));first->setValue(13);second->setValue(13);apply->click();
+    require(near(std::get<ProfileBodyParams>(feature(model,1).params).cavities[1].innerStartRadius,6.5),"UI edits annular inner diameter");
+    QTemporaryDir temp;QString error;const auto path=temp.filePath("profile-edit.pcad");
+    require(project->saveTo(path,error)&&project->loadFrom(path,error),"edited profile project reopens");
+    list->selectFeature(1);target->setCurrentIndex(target->findData(-2));first->setValue(22);second->setValue(22);apply->click();
+    require(near(std::get<ProfileBodyParams>(feature(model,1).params).envelope[0].startRadius,11),"reopened profile retains an editable envelope");
+    target->setCurrentIndex(target->findData(-1));first->setValue(24);apply->click();
+    require(near(std::get<ProfileBodyParams>(feature(model,1).params).sizeX,24),"overall profile dimension editor remains functional");
+    TopoDS_Shape resized;std::string failure;require(buildProfileBody(std::get<ProfileBodyParams>(feature(model,1).params),resized,failure),"build edited profile for independent dimensions");
+    Bnd_Box box;BRepBndLib::AddOptimal(resized,box,false,false);double x0,y0,z0,x1,y1,z1;box.Get(x0,y0,z0,x1,y1,z1);
+    require(near(x1-x0,24),"overall dimensions stay truthful after an envelope edit");
+    require(project->saveTo(path,error)&&project->loadFrom(path,error),"nonuniform profile scaling survives project round trip");
+}
 }
 
 int main(int argc,char** argv) {
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat()); QApplication app(argc,argv);
     try {
-        anchorGeometry(); referencePicking(); QTemporaryDir temp; require(temp.isValid(),"test directory");
+        cloudOnlyButtonWorkflow();
+        assemblyButtonWorkflow();
+        observedAssemblyWorkflow();
+        anchorGeometry(); referencePicking();profileBodyEditing(); QTemporaryDir temp; require(temp.isValid(),"test directory");
         MainWindow window; window.setAttribute(Qt::WA_DontShowOnScreen); window.show(); app.processEvents();
         auto* model=window.findChild<ModelingController*>(); auto* viewer=window.findChild<VTKViewer*>();
         auto* properties=window.findChild<PropertyPanel*>(); auto* list=window.findChild<ModelingPanel*>();

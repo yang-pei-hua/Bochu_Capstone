@@ -21,6 +21,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QMessageBox>
 #include <QSaveFile>
 #include <QScopeGuard>
@@ -74,6 +75,8 @@ PointCloudWorkspaceController::PointCloudWorkspaceController(
                 message = workspaceTr("正在拟合手动模板，并据此继续整体 CAD 重建…"); break;
             case CadReconstructionTask::Stage::Recognizing:
                 message = workspaceTr("正在后台识别 CAD 实体…"); break;
+            case CadReconstructionTask::Stage::SeparatingParts:
+                message = workspaceTr("正在分离部件、恢复有限边界并检查曲面连接与闭合…");break;
             case CadReconstructionTask::Stage::Cancelling:
                 message = workspaceTr("已请求取消 CAD 重建，等待当前计算步骤结束…"); break;
             }
@@ -428,6 +431,7 @@ void PointCloudWorkspaceController::reconstructCad()
     }
     std::vector<vtkIdType> ids;
     PlyCloud cloud = m_document->workingCloud(&ids);
+    m_cadOriginalPointIds.assign(ids.begin(),ids.end());
     std::map<vtkIdType, reconstruction::PointId> pointIds;
     for (size_t i = 0; i < ids.size(); ++i) pointIds[ids[i]] = i + 1;
     std::vector<reconstruction::TemplateHint> hints;
@@ -492,6 +496,7 @@ void PointCloudWorkspaceController::reconstructCad()
     }
     m_cadTask->start(std::move(cloud), sourceUnit, std::move(hints),
                      m_ui.relationsPanel->surfaceTolerance(), m_surfaceAnalysis,std::move(relations));
+    emit logInfo(workspaceTr("仅点云重建：使用观测坐标、法向、单位和用户模板，不读取源模型或面对应表。"));
 }
 
 void PointCloudWorkspaceController::requestGuidedReconstruction()
@@ -538,6 +543,8 @@ void PointCloudWorkspaceController::updateCadActions()
 {
     const bool running = m_cadTask->isRunning();
     const bool busy = running || m_startingCad || m_analysisThread;
+    m_ui.reconstructCadAction->setText(workspaceTr("Reconstruct CAD"));
+    m_ui.reconstructCadAction->setToolTip(workspaceTr("仅使用点云的位置、法向和用户模板拟合 CAD，不读取源模型或拓扑对应表。"));
     m_ui.reconstructCadAction->setEnabled(!busy && m_document->hasCloud()
                                          && m_document->pointCount() > 0);
     m_ui.cancelCadAction->setEnabled(running && !m_cadTask->isCancellationRequested());
@@ -582,11 +589,33 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
                 .arg(preprocessingReport.normalsWithoutOrientation));
         }
     }
+    if(result.assembly && !result.assembly->parts.empty()) {
+        std::vector<DetectedPointCloudSurface> groups;size_t closed=0;
+        const double scale=cloudUnit(*m_document)==reconstruction::LengthUnit::Meter?.001:1.0;
+        const auto vector=[&](modeling::Vec3 p){return QJsonArray{p.x*scale,p.y*scale,p.z*scale};};
+        for(const auto& part:result.assembly->parts){DetectedPointCloudSurface group;group.surface.geometry="part";
+            group.surface.name=workspaceTr("部件候选 %1 · %2").arg(part.id).arg(part.closed?workspaceTr("已闭合"):workspaceTr("未闭合"));
+            group.surface.confidence=part.confidence;group.surface.templateLocked=false;
+            group.surface.parameters={{"status",QString::fromStdString(part.status)},{"closed",part.closed},{"lower",vector(part.lower)},
+                {"upper",vector(part.upper)},{"open_edges",double(part.openEdges)},{"reason",QString::fromStdString(part.reason)}};
+            for(auto id:part.pointIds)if(id>0&&id<=m_cadOriginalPointIds.size())group.points.push_back(vtkIdType(m_cadOriginalPointIds[id-1]));
+            if(!group.points.empty())groups.push_back(std::move(group));if(part.closed)++closed;
+        }
+        m_document->replacePartCandidates(groups,false);
+        std::vector<std::array<double,6>> lines;std::vector<bool> closedLines;
+        for(const auto& part:result.assembly->parts)for(auto id:part.patchIds)for(const auto& loop:result.assembly->patches[id-1].loops)
+            for(size_t i=0;i<loop.size();++i){const auto a=loop[i],b=loop[(i+1)%loop.size()];lines.push_back({a.x*scale,a.y*scale,a.z*scale,b.x*scale,b.y*scale,b.z*scale});closedLines.push_back(part.closed);}
+        m_ui.viewer->setAssemblyBoundaries(lines,closedLines);
+        emit logInfo(workspaceTr("仅点云分离：%1 个候选，%2 个验证闭合，%3 个保留开放边界；候选不等同于原装配实例。")
+            .arg(result.assembly->parts.size()).arg(closed).arg(result.assembly->parts.size()-closed));
+    }
     if (result.outcome == CadReconstructionResult::Outcome::Unsupported) {
         QString message = workspaceTr("No supported solid could be reconstructed in %1: %2")
                                     .arg(QFileInfo(m_cadSourcePath).fileName(), result.error);
         if(const auto* region=m_document->selection().region(result.failedRegionId))
             message=workspaceTr("模板「%1」重建失败，模型保持原状：%2").arg(region->name,result.error);
+        message += result.assembly?workspaceTr(" 分离结果已显示在点云集合中；未生成新的 CAD，已有模型保持原状。"):
+            workspaceTr(" 未生成新的 CAD，已有模型保持原状。");
         reportStatus(message);
         emit logWarning(message);
         return;
@@ -619,9 +648,10 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
         emit logInfo(workspaceTr("已按 %1 个手动模板约束完成整体重建。原始点归属保持不变。").arg(result.templateFits.size()));
     }
 
-    emit logInfo(workspaceTr("Reconstructed solid: %1 boxes, %2 polygonal prisms, %3 through holes, surface coverage %4, %5 curved solids")
+    emit logInfo((result.assembly?workspaceTr("重建结果：%1 个长方体，%2 个棱柱，%3 个通孔，闭合候选所属观测点比例 %4，%5 个解析曲面实体，%6 个有限边界实体"):
+                workspaceTr("Reconstructed solid: %1 boxes, %2 polygonal prisms, %3 through holes, surface coverage %4, %5 curved solids, %6 finite shells"))
                 .arg(candidate.boxes.size()).arg(candidate.prisms.size())
-                .arg(candidate.throughHoles.size()).arg(candidate.surfaceCoverage, 0, 'f', 3).arg(candidate.curvedSolids.size()));
+                .arg(candidate.throughHoles.size()).arg(candidate.surfaceCoverage, 0, 'f', 3).arg(candidate.curvedSolids.size()).arg(candidate.profileBodies.size()));
     QString curvedName;
     if (!candidate.curvedSolids.empty()) {
         curvedName=std::visit([&](const auto& params)->QString {
@@ -643,8 +673,9 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
                                .arg(m_ui.viewer->cameraParameters().parallelProjection
                                          ? workspaceTr("Orthographic") : workspaceTr("Perspective")) :
                           workspaceTr("Ready | Model: %1 | Camera: %2").arg(curvedName).arg(m_ui.viewer->cameraParameters().parallelProjection ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
-    reportStatus(workspaceTr("CAD 重建完成，已更新参数化模型。"));
-    m_analyseAfterCad = m_document->selection().regionPointCount(0) >= 20;
+    reportStatus(result.assembly?workspaceTr("已显示部件候选并更新可闭合部分的 CAD；未闭合部分保留在点云集合中。"):
+        workspaceTr("CAD 重建完成，已更新参数化模型。"));
+    m_analyseAfterCad = !result.assembly && m_document->selection().regionPointCount(0) >= 20;
 }
 
 void PointCloudWorkspaceController::startPointCloudAnalysis(int regionId, bool recordUndo)

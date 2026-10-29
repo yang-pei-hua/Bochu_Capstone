@@ -28,7 +28,7 @@ bool analysisSettingsMatch(const SurfaceAnalysisOptions& a,const SurfaceAnalysis
         const auto& d=o.detection;
         std::vector<double> v{double(d.randomSeed),double(d.detectPlanes),double(d.detectCylinders),
             double(d.detectSpheres),double(d.detectCones),double(d.detectTori),o.connectivityDistance,
-            double(o.independentFamilies),o.relations.distanceTolerance,o.relations.angularToleranceRadians};
+            double(o.independentFamilies),double(o.recoverResidualSurfaces),o.relations.distanceTolerance,o.relations.angularToleranceRadians};
         auto add=[&](const auto& p,double maximum) {
             v.insert(v.end(),{p.distanceThreshold,double(p.minimumSupportPoints),maximum,p.probability,
                              p.minimumNormalAlignment,p.clusterEpsilon});

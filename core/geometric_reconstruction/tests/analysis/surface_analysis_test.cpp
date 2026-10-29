@@ -4,6 +4,7 @@
 #include "reconstruction/recognition/MixedFeatureRecognizer.h"
 #include "reconstruction/modeling/ModelingAdapter.h"
 #include "reconstruction/testing/SyntheticPointCloud.h"
+#include "reconstruction/detection/MultiScaleDetector.h"
 #include <BRepGProp.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include "../../src/recognition/mixed/detail/MixedInternal.h"
@@ -14,6 +15,8 @@
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#include <random>
+#include <unordered_set>
 
 using namespace reconstruction;
 namespace {
@@ -315,8 +318,59 @@ void tiltedCavityWalls() {
     }
 }
 
+void smallConeBands() {
+    std::vector<PointSample> samples;std::vector<std::vector<PointId>> bands(8);
+    const double angle=59*std::acos(-1.0)/180;
+    std::mt19937 random(719);std::uniform_real_distribution<double> unit(0,1);
+    for(int part=0;part<8;++part)for(int i=0;i<256;++i) {
+        // Narrow partial cone bands at a large placement, with inward normals.
+        const double theta=std::acos(-1.0)*unit(random),height=40+2*unit(random),radius=height*std::tan(angle);
+        PointSample p;p.id=10+samples.size()*7;
+        p.position={2000+part*250+radius*std::cos(theta),-3000+radius*std::sin(theta),height+17};
+        p.normal=modeling::Vec3{-std::cos(angle)*std::cos(theta),-std::cos(angle)*std::sin(theta),std::sin(angle)};
+        samples.push_back(p);bands[part].push_back(p.id);
+    }
+    PointSample isolated;isolated.id=9999999;isolated.normal=modeling::Vec3{0,0,0};samples.push_back(isolated);
+    std::shuffle(samples.begin(),samples.end(),random);
+    PointStore points(samples);PrimitiveDetectionOptions options;
+    options.detectPlanes=options.detectCylinders=options.detectSpheres=options.detectTori=false;
+    options.cone.minimumSupportPoints=60;options.cone.maximumCones=1;
+    options.cone.distanceThreshold=0.02;options.cone.minimumNormalAlignment=0.999;
+    PrimitiveDetectionResult result;MultiScaleDetectionReport report;std::string error;
+    require(detectMultiScalePrimitiveEvidence(points,options,result,report,error),error);
+    require(report.recoveredSurfaces>=7,"local recovery overcomes the global proposal budget");
+    std::unordered_set<PointId> found;
+    std::unordered_set<SurfaceId> surfaceIds;
+    for(const auto& e:result.evidence) {
+        const auto& cone=std::get<ConeEvidence>(e);
+        require(cone.id!=0 && surfaceIds.insert(cone.id).second,"multiscale surfaces have unique global IDs");
+        require(cone.maxAbsoluteResidual<0.02,"partial cone fit respects the physical tolerance");
+        found.insert(cone.supportPointIds.begin(),cone.supportPointIds.end());
+    }
+    require(std::find(result.unassignedPointIds.begin(),result.unassignedPointIds.end(),isolated.id)!=result.unassignedPointIds.end(),
+        "invalid normals remain unassigned without breaking local recovery");
+    for(const auto& band:bands) {
+        std::size_t supported=0;for(auto id:band)supported+=found.count(id);
+        require(supported>=band.size()*0.98,"every small cone band must be recovered, regardless of point order");
+    }
+    options.detectPlanes=options.detectCylinders=options.detectSpheres=options.detectTori=true;
+    require(detectMultiScalePrimitiveEvidence(points,options,result,report,error),error);
+    std::unordered_set<PointId> coneSupport,foreignSupport;
+    for(const auto& e:result.evidence)std::visit([&](const auto& s) {
+        auto& target=primitiveKind(e)==PrimitiveKind::Cone?coneSupport:foreignSupport;
+        target.insert(s.supportPointIds.begin(),s.supportPointIds.end());
+    },e);
+    for(const auto& band:bands) {
+        std::size_t correct=0,conflicting=0;
+        for(auto id:band){correct+=coneSupport.count(id);conflicting+=foreignSupport.count(id);}
+        require(correct>=band.size()*0.98 && conflicting<=band.size()*0.02,
+            "complete cone regions defeat incidental plane/cylinder/sphere/torus approximations");
+    }
+    require(!detectMultiScalePrimitiveEvidence(points,options,result,report,error,[]{return true;}) &&
+        result.evidence.empty() && error=="Cancelled","multiscale cancellation publishes no partial evidence");
+}
 }
 int main() {
-    try {snapshotsAndPatches();sharedBox();attachedBossAndHole();adaptiveRegions();localRecoveryAndConstraints();extendedRelations();tiltedCavityWalls();std::cout<<"Shared surface analysis tests passed\n";return 0;}
+    try {snapshotsAndPatches();sharedBox();attachedBossAndHole();adaptiveRegions();localRecoveryAndConstraints();extendedRelations();tiltedCavityWalls();smallConeBands();std::cout<<"Shared surface analysis tests passed\n";return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

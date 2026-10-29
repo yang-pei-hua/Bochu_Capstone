@@ -117,6 +117,8 @@ CadReconstructionResult run(PlyCloud cloud, int cancellation = 0,
     }
     return *result;
 }
+
+
 }
 
 int main(int argc, char** argv)

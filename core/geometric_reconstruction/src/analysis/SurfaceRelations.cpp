@@ -37,6 +37,7 @@ bool inferSurfaceRelations(const PointStore& points, const std::vector<RelationS
     if (!valid(validation)) { error = "Invalid surface relationship tolerances"; return false; }
     const auto map = pointMap(points);
     std::vector<std::vector<const PointSample*>> samples(nodes.size());
+    std::vector<Vec3> lower(nodes.size(),Vec3{INFINITY,INFINITY,INFINITY}),upper(nodes.size(),Vec3{-INFINITY,-INFINITY,-INFINITY});
     std::vector<Grid> grids; grids.reserve(nodes.size());
     std::unordered_set<PatchId> unique;
     for (std::size_t i = 0; i < nodes.size(); ++i) {
@@ -45,6 +46,9 @@ bool inferSurfaceRelations(const PointStore& points, const std::vector<RelationS
             auto it = map.find(id);
             if (it == map.end()) { error = "Relationship support references a different point snapshot"; return false; }
             samples[i].push_back(it->second);
+            const auto p=it->second->position;
+            lower[i]={std::min(lower[i].x,p.x),std::min(lower[i].y,p.y),std::min(lower[i].z,p.z)};
+            upper[i]={std::max(upper[i].x,p.x),std::max(upper[i].y,p.y),std::max(upper[i].z,p.z)};
         }
         grids.emplace_back(samples[i], options.distanceTolerance);
     }
@@ -53,7 +57,13 @@ bool inferSurfaceRelations(const PointStore& points, const std::vector<RelationS
         if (samples[i].empty() || samples[j].empty()) continue;
         const auto small = samples[i].size() < samples[j].size() ? i : j, large = small == i ? j : i;
         bool adjacent = false;
-        for (auto p : samples[small]) {
+        // Most patches of an assembly are spatially disjoint. Their finite
+        // bounds reject adjacency without visiting every point in both patches.
+        const double dx=std::max({0.0,lower[i].x-upper[j].x,lower[j].x-upper[i].x});
+        const double dy=std::max({0.0,lower[i].y-upper[j].y,lower[j].y-upper[i].y});
+        const double dz=std::max({0.0,lower[i].z-upper[j].z,lower[j].z-upper[i].z});
+        const bool near=dx*dx+dy*dy+dz*dz<=options.distanceTolerance*options.distanceTolerance;
+        if(near)for (auto p : samples[small]) {
             grids[large].near(p->position, [&](std::size_t) { adjacent = true; });
             if (adjacent) break;
         }

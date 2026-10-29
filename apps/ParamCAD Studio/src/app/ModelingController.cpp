@@ -346,6 +346,7 @@ bool ModelingController::editPrimitive(modeling::FeatureId id, const std::array<
         if (const auto* box=std::get_if<modeling::BoxPrimitiveParams>(&feature->params)) { current={box->sizeX,box->sizeY,box->sizeZ}; count=3; }
         else if (const auto* hole=std::get_if<modeling::ThroughHolePrimitiveParams>(&feature->params)) { current[0]=hole->radius*2; count=1; }
         else if (const auto* cylinder=std::get_if<modeling::CylinderPrimitiveParams>(&feature->params)) { current={cylinder->radius,cylinder->height,1}; count=2; }
+        else if (const auto* body=std::get_if<modeling::ProfileBodyParams>(&feature->params)) {current={body->sizeX,body->sizeY,body->sizeZ};count=3;}
         bool unchanged=feature->resizeAnchor==anchor;
         for (size_t i=0;i<count;++i) unchanged=unchanged && current[i]==values[i];
         if (unchanged) { m_lastError.clear(); return true; }
@@ -353,6 +354,25 @@ bool ModelingController::editPrimitive(modeling::FeatureId id, const std::array<
     }
     emit modelError(m_lastError);
     return false;
+}
+
+bool ModelingController::editProfileCavity(modeling::FeatureId id,int index,const std::array<double,3>& values,modeling::ModelRevision expectedRevision) {
+    const auto* feature=m_core->document().findFeature(id);
+    const auto* original=feature?std::get_if<modeling::ProfileBodyParams>(&feature->params):nullptr;
+    if(expectedRevision!=revision())m_lastError=tr("模型已变化，请重新选择特征后编辑。");
+    else if(!original || feature->suppressed || index==-1 ||
+        (index>=0 && std::size_t(index/2)>=original->cavities.size()) ||
+        (index<=-2 && std::size_t(-index-2)>=original->envelope.size()))m_lastError=tr("解析外形段或孔段不存在或已抑制。");
+    else {
+        auto p=*original;auto& c=index<=-2?p.envelope[std::size_t(-index-2)]:p.cavities[std::size_t(index/2)];
+        if(index>=0 && index%2){c.innerStartRadius=values[0]/2;c.innerEndRadius=values[1]/2;}
+        else {c.startRadius=values[0]/2;c.endRadius=values[1]/2;}
+        c.end=c.start+values[2];
+        std::string error;
+        if(!modeling::validateProfileBody(p,error) || !modeling::refreshProfileBodyDimensions(p,error))m_lastError=QString::fromStdString(error);
+        else if(execute(modeling::EditFeatureCommand{id,p,true,modeling::ResizeAnchor::Center}))return rebuildAndPublish();
+    }
+    emit modelError(m_lastError);return false;
 }
 
 bool ModelingController::validatePrimitiveEdit(modeling::FeatureId id, const std::array<double,3>& values,

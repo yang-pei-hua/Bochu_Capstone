@@ -72,4 +72,22 @@ double surfaceResidual(const PrimitiveEvidence& e, Vec3 p) {
         }
     }, e);
 }
+double surfaceNormalAlignment(const PrimitiveEvidence& e,Vec3 p,Vec3 normal) {
+    if(!std::isfinite(length(normal)) || length(normal)<1e-12)return 0;
+    normal=normalized(normal);
+    return std::visit([&](const auto& s)->double {
+        using T=std::decay_t<decltype(s)>;Vec3 n;
+        if constexpr(std::is_same_v<T,PlaneEvidence>)n=s.plane.normal;
+        else if constexpr(std::is_same_v<T,SphereEvidence>)n=subtract(p,s.sphere.center);
+        else {
+            const auto a=axis(e),d=subtract(p,center(e));const double t=dot(d,a);
+            const auto radial=subtract(d,scale(a,t));const double r=length(radial);
+            if(r<1e-12)return 0;
+            if constexpr(std::is_same_v<T,CylinderEvidence>)n=radial;
+            else if constexpr(std::is_same_v<T,ConeEvidence>)n=subtract(scale(radial,std::cos(s.cone.openingAngleRadians)/r),scale(a,std::sin(s.cone.openingAngleRadians)));
+            else n=subtract(d,scale(radial,s.torus.majorRadius/r));
+        }
+        return length(n)>1e-12?std::abs(dot(normal,normalized(n))):0;
+    },e);
+}
 } // namespace reconstruction

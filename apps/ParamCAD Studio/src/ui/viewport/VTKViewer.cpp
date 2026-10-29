@@ -4,6 +4,12 @@
 #include <QSize>
 
 #include <vtkActor.h>
+#include <vtkPoints.h>
+#include <vtkCellArray.h>
+#include <vtkCellData.h>
+#include <vtkPolyData.h>
+#include <vtkPolyDataMapper.h>
+#include <vtkUnsignedCharArray.h>
 #include <vtkBoxWidget2.h>
 #include <vtkBoxRepresentation.h>
 #include <vtkWidgetEventTranslator.h>
@@ -135,6 +141,9 @@ VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
     m_renderer->AddActor(m_bodyActor.edgeActor());
     m_renderer->AddActor(m_bodyActor.highlightActor());
     m_renderer->AddActor(m_pointCloudActor.actor());
+    m_assemblyBoundaryActor=vtkSmartPointer<vtkActor>::New();m_assemblyBoundaryActor->SetPickable(false);
+    m_assemblyBoundaryActor->GetProperty()->SetLineWidth(1.5);m_assemblyBoundaryActor->GetProperty()->LightingOff();
+    m_assemblyBoundaryActor->SetVisibility(false);m_renderer->AddActor(m_assemblyBoundaryActor);
     m_renderer->AddActor(m_sketchActor.actor());
     m_renderer->AddActor(m_sketchActor.draftActor());
     m_datumPlanes.attach(m_renderer);
@@ -159,6 +168,7 @@ VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
             this, &VTKViewer::syncPointCloud);
     connect(m_pointCloudDocument, &PointCloudDocument::documentChanged, this, [this] {
         m_pointCloudActor.setPointMask(pointCloudSelection().deleted());
+        if(m_boundaryPointCount && m_boundaryPointCount!=m_pointCloudDocument->pointCount())setAssemblyBoundaries({},{});
         m_renderer->ResetCameraClippingRange();
     });
     connect(m_pointCloudDocument, &PointCloudDocument::selectionChanged,
@@ -797,6 +807,7 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     const bool datumPlanesWereVisible = m_datumPlanesVisible;
     const int highlightedFace = m_highlightedFace;
     const bool boxWasVisible = m_pointBox->GetEnabled() != 0;
+    const bool boundariesWereVisible=m_assemblyBoundaryActor->GetVisibility()!=0;m_assemblyBoundaryActor->SetVisibility(false);
     m_referenceRenderer->DrawOff();
     m_pointBox->SetEnabled(0);
     m_pointCloudActor.setAnnotations(nullptr);
@@ -831,6 +842,7 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     m_referenceRenderer->DrawOn();
     m_pointBox->SetEnabled(boxWasVisible ? 1 : 0);
     m_pointCloudActor.setAnnotations(&pointCloudSelection());
+    m_assemblyBoundaryActor->SetVisibility(boundariesWereVisible);
     if (highlightedFace >= 0) {
         m_bodyActor.highlightFace(highlightedFace);
     }
@@ -853,6 +865,7 @@ QSize VTKViewer::captureSourceSize() const
 
 void VTKViewer::syncPointCloud()
 {
+    setAssemblyBoundaries({},{});
     if (m_pointCloudDocument->hasCloud()) {
         m_pointCloudActor.setCloud(m_pointCloudDocument->sourceCloud());
         m_pointCloudActor.setPointMask(pointCloudSelection().deleted());
@@ -939,8 +952,21 @@ void VTKViewer::setPointCloudVisible(bool visible)
     m_pointCloudVisible = visible;
     if (!visible) setPointCloudSelectionMode(0);
     m_pointCloudActor.setVisible(visible);
+    m_assemblyBoundaryActor->SetVisibility(visible && m_boundaryPointCount==m_pointCloudDocument->pointCount() && m_assemblyBoundaryActor->GetMapper()!=nullptr);
     emit pointCloudVisibilityChanged(visible);
     renderNow();
+}
+
+void VTKViewer::setAssemblyBoundaries(const std::vector<std::array<double,6>>& lines,const std::vector<bool>& closed)
+{
+    if(!m_assemblyBoundaryActor)return;
+    if(lines.empty()){m_assemblyBoundaryActor->SetVisibility(false);m_assemblyBoundaryActor->SetMapper(nullptr);m_boundaryPointCount=0;m_assemblyBoundarySegments=0;return;}
+    vtkNew<vtkPoints> points;vtkNew<vtkCellArray> cells;vtkNew<vtkUnsignedCharArray> colors;colors->SetNumberOfComponents(3);
+    for(size_t i=0;i<lines.size();++i){const auto& line=lines[i];const vtkIdType ids[]{points->InsertNextPoint(line[0],line[1],line[2]),points->InsertNextPoint(line[3],line[4],line[5])};cells->InsertNextCell(2,ids);
+        const unsigned char color[]{static_cast<unsigned char>(i<closed.size()&&closed[i]?50:255),static_cast<unsigned char>(i<closed.size()&&closed[i]?220:170),80};colors->InsertNextTypedTuple(color);}
+    vtkNew<vtkPolyData> polyData;polyData->SetPoints(points);polyData->SetLines(cells);polyData->GetCellData()->SetScalars(colors);
+    vtkNew<vtkPolyDataMapper> mapper;mapper->SetInputData(polyData);mapper->SetScalarModeToUseCellData();mapper->SetColorModeToDirectScalars();
+    m_assemblyBoundaryActor->SetMapper(mapper);m_boundaryPointCount=m_pointCloudDocument->pointCount();m_assemblyBoundarySegments=lines.size();m_assemblyBoundaryActor->SetVisibility(m_pointCloudVisible);renderNow();
 }
 
 void VTKViewer::setPointCloudSelectionMode(int mode)

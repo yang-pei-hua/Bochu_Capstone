@@ -33,6 +33,7 @@ add_library(GeometricReconstruction
     src/analysis/SurfaceRelations.cpp
     src/data/PointStore.cpp
     src/detection/PrimitiveDetector.cpp
+    src/detection/MultiScaleDetector.cpp
     src/detection/cgal/CgalEfficientRansacDetector.cpp
     src/detection/cgal/CurvedEvidence.cpp
     src/detection/cgal/CylinderEvidence.cpp
@@ -47,6 +48,9 @@ add_library(GeometricReconstruction
     src/recognition/AxisAlignedBoxRecognizer.cpp
     src/recognition/BoxRecognizer.cpp
     src/recognition/ParametricSolidRecognizer.cpp
+    src/recognition/assembly/AssemblyReconstruction.cpp
+    src/recognition/assembly/FiniteBoundaries.cpp
+    src/recognition/assembly/PartClosure.cpp
     src/recognition/ThroughHoleRecognizer.cpp
     src/recognition/compound/BoundaryValidation.cpp
     src/recognition/compound/BoxCover.cpp
@@ -91,6 +95,11 @@ endif()
 
 if(GEOMETRIC_RECONSTRUCTION_BUILD_TESTS)
     include(CTest)
+    add_executable(assembly_reconstruction_test tests/assembly_reconstruction_test.cpp)
+    target_link_libraries(assembly_reconstruction_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    add_test(NAME assembly_reconstruction_test COMMAND assembly_reconstruction_test)
+    set_tests_properties(assembly_reconstruction_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${OpenCASCADE_BINARY_DIR}")
     add_executable(surface_analysis_test tests/analysis/surface_analysis_test.cpp)
     target_include_directories(surface_analysis_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(surface_analysis_test PRIVATE GeometricReconstruction::GeometricReconstruction)

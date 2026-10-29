@@ -29,6 +29,7 @@ QString featureTypeLabel(modeling::FeatureType type)
     case modeling::FeatureType::CylinderPrimitive: return QStringLiteral("Cylinder");
     case modeling::FeatureType::ConePrimitive: return QStringLiteral("Cone / Frustum");
     case modeling::FeatureType::TorusPrimitive: return QStringLiteral("Torus");
+    case modeling::FeatureType::ProfileBody: return QStringLiteral("Profile Body");
     }
     return QStringLiteral("Unknown");
 }

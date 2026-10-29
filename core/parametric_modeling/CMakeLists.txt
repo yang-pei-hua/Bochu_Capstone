@@ -22,6 +22,8 @@ add_library(CadModelCore
     src/SketchValidation.cpp
     src/StepExporter.cpp
     src/occt/BoxBuilder.cpp
+    src/occt/ProfileBodyBuilder.cpp
+    src/occt/BoundaryBodyBuilder.cpp
     src/occt/CurvedPrimitiveBuilder.cpp
     src/occt/CutBuilder.cpp
     src/occt/ExtrudeBuilder.cpp

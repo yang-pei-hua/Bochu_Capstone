@@ -67,6 +67,7 @@ public:
     void selectUnassigned();
     void selectRelation(int relationId);
     void addSurfaces(const std::vector<DetectedPointCloudSurface>& surfaces, bool recordUndo = true);
+    void replacePartCandidates(const std::vector<DetectedPointCloudSurface>& parts,bool recordUndo=true);
     int setRelation(int relationId, int first, int second, const QString& type);
     void removeRelation(int relationId);
     void inferRelations(double distanceTolerance, double angleDegrees, bool recordUndo = true);

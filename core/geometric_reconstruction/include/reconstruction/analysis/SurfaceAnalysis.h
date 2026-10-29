@@ -45,6 +45,7 @@ struct SurfaceAnalysisOptions {
     SurfaceRelationOptions relations;
     double connectivityDistance = 0; // Zero: estimate from each surface's density.
     bool independentFamilies = true;
+    bool recoverResidualSurfaces = false;
 };
 enum class LocalFailureReason { InsufficientSupport, MissingEndFace, CandidateConflict, InvalidRelation };
 const char* localFailureReasonName(LocalFailureReason reason) noexcept;
@@ -95,6 +96,7 @@ bool hasSurfaceRelation(const SurfaceAnalysisResult& analysis, SurfaceId first, 
 std::vector<std::vector<PointId>> connectedPointComponents(const PointStore& points,
     const std::vector<PointId>& ids, double distance, double maximumAdaptiveDistance = 0);
 double surfaceResidual(const PrimitiveEvidence& evidence, modeling::Vec3 point);
+double surfaceNormalAlignment(const PrimitiveEvidence& evidence,modeling::Vec3 point,modeling::Vec3 normal);
 // Geometry-only relation inference, shared by the client and batch pipeline.
 bool inferSurfaceRelations(const PointStore& points, const std::vector<RelationSurface>& nodes,
                            const SurfaceRelationOptions& options,

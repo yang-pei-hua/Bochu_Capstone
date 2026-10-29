@@ -42,6 +42,12 @@ void FeatureEditingController::connectUi()
         if (!m_model->editPrimitive(id,{a,b,c},anchor,revision)) m_editor->setMessage(m_model->lastError());
         else { m_editor->setMessage(workspaceTr("尺寸已更新，可使用 CAD 撤销 / 重做。")); emit logInfo(workspaceTr("特征 #%1 参数已更新").arg(id)); }
     });
+    connect(m_editor,&FeatureEditorPanel::bodyCavityApplyRequested,this,
+        [this](modeling::FeatureId id,int index,double a,double b,double c,quint64 revision) {
+            if(!editable()){m_editor->setMessage(workspaceTr("请退出草图并显示当前参数模型。"));return;}
+            if(!m_model->editProfileCavity(id,index,{a,b,c},revision))m_editor->setMessage(m_model->lastError());
+            else m_editor->setMessage(workspaceTr("孔段参数已更新，可使用 CAD 撤销 / 重做。"));
+        });
     connect(m_editor,&FeatureEditorPanel::selectReferenceRequested,this,[this] {
         if (!editable()) { m_editor->setMessage(workspaceTr("请先退出草图编辑。")); return; }
         for (const auto& f:m_model->features()) if (f.id==m_editor->featureId()) {

@@ -39,13 +39,16 @@ bool adjustedPrimitive(const FeatureParams& original, const std::array<double, 3
 {
     if (!validResizeAnchor(original, anchor)) { error = "Invalid resize anchor"; return false; }
     const int count = std::holds_alternative<BoxPrimitiveParams>(original) ? 3
+        : std::holds_alternative<ProfileBodyParams>(original) ? 3
         : std::holds_alternative<CylinderPrimitiveParams>(original) ? 2 : 1;
     for (int i = 0; i < count; ++i) if (!std::isfinite(values[i]) || values[i] <= 1e-7) {
         error = "Dimensions must be finite and greater than 0.0000001 mm"; return false;
     }
     try {
         adjusted = original;
-        if (auto* box = std::get_if<BoxPrimitiveParams>(&adjusted)) {
+        if(auto* body=std::get_if<ProfileBodyParams>(&adjusted)) {
+            body->sizeX=values[0];body->sizeY=values[1];body->sizeZ=values[2];
+        } else if (auto* box = std::get_if<BoxPrimitiveParams>(&adjusted)) {
             const auto axes = boxAxes(*box);
             const std::array<double,3> old{box->sizeX,box->sizeY,box->sizeZ};
             const int side = static_cast<int>(anchor) - 1;

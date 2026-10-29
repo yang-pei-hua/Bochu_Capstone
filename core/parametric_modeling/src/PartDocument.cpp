@@ -29,6 +29,7 @@ std::string featurePrefix(FeatureType type) {
     case FeatureType::CylinderPrimitive: return "Cylinder";
     case FeatureType::ConePrimitive: return "Cone";
     case FeatureType::TorusPrimitive: return "Torus";
+    case FeatureType::ProfileBody: return "ProfileBody";
     }
     return "Feature";
 }
@@ -63,6 +64,7 @@ bool validateSketchEntityIds(
 }
 
 bool validateFeatureParams(const FeatureParams& params, std::string& error) {
+    if(const auto* p=std::get_if<ProfileBodyParams>(&params))return validateProfileBody(*p,error);
     bool curved = false;
     const bool curvedValid = std::visit([&](const auto& p) {
         using P = std::decay_t<decltype(p)>;

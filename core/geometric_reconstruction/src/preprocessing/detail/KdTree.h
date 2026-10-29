@@ -28,6 +28,13 @@ public:
         return result;
     }
 
+    std::vector<std::pair<double,std::size_t>> nearest(const Vec3& query,std::size_t count) const {
+        Heap heap;search(root_,query,std::numeric_limits<std::size_t>::max(),count,heap);
+        std::vector<std::pair<double,std::size_t>> result;
+        while(!heap.empty()){result.emplace_back(std::get<0>(heap.top()),std::get<2>(heap.top()));heap.pop();}
+        std::reverse(result.begin(),result.end());return result;
+    }
+
 private:
     struct Node {
         std::size_t pointIndex = 0;
