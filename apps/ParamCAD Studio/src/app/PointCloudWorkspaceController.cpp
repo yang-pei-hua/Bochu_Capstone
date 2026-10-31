@@ -203,6 +203,8 @@ void PointCloudWorkspaceController::connectUi()
         else m_document->selectRegion(id);
     });
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::relationSelected, m_document, &PointCloudDocument::selectRelation);
+    connect(m_ui.relationsPanel, &PointCloudRelationsPanel::showAllBoundariesChanged,
+            m_ui.viewer, &VTKViewer::setShowAllAssemblyBoundaries);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::pointSelected, m_document, &PointCloudDocument::selectPoint);
     connect(m_ui.relationsPanel, &PointCloudRelationsPanel::editRegionRequested,this,[this](int id,const QString& name,const QString& geometry) {
         if(m_document->editRegion(id,name,geometry)) requestGuidedReconstruction();
@@ -596,16 +598,19 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
         for(const auto& part:result.assembly->parts){DetectedPointCloudSurface group;group.surface.geometry="part";
             group.surface.name=workspaceTr("部件候选 %1 · %2").arg(part.id).arg(part.closed?workspaceTr("已闭合"):workspaceTr("未闭合"));
             group.surface.confidence=part.confidence;group.surface.templateLocked=false;
-            group.surface.parameters={{"status",QString::fromStdString(part.status)},{"closed",part.closed},{"lower",vector(part.lower)},
+            group.surface.parameters={{"status",QString::fromStdString(part.status)},{"closed",part.closed},{"assembly_part_id",double(part.id)},{"lower",vector(part.lower)},
                 {"upper",vector(part.upper)},{"open_edges",double(part.openEdges)},{"reason",QString::fromStdString(part.reason)}};
             for(auto id:part.pointIds)if(id>0&&id<=m_cadOriginalPointIds.size())group.points.push_back(vtkIdType(m_cadOriginalPointIds[id-1]));
             if(!group.points.empty())groups.push_back(std::move(group));if(part.closed)++closed;
         }
         m_document->replacePartCandidates(groups,false);
-        std::vector<std::array<double,6>> lines;std::vector<bool> closedLines;
+        std::map<size_t,int> regionIds;
+        for(const auto& region:m_document->selection().regions())if(region.geometry=="part")
+            regionIds[size_t(region.parameters["assembly_part_id"].toInteger())]=region.id;
+        std::vector<std::array<double,6>> lines;std::vector<bool> closedLines;std::vector<int> lineRegions;
         for(const auto& part:result.assembly->parts)for(auto id:part.patchIds)for(const auto& loop:result.assembly->patches[id-1].loops)
-            for(size_t i=0;i<loop.size();++i){const auto a=loop[i],b=loop[(i+1)%loop.size()];lines.push_back({a.x*scale,a.y*scale,a.z*scale,b.x*scale,b.y*scale,b.z*scale});closedLines.push_back(part.closed);}
-        m_ui.viewer->setAssemblyBoundaries(lines,closedLines);
+            for(size_t i=0;i<loop.size();++i){const auto a=loop[i],b=loop[(i+1)%loop.size()];lines.push_back({a.x*scale,a.y*scale,a.z*scale,b.x*scale,b.y*scale,b.z*scale});closedLines.push_back(part.closed);lineRegions.push_back(regionIds[part.id]);}
+        m_ui.viewer->setAssemblyBoundaries(lines,closedLines,lineRegions);
         emit logInfo(workspaceTr("仅点云分离：%1 个候选，%2 个验证闭合，%3 个保留开放边界；候选不等同于原装配实例。")
             .arg(result.assembly->parts.size()).arg(closed).arg(result.assembly->parts.size()-closed));
     }

@@ -7,6 +7,7 @@
 #include <QScrollArea>
 #include <QToolButton>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -111,6 +112,11 @@ PointCloudRelationsPanel::PointCloudRelationsPanel(QWidget* parent) : QWidget(pa
     assignment->setMenu(assignments);
     collectionTools->addWidget(m_filter, 1); collectionTools->addWidget(assignment);
     collectionLayout->addLayout(collectionTools);
+    auto* allBoundaries = new QCheckBox(tr("显示全部候选边界"), collections);
+    allBoundaries->setObjectName("showAllAssemblyBoundaries");
+    allBoundaries->setToolTip(tr("默认显示已闭合部件和当前选中集合的边界；勾选后查看所有开放候选。"));
+    connect(allBoundaries, &QCheckBox::toggled, this, &PointCloudRelationsPanel::showAllBoundariesChanged);
+    collectionLayout->addWidget(allBoundaries);
     const auto makeTree = [this](QWidget* parent, const char* name) {
         auto* tree = new QTreeWidget(parent); tree->setObjectName(name);
         tree->setHeaderLabels({tr("集合 / 关系"), tr("类型 / 来源"), tr("点数")});

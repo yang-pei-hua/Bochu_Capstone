@@ -21,11 +21,13 @@
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QJsonObject>
+#include <QJsonDocument>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSurfaceFormat>
@@ -113,10 +115,21 @@ void assemblyButtonWorkflow() {
     if(!near(volume(model->bodyShape()),216))std::cerr<<"mixed-component CAD volume="<<volume(model->bodyShape())<<" expected=216\n";
     require(near(volume(model->bodyShape()),216),"an incomplete neighbor is excluded from publishable CAD");
     require(document->selection().regions().size()>=2 && viewer->assemblyBoundarySegmentCount()>0,"part collections and finite boundary overlay are visible");
-    bool open=false,closed=false;for(const auto& r:document->selection().regions()){if(r.geometry!="part")continue;
+    bool open=false,closed=false;int openRegion=0;for(const auto& r:document->selection().regions()){if(r.geometry!="part")continue;
         if(r.parameters["closed"].toBool())closed=true;else open=true;
+        if(!r.parameters["closed"].toBool())openRegion=r.id;
         for(auto id:document->selection().regionPoints(r.id))require(id!=0&&id!=3,"part support maps through noncontiguous original indices");}
     require(open&&closed,"part annotations preserve closed and unresolved states separately");
+    auto* boundaries=window.findChild<QCheckBox*>("showAllAssemblyBoundaries");
+    require(boundaries&&!boundaries->isChecked(),"open candidate boundaries require selection or explicit all-boundaries mode");
+    document->clearSelection();const auto defaultLines=viewer->assemblyBoundarySegmentCount();
+    require(defaultLines==12,"the six closed box faces share twelve displayed edges");
+    document->selectRegion(openRegion);
+    require(viewer->assemblyBoundarySegmentCount()>defaultLines,"selecting an open part exposes its diagnostic boundary");
+    const auto selectedLines=viewer->assemblyBoundarySegmentCount();boundaries->setChecked(true);
+    require(viewer->assemblyBoundarySegmentCount()>=selectedLines,"all-boundaries mode retains every candidate for inspection");
+    boundaries->setChecked(false);document->clearSelection();
+    require(viewer->assemblyBoundarySegmentCount()==defaultLines,"clearing selection removes open-boundary clutter without removing candidates");
     const auto screenshot=qEnvironmentVariable("PCAD_ASSEMBLY_PREVIEW");if(!screenshot.isEmpty()){QApplication::processEvents();require(window.grab().save(screenshot),"save assembly separation preview");}
     QString error;auto* project=window.findChild<ProjectController*>();require(project->saveTo(directory.filePath("assembly.pcad"),error)&&project->loadFrom(directory.filePath("assembly.pcad"),error),"part annotations and editable CAD survive project round trip");
     require(std::count_if(document->selection().regions().begin(),document->selection().regions().end(),[](const auto& r){return r.geometry=="part";})>=2,"saved part candidates retain their semantic type");
@@ -137,8 +150,30 @@ void observedAssemblyWorkflow() {
     require(result&&result->assembly,"real button produces separation diagnostics");
     const auto closed=std::count_if(result->assembly->parts.begin(),result->assembly->parts.end(),[](const auto& part){return part.closed;});
     auto* document=viewer->pointCloudDocument();const auto regions=document->selection().regions().size();
-    require(regions>=result->assembly->parts.size()&&viewer->assemblyBoundarySegmentCount()>0,"real part groups and finite boundaries reach the viewport");
-    std::cerr<<"real-cloud candidates="<<result->assembly->parts.size()<<" closed="<<closed<<" boundary_segments="<<viewer->assemblyBoundarySegmentCount()<<'\n';
+    require(regions>=result->assembly->parts.size(),"real part groups reach the viewport");
+    document->clearSelection();const auto defaultLines=viewer->assemblyBoundarySegmentCount();
+    require(closed==0||defaultLines>0,"verified real parts retain their default boundary overlay");
+    auto* boundaries=window.findChild<QCheckBox*>("showAllAssemblyBoundaries");
+    require(boundaries&&!boundaries->isChecked(),"real clouds default to selected/open and verified/closed boundaries");
+    boundaries->setChecked(true);const auto allLines=viewer->assemblyBoundarySegmentCount();
+    require(allLines>0&&allLines>=defaultLines,"all real candidate boundaries remain available");
+    QApplication::processEvents();require(window.grab().save(QDir(output).filePath("all-boundaries.png")),"save all-boundary diagnostic preview");
+    boundaries->setChecked(false);
+    int selectedRegion=0;size_t largest=0;
+    for(const auto& region:document->selection().regions())if(region.geometry=="part"&&!region.parameters["closed"].toBool()) {
+        const auto count=size_t(document->selection().regionPointCount(region.id));
+        if(count>largest){largest=count;selectedRegion=region.id;}
+    }
+    if(selectedRegion)document->selectRegion(selectedRegion);
+    const auto selectedLines=viewer->assemblyBoundarySegmentCount();
+    require(selectedLines<=allLines,"selected-candidate display stays bounded by the full diagnostic overlay");
+    QApplication::processEvents();require(window.grab().save(QDir(output).filePath("selected-boundaries.png")),"save focused candidate preview");
+    document->clearSelection();
+    QJsonObject display{{"candidates",double(result->assembly->parts.size())},{"closed",double(closed)},
+        {"default_lines",double(defaultLines)},{"selected_lines",double(selectedLines)},{"all_lines",double(allLines)}};
+    QFile displayReport(QDir(output).filePath("boundary-display.json"));require(displayReport.open(QIODevice::WriteOnly),"save boundary display metrics");
+    const auto displayBytes=QJsonDocument(display).toJson();require(displayReport.write(displayBytes)==displayBytes.size(),"write boundary display metrics");displayReport.close();
+    std::cerr<<"real-cloud candidates="<<result->assembly->parts.size()<<" closed="<<closed<<" boundary_segments="<<defaultLines<<'/'<<allLines<<'\n';
     QApplication::processEvents();require(window.grab().save(QDir(output).filePath("separation.png")),"save real separation preview");
     if(closed){
         require(result->outcome==CadReconstructionResult::Outcome::Success&&model->features().size()==size_t(closed),"only verified real parts are published");

@@ -224,6 +224,13 @@ volumes use the conservative recorded sampling upper confidence bound.
 
 ## Guided reconstruction
 
+Finite assembly boundaries now preserve simple, oriented contours through
+simplification and intersection snapping, and retain original loops when a
+constraint would collapse them. The client defaults to verified/selected
+boundaries with an explicit all-candidate overlay. The four-workpiece results
+and remaining closure limits are documented in
+[`Assembly_Boundary_Repair_20261101.md`](../../docs/Assembly_Boundary_Repair_20261101.md).
+
 `reconstructGuidedSolid()` accepts original-point-ID template groups for planes,
 boxes, spheres, cylinders, cones and tori. It fits only the requested family,
 uses fixed plane equations/normals and primitive evidence to guide global

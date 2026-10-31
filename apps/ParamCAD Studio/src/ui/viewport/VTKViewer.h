@@ -70,7 +70,9 @@ public:
     quint64 bodyRevision() const noexcept { return m_bodyRevision; }
     void renderNow();
     // Presentation-only finite boundary overlay in the source cloud frame.
-    void setAssemblyBoundaries(const std::vector<std::array<double,6>>& lines,const std::vector<bool>& closed);
+    void setAssemblyBoundaries(const std::vector<std::array<double,6>>& lines,const std::vector<bool>& closed,
+                               const std::vector<int>& regions = {});
+    void setShowAllAssemblyBoundaries(bool enabled);
     std::size_t assemblyBoundarySegmentCount() const {return m_assemblyBoundarySegments;}
     // Coalesce navigation frames without delaying camera updates or captures.
     void requestRender();
@@ -215,6 +217,7 @@ signals:
     void sketchDeleteRequested();
 
 private:
+    void refreshAssemblyBoundaries();
     static void onCameraModified(vtkObject* caller, unsigned long eventId,
                                  void* clientData, void* callData);
     void createOrientationAxes();
@@ -260,6 +263,11 @@ private:
     vtkSmartPointer<vtkActor> m_assemblyBoundaryActor;
     int m_boundaryPointCount=0;
     std::size_t m_assemblyBoundarySegments=0;
+    std::vector<std::array<double,6>> m_assemblyBoundaryLines;
+    std::vector<bool> m_assemblyBoundaryClosed;
+    std::vector<int> m_assemblyBoundaryRegions;
+    bool m_showAllAssemblyBoundaries=false;
+    quint64 m_boundaryRevision=0;
     PointCloudDocument* const m_pointCloudDocument;
     vtkSmartPointer<vtkBoxWidget2> m_pointBox;
     vtkSmartPointer<vtkBoxRepresentation> m_pointBoxRepresentation;

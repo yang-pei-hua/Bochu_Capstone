@@ -18,6 +18,8 @@ struct AssemblyOptions {
 struct BoundaryRecoveryDiagnostics {
     std::size_t tracedLoops=0,nonSimpleAlphaLoops=0,nonSimpleSimplifiedLoops=0;
     std::size_t nonSimpleRecoveredLoops=0,discardedConstraintLoops=0;
+    std::size_t splitAlphaLoops=0,rejectedAlphaLoops=0,simplificationFallbacks=0;
+    std::size_t constraintFallbacks=0,snappingFallbacks=0,topologyFallbacks=0;
 };
 struct FiniteSurfacePatch {
     std::size_t id=0;

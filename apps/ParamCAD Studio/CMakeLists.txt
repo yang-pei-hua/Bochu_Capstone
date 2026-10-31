@@ -298,6 +298,7 @@ endif()
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
     add_executable(assembly_reconstruction_test ../../core/geometric_reconstruction/tests/assembly_reconstruction_test.cpp)
+    target_include_directories(assembly_reconstruction_test PRIVATE ../../core/geometric_reconstruction/src)
     target_link_libraries(assembly_reconstruction_test PRIVATE GeometricReconstruction::GeometricReconstruction)
     add_test(NAME assembly_reconstruction_test COMMAND assembly_reconstruction_test)
     set_tests_properties(assembly_reconstruction_test PROPERTIES TIMEOUT 120

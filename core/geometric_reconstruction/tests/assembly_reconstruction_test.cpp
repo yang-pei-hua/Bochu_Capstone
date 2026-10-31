@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <iostream>
 #include <cmath>
+#include "recognition/assembly/BoundaryGeometry.h"
 
 namespace {
 using modeling::Vec3;using reconstruction::PointSample;using reconstruction::PointStore;
@@ -108,6 +109,41 @@ void nonorthogonalFaces() {
     require(closed(result)==1&&result.patches.size()==5,"nonorthogonal finite faces connect into a triangular prism");
     require(std::abs(volume(result.candidate)-120)<1e-5,"closure is not limited to six orthogonal box planes");
 }
+void safeBoundaryRecovery() {
+    using namespace reconstruction::detail::assembly;
+    const BoundaryLoop touching{{0,0},{1,0},{1,1},{0,1},{0,0},{-1,0},{-1,-1},{0,-1}};
+    const auto cycles=splitBoundaryCycles(touching);
+    require(cycles.size()==2,"touching alpha islands become two simple cycles, not a figure-eight");
+    double cycleArea=0;
+    for(const auto& loop:cycles){require(simpleBoundary(loop),"split alpha cycles are simple");cycleArea+=boundaryArea(loop);}
+    require(std::abs(cycleArea-2)<1e-12,"splitting does not fill gaps or discard observed area");
+
+    reconstruction::BoundaryRecoveryDiagnostics diagnostics;size_t snapped=0;
+    const BoundaryLoop thin{{0,0},{10,0},{10,.2},{0,.2}};
+    const auto retained=snapBoundary(thin,{{0,1,-.1,1}},5,1,diagnostics,snapped);
+    require(simpleBoundary(retained)&&std::abs(boundaryArea(retained)-2)<1e-12,
+        "opposite thin-wall edges cannot collapse onto the same intersection line");
+    require(snapped==0&&diagnostics.snappingFallbacks>0,"rejected snapping does not claim repaired vertices");
+
+    const BoundaryLoop inset{{.1,.1},{9.9,.1},{9.9,9.9},{.1,9.9}};
+    const auto aligned=snapBoundary(inset,{{1,0,0,1},{1,0,-10,2},{0,1,0,3},{0,1,-10,4}},1,.5,diagnostics,snapped);
+    require(simpleBoundary(aligned)&&std::abs(boundaryArea(aligned)-100)<1e-10&&snapped==4,
+        "supported plane intersections can still recover shared box corners");
+    const BoundaryLoop middleStart{{5,.1},{9.9,.1},{9.9,9.9},{.1,9.9},{.1,.1}};
+    size_t cyclicSnaps=0;
+    const auto cyclic=snapBoundary(middleStart,{{1,0,0,1},{1,0,-10,2},{0,1,0,3},{0,1,-10,4}},1,.5,diagnostics,cyclicSnaps);
+    require(simpleBoundary(cyclic)&&std::abs(boundaryArea(cyclic)-100)<1e-10&&cyclicSnaps==4,
+        "a boundary starting mid-edge recovers the same shared corners as a corner-starting loop");
+
+    const BoundaryLoop concave{{0,0},{10,0},{10,1},{1,1},{1,9},{10,9},{10,10},{0,10}};
+    const auto simplified=simplifyBoundary(concave,100,diagnostics);
+    require(simpleBoundary(simplified)&&std::abs(boundaryArea(simplified)-boundaryArea(concave))<1e-12,
+        "excessive simplification cannot publish a degenerate or reversed concave boundary");
+    const BoundaryLoop outer{{0,0},{10,0},{10,10},{0,10}},hole{{2,2},{2,3},{3,3},{3,2}};
+    auto moved=hole;for(auto& p:moved)p.x+=20;
+    require(!sameBoundaryTopology({outer,hole},{outer,moved}),"a snapped hole cannot escape its observed outer loop");
+    require(sameBoundaryTopology({outer,hole},{outer,hole}),"unchanged inner holes retain their topology");
 }
-int main(){try{separatedAndRotated();missingFaceAndPartial();finiteConcavityAndHole();noiseAndGaps();curvedParts();nonorthogonalFaces();invalidAndCancel();std::cout<<"Assembly reconstruction tests passed\n";return 0;}
+}
+int main(){try{safeBoundaryRecovery();separatedAndRotated();missingFaceAndPartial();finiteConcavityAndHole();noiseAndGaps();curvedParts();nonorthogonalFaces();invalidAndCancel();std::cout<<"Assembly reconstruction tests passed\n";return 0;}
 catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

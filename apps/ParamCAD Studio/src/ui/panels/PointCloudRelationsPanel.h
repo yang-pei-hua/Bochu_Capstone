@@ -33,6 +33,7 @@ public:
     double angleTolerance() const;
 
 signals:
+    void showAllBoundariesChanged(bool enabled);
     void detectRequested();
     void reconstructRequested();
     void cancelCadRequested();

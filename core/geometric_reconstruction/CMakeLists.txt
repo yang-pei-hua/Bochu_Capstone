@@ -49,6 +49,7 @@ add_library(GeometricReconstruction
     src/recognition/BoxRecognizer.cpp
     src/recognition/ParametricSolidRecognizer.cpp
     src/recognition/assembly/AssemblyReconstruction.cpp
+    src/recognition/assembly/BoundaryGeometry.cpp
     src/recognition/assembly/FiniteBoundaries.cpp
     src/recognition/assembly/PartClosure.cpp
     src/recognition/ThroughHoleRecognizer.cpp
@@ -96,6 +97,7 @@ endif()
 if(GEOMETRIC_RECONSTRUCTION_BUILD_TESTS)
     include(CTest)
     add_executable(assembly_reconstruction_test tests/assembly_reconstruction_test.cpp)
+    target_include_directories(assembly_reconstruction_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(assembly_reconstruction_test PRIVATE GeometricReconstruction::GeometricReconstruction)
     add_test(NAME assembly_reconstruction_test COMMAND assembly_reconstruction_test)
     set_tests_properties(assembly_reconstruction_test PROPERTIES TIMEOUT 120

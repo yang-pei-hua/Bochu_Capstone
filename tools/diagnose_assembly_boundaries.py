@@ -94,7 +94,10 @@ def metrics(directory: Path, input_points: int) -> dict:
         **data["summary"], "input_points": input_points,
         "boundary_recovery_totals": dict(sum((Counter(p.get("boundary_recovery", {})) for p in patches.values()), Counter())),
         "working_fraction": data["summary"]["working_points"]/input_points,
-        "display_segments": segment_count, "closed_candidate_segments": closed_segments,
+        # Historical name retained for saved reports. These are all raw patch
+        # edges, before viewport deduplication and selection filtering.
+        "display_segments": segment_count, "raw_boundary_segments": segment_count,
+        "closed_candidate_segments": closed_segments,
         "open_candidate_segments": segment_count-closed_segments,
         "boundary_loops": loops,
         "planar_patches": sum(p["planar"] for p in patches.values()),
@@ -217,7 +220,7 @@ def markdown(summary):
              "基线由客户端同一个 CadReconstructionTask 重新执行；参数探针直接调用同一个 reconstructAssembly。",
              "探针会执行内部闭合与 B-Rep 检查，但不导出/回读 STEP，不构成完整性或精度验收。", "",
              "## 基线", "",
-             "| 工件 | 工作点/原点 | 候选/闭合 | 显示线段（开放候选） | 开放边/非流形边 | 非平面片 | 平面片无轮廓 | 自交轮廓 |",
+             "| 工件 | 工作点/原点 | 候选/闭合 | 原始轮廓线段（开放候选） | 开放边/非流形边 | 非平面片 | 平面片无轮廓 | 自交轮廓 |",
              "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for case in summary["cases"]:
         v = case["baseline"]
@@ -225,6 +228,7 @@ def markdown(summary):
                      f"{v['display_segments']}（{v['open_candidate_segments']}） | {v['open_edges']}/{v['nonmanifold_edges']} | "
                      f"{v['nonplanar_patches']} | {v['planar_patches_without_loops']} | {v['proper_self_crossing_loops']} |")
     lines += ["", "开放边是部件壳拓扑的未配对边；每条显示轮廓首尾相接，并不表示轮廓本身存在未连上的最后一段。",
+              "历史字段 display_segments 表示全部原始面片边段；新客户端会去重并按选择过滤，实际默认显示数应查看 GUI 验收报告。",
               "自交统计仅检查二维投影内严格相交的非相邻线段，忽略接触与共线，不是完整多边形有效性检测。", "",
               "## 受控参数对比", "",
               "| 工件 | 变体 | 工作点 | 面片 | 候选/闭合 | 显示线段 | 开放边 | 非流形边 | 自交轮廓 |",

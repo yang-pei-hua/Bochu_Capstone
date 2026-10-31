@@ -38,6 +38,7 @@ python tools/run_step_surface_validation.py data/real-workpieces-step/cover-plat
 复测。默认、alpha 半径增大、全输入点三个探针直接调用同一部件分离实现，保留输入校验和、
 参数及开放边/轮廓统计；不会读取参考 STEP 或将实验参数改成生产默认。
 四工件的原因分析与结果见 [边界诊断](../docs/Assembly_Boundary_Investigation_20261101.md)。
+首轮轮廓修复、客户端边界显示及前后验收见 [修复报告](../docs/Assembly_Boundary_Repair_20261101.md)。
 
 客户端与批处理均只使用点云坐标、法向、单位及用户手动指定的模板。
 原 STEP 的自动发现、读取、逐面对应、拓扑引导和相关重建命令已删除。

@@ -26,7 +26,13 @@ QJsonObject writeAssemblyDiagnostics(const QString& reportPath,const PlyCloud& c
                 {"non_simple_alpha_loops",double(patch.boundaryDiagnostics.nonSimpleAlphaLoops)},
                 {"non_simple_simplified_loops",double(patch.boundaryDiagnostics.nonSimpleSimplifiedLoops)},
                 {"non_simple_recovered_loops",double(patch.boundaryDiagnostics.nonSimpleRecoveredLoops)},
-                {"discarded_constraint_loops",double(patch.boundaryDiagnostics.discardedConstraintLoops)}}}});}
+                {"discarded_constraint_loops",double(patch.boundaryDiagnostics.discardedConstraintLoops)},
+                {"split_alpha_loops",double(patch.boundaryDiagnostics.splitAlphaLoops)},
+                {"rejected_alpha_loops",double(patch.boundaryDiagnostics.rejectedAlphaLoops)},
+                {"simplification_fallbacks",double(patch.boundaryDiagnostics.simplificationFallbacks)},
+                {"constraint_fallbacks",double(patch.boundaryDiagnostics.constraintFallbacks)},
+                {"snapping_fallbacks",double(patch.boundaryDiagnostics.snappingFallbacks)},
+                {"topology_fallbacks",double(patch.boundaryDiagnostics.topologyFallbacks)}}}});}
     std::vector<quint32> labels(cloud.positions.size());
     for(const auto& part:result.parts){QJsonArray ids,patchIds;for(auto id:part.pointIds){ids.append(double(id));if(id>0&&id<=labels.size())labels[id-1]=quint32(part.id);}
         for(auto id:part.patchIds)patchIds.append(double(id));if(part.closed)++closed;openEdges+=part.openEdges;

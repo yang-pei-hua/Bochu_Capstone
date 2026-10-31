@@ -1,4 +1,6 @@
 #include "ui/viewport/VTKViewer.h"
+#include <map>
+#include <set>
 
 #include <QByteArray>
 #include <QSize>
@@ -168,7 +170,8 @@ VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
             this, &VTKViewer::syncPointCloud);
     connect(m_pointCloudDocument, &PointCloudDocument::documentChanged, this, [this] {
         m_pointCloudActor.setPointMask(pointCloudSelection().deleted());
-        if(m_boundaryPointCount && m_boundaryPointCount!=m_pointCloudDocument->pointCount())setAssemblyBoundaries({},{});
+        if(m_boundaryPointCount && (m_boundaryPointCount!=m_pointCloudDocument->pointCount() ||
+            m_boundaryRevision!=m_pointCloudDocument->revision()))setAssemblyBoundaries({},{});
         m_renderer->ResetCameraClippingRange();
     });
     connect(m_pointCloudDocument, &PointCloudDocument::selectionChanged,
@@ -957,16 +960,59 @@ void VTKViewer::setPointCloudVisible(bool visible)
     renderNow();
 }
 
-void VTKViewer::setAssemblyBoundaries(const std::vector<std::array<double,6>>& lines,const std::vector<bool>& closed)
+void VTKViewer::setAssemblyBoundaries(const std::vector<std::array<double,6>>& lines,const std::vector<bool>& closed,
+                                    const std::vector<int>& regions)
+{
+    m_assemblyBoundaryLines=lines;m_assemblyBoundaryClosed=closed;m_assemblyBoundaryRegions=regions;
+    m_boundaryPointCount=lines.empty()?0:m_pointCloudDocument->pointCount();
+    m_boundaryRevision=m_pointCloudDocument->revision();
+    refreshAssemblyBoundaries();
+}
+
+void VTKViewer::setShowAllAssemblyBoundaries(bool enabled)
+{
+    m_showAllAssemblyBoundaries=enabled;refreshAssemblyBoundaries();
+}
+
+void VTKViewer::refreshAssemblyBoundaries()
 {
     if(!m_assemblyBoundaryActor)return;
-    if(lines.empty()){m_assemblyBoundaryActor->SetVisibility(false);m_assemblyBoundaryActor->SetMapper(nullptr);m_boundaryPointCount=0;m_assemblyBoundarySegments=0;return;}
+    m_assemblyBoundarySegments=0;
+    if(m_assemblyBoundaryLines.empty()){m_assemblyBoundaryActor->SetVisibility(false);m_assemblyBoundaryActor->SetMapper(nullptr);return;}
+    std::set<int> selectedRegions;
+    const auto& selection=pointCloudSelection();
+    for(auto id:selection.selected())if(id>=0 && size_t(id)<selection.memberships().size())
+        selectedRegions.insert(selection.memberships()[size_t(id)]);
+    // Deduplicate only at numerical display precision, well below fitting/weld
+    // tolerances. This does not move source geometry or merge thin-wall faces.
+    std::array<double,3> lower{INFINITY,INFINITY,INFINITY},upper{-INFINITY,-INFINITY,-INFINITY};
+    for(const auto& line:m_assemblyBoundaryLines)for(int i=0;i<6;++i) {
+        lower[i%3]=std::min(lower[i%3],line[i]);upper[i%3]=std::max(upper[i%3],line[i]);
+    }
+    const double precision=std::max(1e-12,std::hypot(std::hypot(upper[0]-lower[0],upper[1]-lower[1]),upper[2]-lower[2])*1e-10);
+    std::map<std::array<long long,6>,std::pair<std::array<double,6>,bool>> unique;
+    for(size_t i=0;i<m_assemblyBoundaryLines.size();++i) {
+        const bool closed=i<m_assemblyBoundaryClosed.size()&&m_assemblyBoundaryClosed[i];
+        if(!m_showAllAssemblyBoundaries && !closed && !m_assemblyBoundaryRegions.empty() &&
+            (i>=m_assemblyBoundaryRegions.size() || !selectedRegions.count(m_assemblyBoundaryRegions[i])))continue;
+        auto line=m_assemblyBoundaryLines[i];
+        std::array<long long,3> a{},b{};
+        for(int axis=0;axis<3;++axis) {
+            a[axis]=std::llround((line[axis]-lower[axis])/precision);
+            b[axis]=std::llround((line[axis+3]-lower[axis])/precision);
+        }
+        if(a==b)continue;
+        if(b<a){std::swap(a,b);line={line[3],line[4],line[5],line[0],line[1],line[2]};}
+        const std::array<long long,6> key{a[0],a[1],a[2],b[0],b[1],b[2]};
+        auto inserted=unique.emplace(key,std::make_pair(line,closed));
+        if(!inserted.second)inserted.first->second.second|=closed;
+    }
     vtkNew<vtkPoints> points;vtkNew<vtkCellArray> cells;vtkNew<vtkUnsignedCharArray> colors;colors->SetNumberOfComponents(3);
-    for(size_t i=0;i<lines.size();++i){const auto& line=lines[i];const vtkIdType ids[]{points->InsertNextPoint(line[0],line[1],line[2]),points->InsertNextPoint(line[3],line[4],line[5])};cells->InsertNextCell(2,ids);
-        const unsigned char color[]{static_cast<unsigned char>(i<closed.size()&&closed[i]?50:255),static_cast<unsigned char>(i<closed.size()&&closed[i]?220:170),80};colors->InsertNextTypedTuple(color);}
+    for(const auto& entry:unique){const auto& line=entry.second.first;const bool closed=entry.second.second;const vtkIdType ids[]{points->InsertNextPoint(line[0],line[1],line[2]),points->InsertNextPoint(line[3],line[4],line[5])};cells->InsertNextCell(2,ids);
+        const unsigned char color[]{static_cast<unsigned char>(closed?50:255),static_cast<unsigned char>(closed?220:170),80};colors->InsertNextTypedTuple(color);}
     vtkNew<vtkPolyData> polyData;polyData->SetPoints(points);polyData->SetLines(cells);polyData->GetCellData()->SetScalars(colors);
     vtkNew<vtkPolyDataMapper> mapper;mapper->SetInputData(polyData);mapper->SetScalarModeToUseCellData();mapper->SetColorModeToDirectScalars();
-    m_assemblyBoundaryActor->SetMapper(mapper);m_boundaryPointCount=m_pointCloudDocument->pointCount();m_assemblyBoundarySegments=lines.size();m_assemblyBoundaryActor->SetVisibility(m_pointCloudVisible);renderNow();
+    m_assemblyBoundaryActor->SetMapper(mapper);m_assemblyBoundarySegments=unique.size();m_assemblyBoundaryActor->SetVisibility(m_pointCloudVisible&&!unique.empty());renderNow();
 }
 
 void VTKViewer::setPointCloudSelectionMode(int mode)
@@ -1014,6 +1060,7 @@ void VTKViewer::selectPointCloudBox(bool add)
 void VTKViewer::refreshPointCloudSelection()
 {
     m_pointCloudActor.setAnnotations(&pointCloudSelection());
+    if(!m_assemblyBoundaryLines.empty())refreshAssemblyBoundaries();
     emit pointCloudSelectionChanged();
     renderNow();
 }
