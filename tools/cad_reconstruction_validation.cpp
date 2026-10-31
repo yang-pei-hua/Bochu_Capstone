@@ -6,6 +6,7 @@
 #include "StepCloudSampler.h"
 #include "SurfaceCoverageValidation.h"
 #include "PointCloudCadValidation.h"
+#include "AssemblyDiagnostics.h"
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
@@ -1003,6 +1004,8 @@ int main(int argc, char **argv) {
         } else if(args.value(1) == "reconstruct-cloud") {
             validatePointCloudCad(args,report);
             if(!report["cad_constructed"].toBool())exitCode=1;
+        } else if(args.value(1) == "probe-assembly") {
+            probeAssemblyBoundaries(args,report);
         } else if(args.value(1) == "analyze" || args.value(1) == "analyze-client") {
             validateSurfaceCoverage(args, report);
         } else {

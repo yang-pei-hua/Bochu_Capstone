@@ -14,6 +14,11 @@ struct AssemblyOptions {
     double connectivityFactor=2.5,alphaFactor=2.5;
     bool buildSolids=true;
 };
+// Counters only: diagnostics do not repair, filter or change recovered geometry.
+struct BoundaryRecoveryDiagnostics {
+    std::size_t tracedLoops=0,nonSimpleAlphaLoops=0,nonSimpleSimplifiedLoops=0;
+    std::size_t nonSimpleRecoveredLoops=0,discardedConstraintLoops=0;
+};
 struct FiniteSurfacePatch {
     std::size_t id=0;
     modeling::Vec3 origin{},normal{},xDirection{},lower{},upper{};
@@ -24,6 +29,7 @@ struct FiniteSurfacePatch {
     // largest area; additional loops can describe holes or disconnected islands.
     std::vector<std::vector<modeling::Vec3>> loops;
     std::size_t snappedVertices=0;
+    BoundaryRecoveryDiagnostics boundaryDiagnostics;
 };
 struct PatchConnection {
     std::size_t first=0,second=0;

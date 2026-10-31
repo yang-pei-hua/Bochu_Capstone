@@ -2,6 +2,7 @@
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Delaunay_triangulation_2.h>
 #include <CGAL/Triangulation_vertex_base_with_info_2.h>
+#include <CGAL/Polygon_2.h>
 #include <map>
 #include <set>
 #include <numeric>
@@ -15,6 +16,11 @@ using DT=CGAL::Delaunay_triangulation_2<Kernel,CGAL::Triangulation_data_structur
 using P=modeling::Point2D;
 double distance(P a,P b){return std::hypot(a.x-b.x,a.y-b.y);}
 double area(const std::vector<P>& p){double result=0;for(size_t i=0;i<p.size();++i){auto a=p[i],b=p[(i+1)%p.size()];result+=a.x*b.y-a.y*b.x;}return result*.5;}
+bool simple(const std::vector<P>& points) {
+    CGAL::Polygon_2<Kernel> polygon;
+    for(auto p:points)polygon.push_back(Kernel::Point_2(p.x,p.y));
+    return polygon.is_simple();
+}
 std::vector<P> simplify(const std::vector<P>& polygon,double tolerance) {
     if(polygon.size()<4)return polygon;size_t pivot=1;for(size_t i=2;i<polygon.size();++i)if(distance(polygon[0],polygon[i])>distance(polygon[0],polygon[pivot]))pivot=i;
     auto chain=[&](size_t first,size_t last){std::vector<P> points;for(size_t i=first;i<=last;++i)points.push_back(polygon[i%polygon.size()]);
@@ -25,7 +31,8 @@ std::vector<P> simplify(const std::vector<P>& polygon,double tolerance) {
         std::vector<P> result;for(size_t i=0;i+1<points.size();++i)if(keep[i])result.push_back(points[i]);return result;};
     auto result=chain(0,pivot);const auto rest=chain(pivot,polygon.size());result.insert(result.end(),rest.begin(),rest.end());return result.size()>=3?result:polygon;
 }
-std::vector<std::vector<P>> alphaLoops(const std::vector<P>& points,double radius,double simplifyTolerance) {
+std::vector<std::vector<P>> alphaLoops(const std::vector<P>& points,double radius,double simplifyTolerance,
+    BoundaryRecoveryDiagnostics& diagnostics) {
     DT triangulation;std::vector<std::pair<Kernel::Point_2,size_t>> input;for(size_t i=0;i<points.size();++i)input.emplace_back(Kernel::Point_2(points[i].x,points[i].y),i);
     triangulation.insert(input.begin(),input.end());
     struct Edge{size_t count=0,first=0,second=0;};std::map<std::pair<size_t,size_t>,Edge> edges;
@@ -41,7 +48,9 @@ std::vector<std::vector<P>> alphaLoops(const std::vector<P>& points,double radiu
         for(size_t guard=0;guard<=next.size();++guard){loop.push_back(points[current]);const auto range=next.equal_range(current);auto selected=range.second;
             for(auto i=range.first;i!=range.second;++i)if(!visited.count(*i)){selected=i;break;}
             if(selected==range.second)break;visited.insert(*selected);current=selected->second;if(current==first)break;}
-        if(current==first && loop.size()>=3){loop=simplify(loop,simplifyTolerance);if(std::abs(area(loop))>simplifyTolerance*simplifyTolerance)loops.push_back(std::move(loop));}}
+        if(current==first && loop.size()>=3){++diagnostics.tracedLoops;diagnostics.nonSimpleAlphaLoops+=!simple(loop);
+            loop=simplify(loop,simplifyTolerance);diagnostics.nonSimpleSimplifiedLoops+=!simple(loop);
+            if(std::abs(area(loop))>simplifyTolerance*simplifyTolerance)loops.push_back(std::move(loop));}}
     std::sort(loops.begin(),loops.end(),[](const auto& a,const auto& b){return std::abs(area(a))>std::abs(area(b));});return loops;
 }
 struct Line{double a=0,b=0,c=0;int identity=0;P anchor{};};
@@ -54,7 +63,7 @@ void recoverBoundaries(const WorkingData& data,const AssemblyOptions& options,As
         if(cancelled&&cancelled())throw std::runtime_error("Cancelled");auto& patch=result.patches[index];if(!patch.planar)continue;
         const auto x=patch.xDirection,y=cross(patch.normal,x);std::vector<P> points;
         for(auto i:data.groups[index]){const auto d=subtract(data.points[i].position,patch.origin);points.push_back({dot(d,x),dot(d,y)});}
-        auto loops=alphaLoops(points,std::max(data.tolerance*2,patch.spacing*options.alphaFactor),std::max(data.tolerance,patch.spacing*.45));
+        auto loops=alphaLoops(points,std::max(data.tolerance*2,patch.spacing*options.alphaFactor),std::max(data.tolerance,patch.spacing*.45),patch.boundaryDiagnostics);
         std::vector<Line> constraints;
         for(auto j:neighbors[index]){const auto& other=result.patches[j];if(!other.planar)continue;Line line;
             line.a=dot(other.normal,x);line.b=dot(other.normal,y);line.c=dot(other.normal,subtract(patch.origin,other.origin));const double norm=std::hypot(line.a,line.b);
@@ -69,13 +78,15 @@ void recoverBoundaries(const WorkingData& data,const AssemblyOptions& options,As
                 selected.anchor=a;if(lines.empty()||selected.identity!=lines.back().identity)lines.push_back(selected);
             }
             if(lines.size()>1 && lines.front().identity==lines.back().identity)lines.pop_back();
-            if(lines.size()<3)continue;std::vector<Vec3> recovered;
+            if(lines.size()<3){++patch.boundaryDiagnostics.discardedConstraintLoops;continue;}std::vector<Vec3> recovered;std::vector<P> recoveredPlane;
             for(size_t i=0;i<lines.size();++i){const auto& a=lines[(i+lines.size()-1)%lines.size()];const auto& b=lines[i];const double determinant=a.a*b.b-b.a*a.b;
                 P p=b.anchor;
                 if(std::abs(determinant)>1e-8){const P intersection{(a.b*b.c-b.b*a.c)/determinant,(b.a*a.c-a.a*b.c)/determinant};
                     double nearest=INFINITY;for(auto q:loop)nearest=std::min(nearest,distance(intersection,q));
                     if(nearest<reach*2){p=intersection;if(a.identity>0 || b.identity>0)++patch.snappedVertices;}}
                 recovered.push_back(add(patch.origin,add(scale(x,p.x),scale(y,p.y))));}
+            for(auto p:recovered){const auto d=subtract(p,patch.origin);recoveredPlane.push_back({dot(d,x),dot(d,y)});}
+            patch.boundaryDiagnostics.nonSimpleRecoveredLoops+=!simple(recoveredPlane);
             // Boundary direction is inherited from the alpha triangles, keeping
             // inner loops opposite to the finite outer loop.
             if(recovered.size()>=3)patch.loops.push_back(std::move(recovered));

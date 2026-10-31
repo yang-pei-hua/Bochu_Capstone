@@ -1,4 +1,5 @@
 #include "AssemblyDiagnostics.h"
+#include "io/PointCloudAdapter.h"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QDataStream>
@@ -6,6 +7,7 @@
 #include <QDir>
 #include <QSaveFile>
 #include <stdexcept>
+#include <cmath>
 
 namespace {
 QJsonArray vector(modeling::Vec3 p){return {p.x,p.y,p.z};}
@@ -19,7 +21,12 @@ QJsonObject writeAssemblyDiagnostics(const QString& reportPath,const PlyCloud& c
     for(const auto& patch:result.patches){QJsonArray boundaries;for(const auto& loop:patch.loops){QJsonArray values;for(auto p:loop)values.append(vector(p));boundaries.append(values);++loops;}
         patches.append(QJsonObject{{"id",double(patch.id)},{"planar",patch.planar},{"normal",vector(patch.normal)},{"origin_mm",vector(patch.origin)},
             {"x_direction",vector(patch.xDirection)},{"spacing_mm",patch.spacing},{"rms_residual_mm",patch.residual},{"orientation_known",patch.orientationKnown},
-            {"point_count",double(patch.pointIds.size())},{"boundary_loops_mm",boundaries},{"snapped_vertices",double(patch.snappedVertices)}});}
+            {"point_count",double(patch.pointIds.size())},{"boundary_loops_mm",boundaries},{"snapped_vertices",double(patch.snappedVertices)},
+            {"boundary_recovery",QJsonObject{{"traced_loops",double(patch.boundaryDiagnostics.tracedLoops)},
+                {"non_simple_alpha_loops",double(patch.boundaryDiagnostics.nonSimpleAlphaLoops)},
+                {"non_simple_simplified_loops",double(patch.boundaryDiagnostics.nonSimpleSimplifiedLoops)},
+                {"non_simple_recovered_loops",double(patch.boundaryDiagnostics.nonSimpleRecoveredLoops)},
+                {"discarded_constraint_loops",double(patch.boundaryDiagnostics.discardedConstraintLoops)}}}});}
     std::vector<quint32> labels(cloud.positions.size());
     for(const auto& part:result.parts){QJsonArray ids,patchIds;for(auto id:part.pointIds){ids.append(double(id));if(id>0&&id<=labels.size())labels[id-1]=quint32(part.id);}
         for(auto id:part.patchIds)patchIds.append(double(id));if(part.closed)++closed;openEdges+=part.openEdges;
@@ -46,4 +53,45 @@ QJsonObject writeAssemblyDiagnostics(const QString& reportPath,const PlyCloud& c
         const auto hash=labels[i]*2654435761U;stream<<quint8(labels[i]?64+(hash&127):120)<<quint8(labels[i]?64+((hash>>8)&127):120)<<quint8(labels[i]?64+((hash>>16)&127):120)<<labels[i];}
     if(stream.status()!=QDataStream::Ok||!file.commit())throw std::runtime_error("Cannot commit segmented cloud");
     save(directory.filePath("segmented.json"),QJsonObject{{"unit",unit},{"labels","inferred_part_candidates"}});return summary;
+}
+
+void probeAssemblyBoundaries(const QStringList& args,QJsonObject& report) {
+    if(args.size()!=5)throw std::runtime_error("Usage: probe-assembly cloud.ply report.json options.json");
+    QFile configuration(args[4]);
+    if(!configuration.open(QIODevice::ReadOnly))throw std::runtime_error("Cannot read probe options");
+    QJsonParseError parseError;
+    const auto document=QJsonDocument::fromJson(configuration.readAll(),&parseError);
+    if(parseError.error!=QJsonParseError::NoError || !document.isObject())throw std::runtime_error("Expected probe options object");
+    const auto values=document.object();reconstruction::AssemblyOptions options;
+    for(auto it=values.begin();it!=values.end();++it) {
+        if(!it.value().isDouble() || !std::isfinite(it.value().toDouble()))throw std::runtime_error("Probe options must be finite numbers");
+        const auto value=it.value().toDouble();
+        if(it.key()=="maximum_working_points") {
+            if(value<24 || value>2000000 || value!=std::floor(value))throw std::runtime_error("Probe point budget must be an integer in [24, 2000000]");
+            options.maximumWorkingPoints=size_t(value);
+        } else if(it.key()=="alpha_factor")options.alphaFactor=value;
+        else if(it.key()=="connectivity_factor")options.connectivityFactor=value;
+        else if(it.key()=="distance_tolerance_mm")options.distanceTolerance=value;
+        else if(it.key()=="normal_angle_degrees")options.normalAngleRadians=value*std::acos(-1.0)/180;
+        else throw std::runtime_error("Unknown assembly probe option");
+    }
+    const auto unit=PointCloudAdapter::lengthUnitFor(args[2]);
+    if(unit==reconstruction::LengthUnit::Arbitrary)throw std::runtime_error("Probe input requires declared mm/m units");
+    PlyCloud cloud;QString failure;
+    if(!PlyReader::read(args[2],cloud,failure))throw std::runtime_error(failure.toStdString());
+    const auto input=PointCloudAdapter::toPointStore(cloud,unit);
+    auto samples=input.points();
+    if(unit==reconstruction::LengthUnit::Meter)for(auto& p:samples){p.position.x*=1000;p.position.y*=1000;p.position.z*=1000;}
+    reconstruction::AssemblyReconstructionResult result;std::string error;
+    if(!reconstruction::reconstructAssembly(reconstruction::PointStore(std::move(samples),reconstruction::LengthUnit::Millimeter),options,result,error))
+        throw std::runtime_error(error);
+    report["input_points"]=double(cloud.positions.size());
+    report["source_model_read"]=false;report["reference_labels_used"]=false;
+    report["probe_options"]=QJsonObject{{"maximum_working_points",double(options.maximumWorkingPoints)},
+        {"alpha_factor",options.alphaFactor},{"connectivity_factor",options.connectivityFactor},
+        {"normal_angle_degrees",options.normalAngleRadians*180/std::acos(-1.0)},
+        {"distance_tolerance_mm",options.distanceTolerance}};
+    report["assembly"]=writeAssemblyDiagnostics(args[3],cloud,result,unit==reconstruction::LengthUnit::Meter?"m":"mm");
+    report["status"]="assembly_probe_completed";
+    // No CAD export or source-completeness claim is made by this diagnostic mode.
 }
