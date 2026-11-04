@@ -48,6 +48,7 @@ add_library(GeometricReconstruction
     src/recognition/AxisAlignedBoxRecognizer.cpp
     src/recognition/BoxRecognizer.cpp
     src/recognition/ParametricSolidRecognizer.cpp
+    src/recognition/ProjectionExtrusion.cpp
     src/recognition/assembly/AssemblyReconstruction.cpp
     src/recognition/assembly/BoundaryGeometry.cpp
     src/recognition/assembly/FiniteBoundaries.cpp

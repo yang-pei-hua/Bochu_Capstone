@@ -80,7 +80,8 @@ void FeatureEditorPanel::setFeature(const modeling::Feature* feature, modeling::
 {
     const bool supported = feature && (feature->type == modeling::FeatureType::BoxPrimitive
         || feature->type == modeling::FeatureType::ThroughHolePrimitive
-        || feature->type == modeling::FeatureType::CylinderPrimitive || feature->type==modeling::FeatureType::ProfileBody);
+        || feature->type == modeling::FeatureType::CylinderPrimitive || feature->type==modeling::FeatureType::ProfileBody
+        || feature->type == modeling::FeatureType::Extrude);
     const int previousTarget=m_feature && feature && m_feature->id==feature->id?m_target->currentData().toInt():-1;
     m_feature = supported ? std::optional<modeling::Feature>(*feature) : std::nullopt;
     m_revision = revision; setVisible(supported);
@@ -113,6 +114,9 @@ void FeatureEditorPanel::setFeature(const modeling::Feature* feature, modeling::
         add(tr("底面中心"),ResizeAnchor::Base); add(tr("顶面中心"),ResizeAnchor::Top);
         add(tr("实体中心"),ResizeAnchor::Center);
         m_labels[0]->setText(tr("半径")); m_labels[1]->setText(tr("高度"));
+    } else if (feature->type == modeling::FeatureType::Extrude) {
+        add(tr("草图平面"),ResizeAnchor::Center);
+        m_labels[0]->setText(tr("拉伸 / 切除深度"));
     } else { add(tr("孔轴的位置和方向"),ResizeAnchor::Center); m_labels[0]->setText(tr("孔直径")); }
     m_anchor->setCurrentIndex(m_anchor->findData(static_cast<int>(feature->resizeAnchor)));
     resetFields(); updateControls();
@@ -132,6 +136,7 @@ void FeatureEditorPanel::resetFields()
     else if (const auto* cylinder = std::get_if<modeling::CylinderPrimitiveParams>(&m_feature->params))
         values={cylinder->radius,cylinder->height,1};
     else if (const auto* hole = std::get_if<modeling::ThroughHolePrimitiveParams>(&m_feature->params)) values[0]=hole->radius*2;
+    else if (const auto* extrusion = std::get_if<modeling::ExtrudeFeatureParams>(&m_feature->params)) values[0]=extrusion->depth;
     const auto* body=std::get_if<modeling::ProfileBodyParams>(&m_feature->params);
     const bool cavity=body && m_target->currentData().toInt()!=-1;
     if(body) {

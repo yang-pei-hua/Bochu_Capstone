@@ -11,6 +11,8 @@ int main() {
         testDistantOutliersCannotMaskNearerOutliers();
         testVoxelIndexOverflowPreservesObservationIdentity();
         testCompoundCommitFusesSolidsAtomically();
+        testProjectionExtrusion();
+        testProjectionBooleanIsScoped();
         testRecognitionRequiresKnownScale();
         testRotatedNoisyBoxWithOutliers(RECONSTRUCTION_TEST_OUTPUT_DIR);
         testDuplicateDepthLayersDoNotHideBoxFaces();

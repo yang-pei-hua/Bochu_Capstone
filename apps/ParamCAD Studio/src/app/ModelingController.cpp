@@ -338,6 +338,12 @@ bool ModelingController::editPrimitive(modeling::FeatureId id, const std::array<
     std::string error;
     if (expectedRevision != revision()) m_lastError = tr("模型已变化，请重新选择特征后编辑。");
     else if (!feature || feature->suppressed) m_lastError = tr("特征不存在或已抑制。");
+    else if (const auto* extrusion = std::get_if<modeling::ExtrudeFeatureParams>(&feature->params)) {
+        if (extrusion->depth == values[0]) { m_lastError.clear(); return true; }
+        auto edited = *extrusion;
+        edited.depth = values[0];
+        if (execute(modeling::EditFeatureCommand{id,edited,true,{}})) return rebuildAndPublish();
+    }
     else if (!modeling::adjustedPrimitive(feature->params, values, anchor, params, error))
         m_lastError = QString::fromStdString(error);
     else {

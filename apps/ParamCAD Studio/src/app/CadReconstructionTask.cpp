@@ -41,7 +41,7 @@ void CadReconstructionTask::cancel()
 bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit unit,
     std::vector<reconstruction::TemplateHint> hints, double sourceTolerance,
     std::optional<reconstruction::SurfaceAnalysisResult> analysis,
-    std::vector<reconstruction::SurfaceRelationHint> relations)
+    std::vector<reconstruction::SurfaceRelationHint> relations, bool projectionFallback)
 {
     if (m_running) return false;
     auto result = std::make_shared<CadReconstructionResult>();
@@ -50,7 +50,7 @@ bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit uni
     m_running = true;
     m_thread = QThread::create([this, cloud = std::move(cloud), unit, result, cancelled,
                               hints = std::move(hints), sourceTolerance, analysis = std::move(analysis),
-                              relations = std::move(relations)] {
+                              relations = std::move(relations), projectionFallback] {
         try {
             if (cancelled->load()) return;
             const auto source = PointCloudAdapter::toPointStore(cloud, unit);
@@ -94,12 +94,14 @@ bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit uni
             if(hints.empty() && relations.empty() && (!recognized || bodies>1)) {
                 QMetaObject::invokeMethod(this,[this,cancelled]{if(m_running&&m_cancelled==cancelled&&!cancelled->load())emit stageChanged(Stage::SeparatingParts);},Qt::QueuedConnection);
                 reconstruction::AssemblyOptions options;
+                if (projectionFallback) options.maximumProjectionParts = 6;
                 // The decomposition estimates local noise independently of the
                 // coarse, whole-cloud detection tolerance.
                 result->assembly.emplace();std::string decompositionError;
                 if(reconstruction::reconstructAssembly(recoverySource,options,*result->assembly,decompositionError,[cancelled]{return cancelled->load();})) {
                     const auto& separated=result->assembly->candidate;
-                    if(!separated.profileBodies.empty() || !separated.curvedSolids.empty()) {
+                    if(!separated.profileBodies.empty() || !separated.curvedSolids.empty() ||
+                       !separated.projectionPrograms.empty()) {
                         result->candidate=separated;result->analysis=std::move(guided.analysis);
                         result->outcome=CadReconstructionResult::Outcome::Success;return;
                     }

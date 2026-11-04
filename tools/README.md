@@ -2,6 +2,60 @@
 
 `pcad` 是仓库工具的统一入口，使用 Python 3.10 或更新版本，仅依赖标准库。
 
+## 点云划分人工审核桌面工具
+
+双击检查包目录中的 `点云划分审核.lnk` 或 `启动点云审核.cmd`，也可执行：
+
+```powershell
+python tools/review_component_clouds.py --dataset outputs/component-cloud-review-20261101
+```
+
+依赖 Python 自带的 Tkinter 和 Pillow，离线运行。按原编号依次加载拼图，三个按钮分别记录
+“点云划分有问题”“点云划分正确（可以作为拟合的测试集）”“暂不做决定”，保存后自动下一张。
+快捷键 `1/2/3`；左右键翻页；滚轮缩放、拖动查看；支持整件定位图、工件/状态筛选、备注及回看改判。
+备注框/搜索框输入数字不会触发判定快捷键。
+
+检查包的 `review/` 保存：
+
+- `decisions.json`：按点云名称记录编号、判断、备注、时间、点云哈希和续审位置，原子写入。
+- `decisions.csv`：可用 Excel 查看全部编号的当前判断。
+- `fit_test_set.json`：仅收录人工选择“正确”的点云，改判后同步移除。
+- `decisions.json.bak`：上一次保存的记录。
+
+关闭重开继续上次位置；单个检查包的同一记录目录只允许一个审核窗口写入。
+记录绑定点云内容，改变点云后旧判断不会自动沿用。默认四份 `000` 未归属点也在列表中。
+`--reviews <目录>` 可为同一检查包创建独立的审核记录（也用于隔离 UI 测试）。
+
+```powershell
+python -m unittest discover -s tools/tests -p test_component_review.py -v
+```
+
+## 批量导出独立候选点云与多视角检查图
+
+已有 `run_point_cloud_cad.py` 的四工件输出可批量拆成独立 PLY，并生成每份 12 视角拼图及整件编号定位图：
+
+```powershell
+python tools/export_component_clouds.py `
+  --reconstruction outputs/boundary-repair-20261101/final `
+  --output outputs/component-cloud-review-new --workers 4
+```
+
+依赖 `numpy`、`Pillow`。输出目录必须新建；脚本核对原始点云及算法执行文件 SHA-256，
+算法更新后需先重新执行重建。闭合和未闭合候选全部导出，不按 CAD 是否生成过滤。
+文件夹使用 `<工件>_<原候选编号>`，每份包含 `cloud.ply`、单位/来源 `cloud.json`、`views.png`。
+四份 `000` 文件夹保存未归属点。根目录包含四张 `<工件>_locator.png`、`index.csv` 和总清单。
+
+PLY 保留原始坐标、法向及属性，不降采样、不居中；`source_point_id` 保存源 PLY 的 1-based 点行号。
+图片才使用独立 PCA 主轴和显示采样，12 视图比例一致；每件定位图分栏标注全部编号，
+引线端点及其原始点 ID 同时保存到总清单，便于核对对应关系。
+后续测试独立点云时，将其 `cloud.ply` 与同目录 `cloud.json` 一起保留。
+
+本轮结果为 329 个候选 + 4 份未归属点，共 333 个文件夹；导出测试：
+
+```powershell
+python -m unittest discover -s tools/tests -p test_component_cloud_export.py -v
+```
+
 ## STEP 点云与逐面识别验证
 
 已有验证工具现在支持直接从 STEP 表面采样，无需图片或 COLMAP：
@@ -60,6 +114,36 @@ python tools/run_point_cloud_cad.py --input scan=path/to/scan.ply --unit mm --ou
 
 前一节的 STEP 采样／逐面评测仅用于离线制作与评估测试数据；
 参考拓扑只在曲面检测完成后用于评测，不进入本节的重建任务。
+
+## 投影引导的草图、拉伸与切除
+
+独立部件拟合可以直接使用审核工具选出的 PLY，需保留相邻的单位 JSON 或用 `--unit` 声明单位。
+
+```powershell
+python tools/run_point_cloud_cad.py --mode projection `
+  --input part=path/to/cloud.ply --output outputs/projection-fit
+```
+
+批处理可重复传入 `--input`。加 `--area-directions` 可额外尝试凸包投影面积较小的方向，
+与默认的面片、圆柱轴、PCA 和侧面法向候选作对照。
+单件报告的点 ID 为输入 PLY 的 1-based 行号，审核 PLY 中的 `source_point_id` 可映射回工件点云。
+通过时输出 `model.pcad`、特征 JSON 与 STEP。其余案例保留候选轴和拒绝原因。
+
+单件拟合从有观测的端面恢复折线及整圆草图，检查内环的侧壁或圆柱支持。
+有孔壁与孔底时可尝试盲孔切除，有槽底和槽壁时可尝试直槽切除。
+中间平面可用于提出凸台拉伸。报告记录采样点到实体边界的距离、法向误差和缺乏匹配观测的模型面面积比例。
+容差默认取部件包围盒对角线的 0.25%。直接调用验证程序时可传入毫米容差覆盖此值。
+当前通过门槛为评分样本内点率至少 90%、边界距离 P95 至多三倍容差、缺少观测支持的模型面面积比例至多 4%。
+这些指标用于筛选候选。对未采样表面和体积的判断需要额外观测。
+
+```powershell
+& "apps/ParamCAD Studio/build/msvc-debug/cloud-only/Release/cad_reconstruction_validation.exe" `
+  fit-projection path/to/cloud.ply report.json model.step 0.05
+```
+
+整件装配使用 `--mode projection-fallback`，或在客户端 **Tools → Reconstruct CAD with Projection Fallback** 启动。
+该路径在有限壳闭合后尝试至多 6 个有多面片的开放候选，优先处理点数较多的候选。
+原壳闭合与投影拟合分别报告。包含目标体布尔操作的 PCAD 使用项目格式 3。
 
 ## 安装与使用
 

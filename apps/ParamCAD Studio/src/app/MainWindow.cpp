@@ -315,6 +315,12 @@ void MainWindow::createActions()
     m_reconstructCadAction->setToolTip(
         tr("Recognize geometry in the loaded point cloud and reconstruct a parametric CAD model"));
     m_reconstructCadAction->setEnabled(false);
+    m_projectionCadAction = new QAction(tr("Reconstruct CAD with Projection Fallback"), this);
+    m_projectionCadAction->setObjectName(QStringLiteral("projectionCadAction"));
+    m_projectionCadAction->setEnabled(false);
+    connect(m_reconstructCadAction,&QAction::changed,this,[this] {
+        m_projectionCadAction->setEnabled(m_reconstructCadAction->isEnabled());
+    });
     m_cancelCadAction = new QAction(tr("Cancel CAD Reconstruction"), this);
     m_cancelCadAction->setObjectName(QStringLiteral("cancelCadReconstructionAction"));
     m_cancelCadAction->setEnabled(false);
@@ -409,6 +415,7 @@ void MainWindow::createMenus()
     toolsMenu->addAction(m_captureToolAction);
     toolsMenu->addAction(m_reconstructToolAction);
     toolsMenu->addAction(m_reconstructCadAction);
+    toolsMenu->addAction(m_projectionCadAction);
     toolsMenu->addAction(m_cancelCadAction);
 
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
@@ -545,6 +552,8 @@ void MainWindow::connectUi()
     connect(m_openAction, &QAction::triggered, m_modelViewController, &ModelViewController::openModel);
     connect(m_openPointCloudAction, &QAction::triggered, m_pointCloudWorkspace, &PointCloudWorkspaceController::openPointCloud);
     connect(m_reconstructCadAction, &QAction::triggered, m_pointCloudWorkspace, &PointCloudWorkspaceController::reconstructCad);
+    connect(m_projectionCadAction,&QAction::triggered,m_pointCloudWorkspace,
+            &PointCloudWorkspaceController::reconstructCadWithProjection);
     connect(m_cancelCadAction, &QAction::triggered,
             m_pointCloudWorkspace, &PointCloudWorkspaceController::cancelCadReconstruction);
     connect(m_textureAction, &QAction::triggered, m_modelViewController, &ModelViewController::chooseTexture);

@@ -47,6 +47,8 @@ void testDistantOutliersCannotMaskNearerOutliers();
 void testVoxelIndexOverflowPreservesObservationIdentity();
 
 void testCompoundCommitFusesSolidsAtomically();
+void testProjectionExtrusion();
+void testProjectionBooleanIsScoped();
 
 void testRecognitionRequiresKnownScale();
 

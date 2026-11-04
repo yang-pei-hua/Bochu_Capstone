@@ -43,7 +43,8 @@ public:
     bool start(PlyCloud cloud, reconstruction::LengthUnit unit,
                std::vector<reconstruction::TemplateHint> hints = {}, double sourceTolerance = 0,
                std::optional<reconstruction::SurfaceAnalysisResult> analysis = {},
-               std::vector<reconstruction::SurfaceRelationHint> relations = {});
+               std::vector<reconstruction::SurfaceRelationHint> relations = {},
+               bool projectionFallback = false);
     bool isRunning() const noexcept;
     bool isCancellationRequested() const noexcept;
     void cancel();

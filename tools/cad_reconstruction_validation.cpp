@@ -1004,6 +1004,9 @@ int main(int argc, char **argv) {
         } else if(args.value(1) == "reconstruct-cloud") {
             validatePointCloudCad(args,report);
             if(!report["cad_constructed"].toBool())exitCode=1;
+        } else if(args.value(1) == "fit-projection") {
+            validateProjectionCad(args,report);
+            if(!report["cad_constructed"].toBool())exitCode=1;
         } else if(args.value(1) == "probe-assembly") {
             probeAssemblyBoundaries(args,report);
         } else if(args.value(1) == "analyze" || args.value(1) == "analyze-client") {

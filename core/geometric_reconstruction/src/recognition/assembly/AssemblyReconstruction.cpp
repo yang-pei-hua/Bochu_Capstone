@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <unordered_map>
 #include <numeric>
 #include <unordered_set>
 #include <stdexcept>
@@ -15,6 +16,43 @@ double quantile(std::vector<double> values,double fraction){if(values.empty())re
 bool finite(Vec3 p){return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);}
 std::uint64_t sampleKey(const PointSample& p){std::uint64_t h=1469598103934665603ULL;for(double x:{p.position.x,p.position.y,p.position.z}){std::uint64_t bits=0;std::memcpy(&bits,&x,8);h^=bits;h*=1099511628211ULL;h^=h>>29;}return h;}
 void checkCancel(const std::function<bool()>& cancelled){if(cancelled&&cancelled())throw std::runtime_error("Cancelled");}
+
+void fitOpenParts(const PointStore& source, const AssemblyOptions& options,
+                  AssemblyReconstructionResult& output, const std::function<bool()>& cancelled) {
+    if (!options.buildSolids || !options.maximumProjectionParts) return;
+    std::vector<AssemblyPart*> pending;
+    for (auto& part : output.parts)
+        if (!part.closed && part.patchIds.size() >= 2 && part.pointIds.size() >= 60)
+            pending.push_back(&part);
+    std::stable_sort(pending.begin(),pending.end(),[](const auto* a,const auto* b) {
+        return a->pointIds.size() > b->pointIds.size();
+    });
+    if (pending.size() > options.maximumProjectionParts) pending.resize(options.maximumProjectionParts);
+    std::unordered_map<PointId,const PointSample*> observations;
+    for (const auto& p : source.points()) observations.emplace(p.id,&p);
+    for (auto* part : pending) {
+        checkCancel(cancelled);
+        std::vector<PointSample> points;
+        for (const auto id : part->pointIds) points.push_back(*observations.at(id));
+        std::vector<PrimitiveEvidence> evidence;
+        for (const auto id : part->patchIds) {
+            const auto& patch = output.patches[id-1];
+            if (!patch.planar) continue;
+            PlaneEvidence plane;
+            plane.id = id;
+            plane.plane = {patch.normal,-dot(patch.normal,patch.origin)};
+            plane.supportPointIds = patch.pointIds;
+            evidence.emplace_back(std::move(plane));
+        }
+        ProjectionExtrusionOptions fitOptions;
+        fitOptions.distanceTolerance = options.distanceTolerance;
+        part->projection.emplace();
+        if (fitProjectionExtrusion(PointStore(std::move(points)),fitOptions,
+                                   *part->projection,evidence,cancelled))
+            output.candidate.projectionPrograms.push_back(part->projection->operations);
+        checkCancel(cancelled);
+    }
+}
 struct UnionFind {
     std::vector<size_t> p;
     explicit UnionFind(size_t n):p(n){std::iota(p.begin(),p.end(),0);}
@@ -165,6 +203,7 @@ bool reconstructAssembly(const PointStore& source,const AssemblyOptions& options
             else{output.patches[selected].pointIds.push_back(p.id);output.parts[patchParts[selected]].pointIds.push_back(p.id);}
         }
         closeParts(data,options,output,cancelled);
+        fitOpenParts(source,options,output,cancelled);
         if(output.patches.empty())error="No finite surface patches with sufficient neighborhood support";
         return !output.patches.empty();
     }catch(const std::exception& e){output={};error=e.what();return false;}

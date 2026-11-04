@@ -83,6 +83,8 @@ void cloudOnlyButtonWorkflow() {
     auto* workspace=window.findChild<PointCloudWorkspaceController*>();auto* task=window.findChild<CadReconstructionTask*>();
     auto* model=window.findChild<ModelingController*>();workspace->loadPointCloudFromFile(path);
     auto* action=window.findChild<QAction*>("reconstructCadAction");require(action->isEnabled() && !action->text().contains("STEP"),"button exposes only point-cloud reconstruction");
+    const auto* projectionAction=window.findChild<QAction*>("projectionCadAction");
+    require(projectionAction && projectionAction->isEnabled(),"projection fallback action is enabled for a metric cloud");
     std::optional<CadReconstructionResult> result;QObject::connect(task,&CadReconstructionTask::finished,&window,[&](const auto& value){result=value;});
     action->trigger();QElapsedTimer timer;timer.start();while(task->isRunning()&&timer.elapsed()<30000){QApplication::processEvents();QThread::msleep(5);}
     require(result && result->outcome==CadReconstructionResult::Outcome::Success && !model->features().empty(),"button reconstructs using only observations despite poisoned source-model sidecars");
@@ -92,6 +94,24 @@ void cloudOnlyButtonWorkflow() {
     require(near(volume(model->bodyShape()),252)&&model->undo()&&near(volume(model->bodyShape()),216),"cloud-only CAD remains editable and undoable");
     QString error;auto* project=window.findChild<ProjectController*>();require(project->saveTo(directory.filePath("result.pcad"),error)&&project->loadFrom(directory.filePath("result.pcad"),error),"cloud-only project saves and reopens");
     require(window.findChild<ModelViewController*>()->exportStepTo(directory.filePath("result.step"),error),"STEP export remains available for reconstructed CAD");
+
+    reconstruction::ProjectionOperation base;
+    base.sketch.entities={{1,Rectangle2D{0,0,4,4}}};
+    base.depth=4;
+    auto cut=base;
+    cut.sketch.entities={{1,Rectangle2D{1,1,2,2}}};
+    cut.operation=ExtrudeOperation::Cut;
+    cut.depth=2;
+    reconstruction::CompoundCandidate program;
+    program.projectionPrograms={{base,cut}};
+    require(model->commitReconstructedCompound(program),"publish projection program for parameter editing");
+    window.findChild<ModelingPanel*>()->selectFeature(model->features().back().id);
+    auto* depth=editor->findChild<QDoubleSpinBox*>("featureDimension0");
+    require(depth->isEnabled() && near(depth->value(),2),"projection cut depth is editable in the client");
+    depth->setValue(3);
+    editor->findChild<QPushButton*>("applyFeatureParametersButton")->click();
+    require(near(volume(model->bodyShape()),52) && model->undo() && near(volume(model->bodyShape()),56),
+            "changing projection cut depth updates material and supports undo");
 }
 
 void assemblyButtonWorkflow() {

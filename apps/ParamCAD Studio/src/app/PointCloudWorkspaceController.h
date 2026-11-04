@@ -45,10 +45,12 @@ public:
     void openPointCloud();
     void loadPointCloudFromFile(const QString& filePath);
     void reconstructCad();
+    void reconstructCadWithProjection();
     void cancelCadReconstruction();
     void prepareProjectReplacement();
 
 private:
+    void startCadReconstruction(bool projectionFallback);
     void updateCadActions();
     void requestGuidedReconstruction();
     void startQueuedReconstruction();

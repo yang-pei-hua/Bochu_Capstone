@@ -10,6 +10,8 @@ struct BoundaryLine {
 };
 
 double boundaryArea(const BoundaryLoop& loop);
+std::vector<BoundaryLoop> alphaLoops(const std::vector<modeling::Point2D>& points,
+    double radius, double simplifyTolerance, BoundaryRecoveryDiagnostics& diagnostics);
 bool simpleBoundary(const BoundaryLoop& loop);
 // A triangle-boundary walk can touch the same vertex several times. Split at
 // those vertices rather than publishing a figure-eight as one polygon.

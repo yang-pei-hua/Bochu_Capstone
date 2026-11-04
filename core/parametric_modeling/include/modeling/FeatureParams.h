@@ -27,6 +27,8 @@ struct ExtrudeFeatureParams {
     double depth = 0.0;
     bool reverse = false;
     ExtrudeOperation operation = ExtrudeOperation::NewBody;
+    // When set, apply the boolean only to the solid produced by this feature.
+    FeatureId targetBody = kInvalidFeatureId;
 };
 
 struct CutFeatureParams {

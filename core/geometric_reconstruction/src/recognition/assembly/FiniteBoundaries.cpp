@@ -15,6 +15,7 @@ using Vertex=CGAL::Triangulation_vertex_base_with_info_2<size_t,Kernel>;
 using DT=CGAL::Delaunay_triangulation_2<Kernel,CGAL::Triangulation_data_structure_2<Vertex>>;
 using P=modeling::Point2D;
 double distance(P a,P b){return std::hypot(a.x-b.x,a.y-b.y);}
+}
 std::vector<std::vector<P>> alphaLoops(const std::vector<P>& points,double radius,double simplifyTolerance,
     BoundaryRecoveryDiagnostics& diagnostics) {
     DT triangulation;std::vector<std::pair<Kernel::Point_2,size_t>> input;for(size_t i=0;i<points.size();++i)input.emplace_back(Kernel::Point_2(points[i].x,points[i].y),i);
@@ -46,7 +47,6 @@ std::vector<std::vector<P>> alphaLoops(const std::vector<P>& points,double radiu
         }}
     if(!sameBoundaryTopology(original,loops)){loops=original;++diagnostics.topologyFallbacks;}
     std::sort(loops.begin(),loops.end(),[](const auto& a,const auto& b){return std::abs(boundaryArea(a))>std::abs(boundaryArea(b));});return loops;
-}
 }
 void recoverBoundaries(const WorkingData& data,const AssemblyOptions& options,AssemblyReconstructionResult& result,
     const std::function<bool()>& cancelled) {

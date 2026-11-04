@@ -67,6 +67,19 @@ modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &cand
         const auto added=append(body);
         if(!added.success)return {false,core.revision(),{},added.error};
     }
+    for (const auto& program : candidate.projectionPrograms) {
+        if (program.empty() || program.front().operation != modeling::ExtrudeOperation::NewBody)
+            return {false,core.revision(),{},"Projection program has no base extrusion"};
+        modeling::FeatureId target = modeling::kInvalidFeatureId;
+        for (const auto& operation : program) {
+            const auto sketch = append(operation.sketch);
+            if (!sketch.success) return {false,core.revision(),{},sketch.error};
+            const auto extrude = append(modeling::ExtrudeFeatureParams{
+                sketch.featureId,operation.depth,operation.reverse,operation.operation,target});
+            if (!extrude.success) return {false,core.revision(),{},extrude.error};
+            target = extrude.featureId;
+        }
+    }
     return core.apply(patch);
 }
 

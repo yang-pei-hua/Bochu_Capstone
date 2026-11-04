@@ -404,6 +404,16 @@ void PointCloudWorkspaceController::loadPointCloudFromFile(const QString& filePa
 
 void PointCloudWorkspaceController::reconstructCad()
 {
+    startCadReconstruction(false);
+}
+
+void PointCloudWorkspaceController::reconstructCadWithProjection()
+{
+    startCadReconstruction(true);
+}
+
+void PointCloudWorkspaceController::startCadReconstruction(bool projectionFallback)
+{
     if (m_cadTask->isRunning() || m_startingCad || m_analysisThread) return;
     if (m_document->sourcePath().isEmpty()) {
         emit logWarning(workspaceTr("Load a point cloud before reconstructing a model."));
@@ -497,7 +507,7 @@ void PointCloudWorkspaceController::reconstructCad()
         relations.push_back(std::move(hint));
     }
     m_cadTask->start(std::move(cloud), sourceUnit, std::move(hints),
-                     m_ui.relationsPanel->surfaceTolerance(), m_surfaceAnalysis,std::move(relations));
+                     m_ui.relationsPanel->surfaceTolerance(), m_surfaceAnalysis,std::move(relations),projectionFallback);
     emit logInfo(workspaceTr("仅点云重建：使用观测坐标、法向、单位和用户模板，不读取源模型或面对应表。"));
 }
 
@@ -596,10 +606,17 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
         const double scale=cloudUnit(*m_document)==reconstruction::LengthUnit::Meter?.001:1.0;
         const auto vector=[&](modeling::Vec3 p){return QJsonArray{p.x*scale,p.y*scale,p.z*scale};};
         for(const auto& part:result.assembly->parts){DetectedPointCloudSurface group;group.surface.geometry="part";
-            group.surface.name=workspaceTr("部件候选 %1 · %2").arg(part.id).arg(part.closed?workspaceTr("已闭合"):workspaceTr("未闭合"));
+            const bool fitted = part.projection && !part.projection->operations.empty();
+            const auto status = part.closed ? workspaceTr("已闭合") :
+                fitted ? workspaceTr("投影拟合通过") : workspaceTr("未闭合");
+            group.surface.name=workspaceTr("部件候选 %1 · %2").arg(part.id).arg(status);
             group.surface.confidence=part.confidence;group.surface.templateLocked=false;
             group.surface.parameters={{"status",QString::fromStdString(part.status)},{"closed",part.closed},{"assembly_part_id",double(part.id)},{"lower",vector(part.lower)},
                 {"upper",vector(part.upper)},{"open_edges",double(part.openEdges)},{"reason",QString::fromStdString(part.reason)}};
+            if (part.projection) {
+                group.surface.parameters["projection_accepted"]=fitted;
+                group.surface.parameters["projection_reason"]=QString::fromStdString(part.projection->reason);
+            }
             for(auto id:part.pointIds)if(id>0&&id<=m_cadOriginalPointIds.size())group.points.push_back(vtkIdType(m_cadOriginalPointIds[id-1]));
             if(!group.points.empty())groups.push_back(std::move(group));if(part.closed)++closed;
         }
@@ -613,6 +630,9 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
         m_ui.viewer->setAssemblyBoundaries(lines,closedLines,lineRegions);
         emit logInfo(workspaceTr("仅点云分离：%1 个候选，%2 个验证闭合，%3 个保留开放边界；候选不等同于原装配实例。")
             .arg(result.assembly->parts.size()).arg(closed).arg(result.assembly->parts.size()-closed));
+        if (!result.assembly->candidate.projectionPrograms.empty())
+            emit logInfo(workspaceTr("投影拟合通过 %1 个开放候选。")
+                .arg(result.assembly->candidate.projectionPrograms.size()));
     }
     if (result.outcome == CadReconstructionResult::Outcome::Unsupported) {
         QString message = workspaceTr("No supported solid could be reconstructed in %1: %2")

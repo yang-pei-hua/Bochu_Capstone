@@ -146,7 +146,7 @@ bool dependsOn(const Feature& feature, FeatureId upstreamId) {
         return face != nullptr && face->ownerFeature == upstreamId;
     }
     if (const auto* extrude = std::get_if<ExtrudeFeatureParams>(&feature.params)) {
-        return extrude->sketchId == upstreamId;
+        return extrude->sketchId == upstreamId || extrude->targetBody == upstreamId;
     }
     const auto* cut = std::get_if<CutFeatureParams>(&feature.params);
     return cut != nullptr && cut->sketchId == upstreamId;
@@ -214,6 +214,10 @@ bool PartDocument::restoreFeatures(const std::vector<Feature>& features) {
         } else if (const auto* extrude = std::get_if<ExtrudeFeatureParams>(&feature.params)) {
             hasDependency = true;
             dependency = extrude->sketchId;
+            if (extrude->targetBody && !upstream.count(extrude->targetBody)) {
+                lastError_ = "Project extrusion references a missing or downstream target body";
+                return false;
+            }
         } else if (const auto* cut = std::get_if<CutFeatureParams>(&feature.params)) {
             hasDependency = true;
             dependency = cut->sketchId;

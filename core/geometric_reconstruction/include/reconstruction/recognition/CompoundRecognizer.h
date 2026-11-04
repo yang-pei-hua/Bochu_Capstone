@@ -3,6 +3,7 @@
 #include "reconstruction/detection/PrimitiveDetector.h"
 #include "reconstruction/data/ReconstructionCandidate.h"
 #include "reconstruction/recognition/CurvedSolidRecognizer.h"
+#include "reconstruction/recognition/ProjectionExtrusion.h"
 #include <string>
 
 namespace reconstruction {
@@ -29,6 +30,7 @@ struct CompoundCandidate {
     std::vector<ThroughHoleCandidate> throughHoles;
     std::vector<CurvedSolidCandidate> curvedSolids;
     std::vector<modeling::ProfileBodyParams> profileBodies;
+    std::vector<std::vector<ProjectionOperation>> projectionPrograms;
     double occupancyError = 0;
     double surfaceCoverage = 0;
     double confidence = 0;

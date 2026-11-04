@@ -177,12 +177,14 @@ QJsonObject paramsJson(const FeatureParams& params)
                                                 {"values", data}});
                 }
                 return {{"plane", planeJson(p.plane)}, {"entities", entities}};
-            } else if constexpr (std::is_same_v<P, ExtrudeFeatureParams>)
-                return {{"sketch", QString::number(p.sketchId)},
+            } else if constexpr (std::is_same_v<P, ExtrudeFeatureParams>) {
+                QJsonObject result{{"sketch", QString::number(p.sketchId)},
                         {"values", values({p.depth})},
                         {"reverse", p.reverse},
                         {"operation", static_cast<int>(p.operation)}};
-            else if constexpr (std::is_same_v<P, CutFeatureParams>)
+                if (p.targetBody) result["target_body"] = QString::number(p.targetBody);
+                return result;
+            } else if constexpr (std::is_same_v<P, CutFeatureParams>)
                 return {{"sketch", QString::number(p.sketchId)},
                         {"values", values({p.depth})},
                         {"reverse", p.reverse},
@@ -257,7 +259,8 @@ FeatureParams paramsFromJson(const QJsonObject& p)
     case 1:
         return ExtrudeFeatureParams{id(p["sketch"]), numbers(p["values"], 1)[0],
                                     boolean(p["reverse"]),
-                                    static_cast<ExtrudeOperation>(integer(p["operation"], 3))};
+                                    static_cast<ExtrudeOperation>(integer(p["operation"], 3)),
+                                    p.contains("target_body") ? id(p["target_body"]) : kInvalidFeatureId};
     case 2:
         return CutFeatureParams{id(p["sketch"]), numbers(p["values"], 1)[0],
                                 boolean(p["throughAll"]), boolean(p["reverse"])};

@@ -109,6 +109,35 @@ void joinedPrimitiveProject(QTemporaryDir& temp) {
     require(std::abs(volume(loaded->model.bodyShape())-volume(core.bodyShape()))<1e-6,
             "joined history preserves material volume");
 }
+
+void scopedExtrusionProject(QTemporaryDir& temp) {
+    using namespace modeling;
+    ProjectSnapshot state;
+    SketchFeatureParams base;
+    base.entities = {{1,Rectangle2D{0,0,4,4}}};
+    SketchFeatureParams cutter;
+    cutter.entities = {{1,Rectangle2D{3,1,2,2}}};
+    state.features = {
+        {1,"neighbor",FeatureType::BoxPrimitive,BoxPrimitiveParams{{{4,0,0}},2,4,4,false}},
+        {2,"base",FeatureType::Sketch,base},
+        {3,"extrude",FeatureType::Extrude,ExtrudeFeatureParams{2,4,false}},
+        {4,"tool",FeatureType::Sketch,cutter},
+        {5,"scoped cut",FeatureType::Extrude,ExtrudeFeatureParams{4,4,false,ExtrudeOperation::Cut,3}},
+    };
+    ModelingCore core;
+    require(core.restoreFeatures(state.features),"build scoped extrusion project");
+    state.currentBody=core.bodyShape();
+    state.parametricBody=true;
+    QString error;
+    const auto path=temp.filePath("scoped-extrusion.pcad");
+    require(ProjectStore::save(path,state,error),"save scoped extrusion project");
+    require(manifest(read(path))["version"]==3,"scoped operation requires project version 3");
+    const auto loaded=ProjectStore::load(path,error);
+    require(loaded && std::get<ExtrudeFeatureParams>(loaded->model.features().back().params).targetBody==3,
+            "scoped extrusion target survives project round trip");
+    require(std::abs(volume(loaded->model.bodyShape())-88)<1e-6,
+            "scoped extrusion replay preserves the neighboring solid");
+}
 void primitiveProjects(QTemporaryDir& temp)
 {
     using namespace modeling;
@@ -280,7 +309,7 @@ int main(int argc, char** argv)
         metadata["version"] = 1;
         write(bad, withManifest(original, metadata));
         require(ProjectStore::load(bad, error) != nullptr, "version 1 projects remain readable");
-        metadata["version"] = 3;
+        metadata["version"] = 4;
         write(bad, withManifest(original, metadata));
         require(!ProjectStore::load(bad, error) && error.contains("version"),
                 "future version rejected");
@@ -313,6 +342,7 @@ int main(int argc, char** argv)
                 "load empty project");
         primitiveProjects(temp);
         joinedPrimitiveProject(temp);
+        scopedExtrusionProject(temp);
         std::cout << "Project store tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

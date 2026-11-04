@@ -1,6 +1,103 @@
 #include "TestSupport.h"
 
+#include <BRepAlgoAPI_Common.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <gp_Ax2.hxx>
+
 namespace regression {
+namespace {
+reconstruction::PointStore perforatedBlock(double floor, bool missingBase) {
+    using namespace reconstruction;
+    std::vector<PointSample> points;
+    auto add = [&](double x,double y,double z,modeling::Vec3 normal) {
+        points.push_back({points.size()+1,{x,y,z},normal});
+    };
+    constexpr double height=8, radius=1.5;
+    for (int i=0;i<=24;++i) for (int j=0;j<=24;++j) {
+        const double x=-4+8.*i/24, y=-3+6.*i/24, z=height*j/24;
+        add(x,-3,z,{0,-1,0}); add(x,3,z,{0,1,0});
+        add(-4,y,z,{-1,0,0}); add(4,y,z,{1,0,0});
+        const double v=-3+6.*j/24;
+        const bool inHole=std::hypot(x,v)<radius;
+        if (!missingBase && (floor>0 || !inHole)) add(x,v,0,{0,0,-1});
+        if (!inHole) add(x,v,height,{0,0,1});
+        else if (floor>0) add(x,v,floor,{0,0,1});
+    }
+    for (int i=0;i<80;++i) for (int j=0;j<=24;++j) {
+        const double angle=2*std::acos(-1.)*i/80;
+        const double x=std::cos(angle), y=std::sin(angle);
+        add(radius*x,radius*y,floor+(height-floor)*j/24,{-x,-y,0});
+    }
+    return PointStore(std::move(points));
+}
+}
+
+void testProjectionExtrusion() {
+    using namespace reconstruction;
+    ProjectionExtrusionOptions options;
+    options.distanceTolerance=.04;
+    for (const double floor : {0.,4.}) {
+        ProjectionExtrusionResult fit;
+        const bool accepted=fitProjectionExtrusion(perforatedBlock(floor,false),options,fit);
+        require(accepted, "Projection should recover a supported hole: "+fit.reason);
+        require(fit.operations.size()==(floor==0?1:2),"Through hole should use an inner loop, blind hole should use Cut");
+        require(fit.quality.p95Distance<options.distanceTolerance,"Projection must fit the actual boundary");
+        modeling::ModelingCore core;
+        std::string error;
+        require(buildProjectionProgram(fit.operations,core,error),error);
+        const double expected=384-std::acos(-1.)*1.5*1.5*(8-floor);
+        requireNear(volumeOf(core.bodyShape()),expected,.3,"Projection hole volume");
+        const auto block=BRepPrimAPI_MakeBox(gp_Pnt(-4,-3,0),8,6,8).Shape();
+        const auto tool=BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0,0,floor),gp_Dir(0,0,1)),1.5,9-floor).Shape();
+        BRepAlgoAPI_Cut reference(block,tool);
+        require(reference.IsDone(),"Build independent analytical benchmark solid");
+        BRepAlgoAPI_Common intersection(reference.Shape(),core.bodyShape());
+        require(intersection.IsDone(),"Measure projection benchmark intersection");
+        const double overlap=volumeOf(intersection.Shape());
+        const double iou=overlap/(volumeOf(reference.Shape())+volumeOf(core.bodyShape())-overlap);
+        require(iou>.999,"Projection hole must match the analytical target volume and location");
+        if (floor>0) {
+            const auto feature=core.features().back();
+            auto cut=std::get<modeling::ExtrudeFeatureParams>(feature.params);
+            cut.depth-=1;
+            modeling::ModelPatch patch;
+            patch.commands.push_back(modeling::EditFeatureCommand{feature.id,cut,true,{}});
+            require(core.apply(patch).success,"Recovered cut depth must be editable");
+            requireNear(volumeOf(core.bodyShape()),expected+std::acos(-1.)*2.25,.3,"Edited blind hole volume");
+        }
+    }
+    ProjectionExtrusionResult rejected;
+    require(!fitProjectionExtrusion(perforatedBlock(0,true),options,rejected),
+            "Do not publish a part with a significant unobserved face");
+    require(rejected.operations.empty(),"Rejected programs must remain diagnostic only");
+    require(!fitProjectionExtrusion(perforatedBlock(0,false),options,rejected,{},[]{return true;}) &&
+            rejected.reason=="Cancelled","Cancelled fit must publish no operations");
+}
+
+void testProjectionBooleanIsScoped() {
+    using namespace modeling;
+    using namespace reconstruction;
+    ProjectionOperation base;
+    base.sketch.entities={{1,Rectangle2D{0,0,4,4}}};
+    base.depth=4;
+    auto neighbor=base;
+    neighbor.sketch.entities={{1,Rectangle2D{4,0,2,4}}};
+    auto cut=base;
+    cut.sketch.entities={{1,Rectangle2D{3,1,2,2}}};
+    cut.operation=ExtrudeOperation::Cut;
+    CompoundCandidate candidate;
+    candidate.projectionPrograms={{neighbor},{base,cut}};
+    ModelingCore core;
+    const auto committed=commitCompoundCandidate(candidate,core);
+    require(committed.success,committed.error);
+    requireNear(volumeOf(core.bodyShape()),88,1e-6,"Scoped cut cannot remove adjacent body material");
+    ModelingCore reopened;
+    require(reopened.restoreFeatures(core.features()),reopened.lastError());
+    requireNear(volumeOf(reopened.bodyShape()),88,1e-6,"Scoped boolean must survive replay");
+}
+
 void testCompoundCommitFusesSolidsAtomically() {
     reconstruction::CompoundCandidate candidate;
     reconstruction::BoxCandidate base,upright;

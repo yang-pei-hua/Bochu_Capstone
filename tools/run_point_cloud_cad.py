@@ -36,9 +36,15 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def reconstruct(engine: Path, cloud: Path, directory: Path, timeout: float) -> dict:
+def reconstruct(engine: Path, cloud: Path, directory: Path, timeout: float, mode: str = "assembly",
+                area_directions: bool = False) -> dict:
     report = directory / "report.json"
-    command = [str(engine), "reconstruct-cloud", str(cloud), str(report), str(directory / "model.step")]
+    action = "fit-projection" if mode == "projection" else "reconstruct-cloud"
+    command = [str(engine), action, str(cloud), str(report), str(directory / "model.step")]
+    if mode == "projection-fallback":
+        command.append("--projection-fallback")
+    if area_directions:
+        command.append("--area-directions")
     started = time.monotonic()
     timed_out = False
     with (directory / "reconstruction.log").open("w", encoding="utf-8") as log:
@@ -87,6 +93,7 @@ def reconstruct(engine: Path, cloud: Path, directory: Path, timeout: float) -> d
         "error": result.get("error"), "solids": result.get("solids", 0), "features": result.get("features", 0),
         "surface_coverage": result.get("surface_coverage"), "coverage_basis": result.get("coverage_basis"),
         "assigned_observation_fraction": result.get("assigned_observation_fraction"), "assembly": result.get("assembly"),
+        "projection_quality": result.get("quality") if mode == "projection" else None,
         "partial_reconstruction": result.get("partial_reconstruction", False), "artifacts": artifacts}
 
 
@@ -97,9 +104,14 @@ def main() -> int:
     parser.add_argument("--unit", choices=("mm", "m"), help="Declare scan units when no unit sidecar is available")
     parser.add_argument("--executable", type=Path, default=DEFAULT_ENGINE)
     parser.add_argument("--timeout", type=float, default=300, help="Time limit for each scan in seconds")
+    parser.add_argument("--mode", choices=("assembly", "projection", "projection-fallback"), default="assembly",
+                        help="Fit one isolated component or enable projection after assembly closure")
+    parser.add_argument("--area-directions", action="store_true", help="Include projection area directions in single-part fitting")
     args = parser.parse_args()
     try:
         output, engine = args.output.resolve(), args.executable.resolve()
+        if args.area_directions and args.mode != "projection":
+            raise ValueError("Area direction comparison requires --mode projection")
         output.relative_to((ROOT / "outputs").resolve())
         if not engine.is_file() or not 0 < args.timeout < float("inf"):
             raise ValueError("Executable must exist and timeout must be finite and positive")
@@ -116,6 +128,7 @@ def main() -> int:
             raise ValueError("Output directory must be new or empty")
         output.mkdir(parents=True, exist_ok=True)
         manifest = {"schema": "paramcad.point-cloud-only-cad", "version": 1, "status": "running",
+            "mode": args.mode,
             "source_model_read": False, "topology_correspondence_used": False, "reference_labels_used": False,
             "source_completeness_verified": False, "executable_sha256": sha256(engine), "cases": []}
         write_json(output / "summary.json", manifest)
@@ -140,7 +153,7 @@ def main() -> int:
                 row.update({"cloud": str(cloud), "unit": unit})
                 write_json(output / "summary.json", manifest)
                 print(f"{name}: reconstructing from observations only", flush=True)
-                row.update(reconstruct(engine, cloud, directory, args.timeout))
+                row.update(reconstruct(engine, cloud, directory, args.timeout, args.mode, args.area_directions))
             except (OSError, ValueError, KeyError) as error:
                 row.update({"status": "failed", "cad_constructed": False, "error": str(error)})
             print(f"{name}: {row['status']} {row.get('error') or ''}", flush=True)

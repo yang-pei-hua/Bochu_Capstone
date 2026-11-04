@@ -34,15 +34,30 @@ QJsonObject writeAssemblyDiagnostics(const QString& reportPath,const PlyCloud& c
                 {"snapping_fallbacks",double(patch.boundaryDiagnostics.snappingFallbacks)},
                 {"topology_fallbacks",double(patch.boundaryDiagnostics.topologyFallbacks)}}}});}
     std::vector<quint32> labels(cloud.positions.size());
+    std::size_t projected = 0, attempted = 0;
     for(const auto& part:result.parts){QJsonArray ids,patchIds;for(auto id:part.pointIds){ids.append(double(id));if(id>0&&id<=labels.size())labels[id-1]=quint32(part.id);}
         for(auto id:part.patchIds)patchIds.append(double(id));if(part.closed)++closed;openEdges+=part.openEdges;
-        parts.append(QJsonObject{{"id",double(part.id)},{"patch_ids",patchIds},{"point_ids",ids},{"status",QString::fromStdString(part.status)},
+        QJsonObject item{{"id",double(part.id)},{"patch_ids",patchIds},{"point_ids",ids},{"status",QString::fromStdString(part.status)},
             {"reason",QString::fromStdString(part.reason)},{"closed",part.closed},{"open_edges",double(part.openEdges)},{"nonmanifold_edges",double(part.nonmanifoldEdges)},
             {"lower_mm",vector(part.lower)},{"upper_mm",vector(part.upper)},{"confidence",part.confidence},{"orientation_known",part.orientationKnown},
-            {"normal_orientation_inferred",part.normalOrientationInferred}});}
+            {"normal_orientation_inferred",part.normalOrientationInferred}};
+        if (part.projection) {
+            ++attempted;
+            const auto& fit = *part.projection;
+            const bool accepted = !fit.operations.empty();
+            if (accepted) ++projected;
+            item["projection_fit"] = QJsonObject{{"accepted",accepted},
+                {"reason",QString::fromStdString(fit.reason)},{"operations",qint64(fit.operations.size())},
+                {"p95_distance_mm",fit.quality.p95Distance},{"inlier_fraction",fit.quality.surfaceInlierFraction},
+                {"unsupported_face_area_fraction",fit.quality.unsupportedFaceAreaFraction}};
+        }
+        parts.append(item);
+    }
     for(const auto& connection:result.connections)connections.append(QJsonObject{{"first",double(connection.first)},{"second",double(connection.second)},
         {"convex",connection.convex},{"connected",connection.accepted},{"orientation_known",connection.orientationKnown},{"observation_pairs",double(connection.observations)},{"distance_mm",connection.distance}});
     QJsonObject summary{{"candidate_parts",double(result.parts.size())},{"closed_parts",double(closed)},{"open_parts",double(result.parts.size()-closed)},
+        {"projection_attempted_parts",qint64(attempted)},{"projection_reconstructed_parts",qint64(projected)},
+        {"unreconstructed_parts",qint64(result.parts.size()-closed-projected)},
         {"finite_patches",double(result.patches.size())},{"boundary_loops",double(loops)},{"connections",double(result.connections.size())},{"open_edges",double(openEdges)},
         {"unassigned_points",double(result.unassignedPointIds.size())},{"working_points",double(result.workingPoints)},{"distance_tolerance_mm",result.distanceTolerance},
         {"part_report",jsonPath},{"segmented_cloud",plyPath}};

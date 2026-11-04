@@ -8,8 +8,10 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepTools_ReShape.hxx>
 #include <BRep_Builder.hxx>
 #include <Standard_Failure.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Compound.hxx>
 
@@ -29,6 +31,7 @@ struct SketchBuildState {
 
 struct ExtrudeBuildState {
     occt::ExtrudeResult result;
+    TopoDS_Shape scopedBody;
 };
 
 struct PrimitiveBuildState { FeatureParams params; };
@@ -166,6 +169,44 @@ bool applyExtrudeOperation(
     }
 }
 
+bool applyScopedExtrude(const ExtrudeFeatureParams& params, const TopoDS_Shape& tool,
+    const DerivedStateMap& states, TopoDS_Shape& currentBody, TopoDS_Shape& produced,
+    std::string& error) {
+    const auto owner = states.find(params.targetBody);
+    const auto* state = owner == states.end() ? nullptr : std::get_if<ExtrudeBuildState>(&owner->second);
+    if (!state || state->scopedBody.IsNull() || params.operation == ExtrudeOperation::NewBody) {
+        error = "Extrude target must be a prior independent or scoped extrusion";
+        return false;
+    }
+    bool present = false;
+    for (TopExp_Explorer solid(currentBody, TopAbs_SOLID); solid.More(); solid.Next()) {
+        if (solid.Current().IsSame(state->scopedBody)) { present = true; break; }
+    }
+    if (!present) {
+        error = "Extrude target is no longer present in the model";
+        return false;
+    }
+    auto updated = state->scopedBody;
+    if (!applyExtrudeOperation(params, tool, updated, error)) return false;
+    TopExp_Explorer solids(updated, TopAbs_SOLID);
+    if (!solids.More()) {
+        error = "Scoped extrusion removed its target solid";
+        return false;
+    }
+    produced = solids.Current();
+    solids.Next();
+    if (solids.More() || !(occt::shapeVolume(produced) > 0)) {
+        error = "Scoped extrusion must produce a single solid";
+        return false;
+    }
+    BRepTools_ReShape replacement;
+    replacement.Replace(state->scopedBody, produced);
+    const auto updatedModel = replacement.Apply(currentBody);
+    if (!occt::isValidShape(updatedModel, error)) return false;
+    currentBody = updatedModel;
+    return true;
+}
+
 }  // namespace
 
 bool RebuildEngine::rebuild(PartDocument& document) const {
@@ -231,11 +272,15 @@ bool RebuildEngine::rebuild(PartDocument& document) const {
                     sketchState.profile, sketchState.frame, *params, result, error)) {
                 break;
             }
-            if (!applyExtrudeOperation(
-                    *params, result.shape, currentBody, error)) {
-                break;
+            TopoDS_Shape scopedBody;
+            if (params->targetBody) {
+                if (!applyScopedExtrude(*params, result.shape, states, currentBody, scopedBody, error))
+                    break;
+            } else {
+                if (!applyExtrudeOperation(*params, result.shape, currentBody, error)) break;
+                if (params->operation == ExtrudeOperation::NewBody) scopedBody = result.shape;
             }
-            states.emplace(feature.id, ExtrudeBuildState{result});
+            states.emplace(feature.id, ExtrudeBuildState{result, scopedBody});
             continue;
         }
         case FeatureType::Cut: {
