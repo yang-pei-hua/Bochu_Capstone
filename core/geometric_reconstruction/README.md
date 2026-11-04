@@ -49,12 +49,10 @@ builds consume `cmake/RegressionSources.cmake` to keep their test source lists a
 
 ## Pipeline
 
-The shared pipeline now starts with `analyzeSurfaces()` and passes one typed
-`SurfaceAnalysisResult` to semantic recognizers. See
-[`Shared_Surface_Analysis_Refactor.md`](../../docs/Shared_Surface_Analysis_Refactor.md)
-for the current interfaces, patch/relation semantics, cache validity, mixed-host
-recognition, and verification commands. The low-level joint detector described
-below remains available; shared production analysis gathers families independently.
+The shared pipeline starts with `analyzeSurfaces()` and passes one typed
+`SurfaceAnalysisResult` to semantic recognizers. Production analysis gathers
+surface families independently. The current module inventory records the code
+entry points and proposed interface boundaries. [Module contracts and refactoring plan](../../docs/Point_Cloud_to_CAD_Module_Contracts_and_Refactoring_Plan.md)
 
 This module is the Qt/VTK-free boundary between observed point clouds and the
 parametric modeling core. It keeps three kinds of state separate:
@@ -200,9 +198,8 @@ range only chooses resolution; it does not remove source observations. Protected
 manual observations continue to survive both filters.
 
 Independent stress fixtures and explicitly sourced recorded-cloud replay are
-available through `tools/run_cloud_reliability.py`. See
-[`Cloud_Reliability_Validation.md`](../../docs/Cloud_Reliability_Validation.md)
-for commands, accuracy/rejection contracts and the missing real mechanical dataset.
+available through `tools/run_cloud_reliability.py`. The earlier validation
+commands and results are archived. [Historical reliability report](../../docs/Outdated/Cloud_Reliability_Validation.md)
 The next steps are partial-visibility handling, acquiring orientation when no
 signed observations exist, independently oriented components and richer
 curved-feature semantics.
@@ -227,9 +224,8 @@ volumes use the conservative recorded sampling upper confidence bound.
 Finite assembly boundaries now preserve simple, oriented contours through
 simplification and intersection snapping, and retain original loops when a
 constraint would collapse them. The client defaults to verified/selected
-boundaries with an explicit all-candidate overlay. The four-workpiece results
-and remaining closure limits are documented in
-[`Assembly_Boundary_Repair_20261101.md`](../../docs/Assembly_Boundary_Repair_20261101.md).
+boundaries with an explicit all-candidate overlay. The earlier four-workpiece
+results are archived. [Historical boundary repair report](../../docs/Outdated/Assembly_Boundary_Repair_20261101.md)
 
 `reconstructGuidedSolid()` accepts original-point-ID template groups for planes,
 boxes, spheres, cylinders, cones and tori. It fits only the requested family,
@@ -276,6 +272,6 @@ of a closed-source build requires the appropriate commercial-license decision.
 recovery, and observation-checked joint parallel/perpendicular/coaxial fitting for
 planes and cylinders. Mixed recognition retries failed regions without changing
 previously recognized host/features; local snapshots and candidate alternatives
-remain available in `SurfaceAnalysisResult::localFailures`. See
-[workflow and limits](../../docs/Shared_Surface_Analysis_Refactor.md) and run
+remain available in `SurfaceAnalysisResult::localFailures`. Run
 `python tools/run_local_recovery_tests.py` for the mixed-board acceptance matrix.
+The earlier workflow description is archived. [Historical surface analysis design](../../docs/Outdated/Shared_Surface_Analysis_Refactor.md)

@@ -59,4 +59,4 @@ python tools/run_mixed_feature_fit_tests.py
 
 默认在 `outputs/shared-surface-mixed-validation/` 保存独立参考 STEP、无噪声/噪声版
 重建 STEP、体积差报告以及逐部件参数验收。拟合只读取点云及单位元数据，源尺寸和
-标签用于单独验收。完整调用链与当前能力边界见 `docs/Shared_Surface_Analysis_Refactor.md`。
+标签用于单独验收。此前的调用链说明已归档。 [历史曲面分析设计](../../../docs/Outdated/Shared_Surface_Analysis_Refactor.md)

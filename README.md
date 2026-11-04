@@ -138,7 +138,7 @@ outputs/reconstructions/<时间戳>/
 
 曲面提议还需经过实体完整性检查：圆柱和圆锥需要观测到端面，球和圆环体需要足够的角度覆盖。缺面、遮挡、复杂曲面组合和多零件自动分割仍是后续工作。
 
-已增加可复现的点云可靠性评测，覆盖噪声、离群点、法向缺失、非均匀采样与缺面拒绝。合成点云和虚拟拍摄重建点云分别记录来源；带真值的真实机械扫描仍待补充。方法、结果与真实数据接入格式见 [点云可靠性评测](docs/Cloud_Reliability_Validation.md)。
+已增加可复现的点云可靠性评测，覆盖噪声、离群点、法向缺失、非均匀采样与缺面拒绝。合成点云和虚拟拍摄重建点云分别记录来源；带真值的真实机械扫描仍待补充。此前的评测方法、结果与数据接入格式已归档。 [历史点云可靠性评测](docs/Outdated/Cloud_Reliability_Validation.md)
 
 这一阶段的主要依赖是：
 
@@ -203,7 +203,7 @@ outputs/reconstructions/<时间戳>/
 
 支持绝对尺寸、增减量和增减百分比，单位为 mm/cm/m 或毫米/厘米/米；未注明单位按毫米处理。默认使用该特征已有的固定参照，长宽高和 X/Y/Z 都指特征局部轴。修改输入、选择或模型后需重新预览。应用共享参数编辑的撤销、重做、重拟合保护、工程保存和 STEP 导出。
 
-本阶段使用本地确定性解析，范围限于上述参数；自由文本、多个目标、拓扑修改、点云重拟合、LLM/Agent 和 SolidWorks MCP 仍待实现。详细语法与边界见 [文字参数修改说明](docs/Text_Parameter_Editing.md)。
+本阶段使用本地确定性解析，范围限于上述参数；自由文本、多个目标、拓扑修改、点云重拟合、LLM/Agent 和 SolidWorks MCP 仍待实现。此前的语法与边界说明已归档。 [历史文字参数修改说明](docs/Outdated/Text_Parameter_Editing.md)
 
 ## 3. 仓库层级架构
 
@@ -216,7 +216,7 @@ Bochu_Capstone/
 │   ├── geometric_reconstruction/ PLY → 曲面证据 → 参数化特征
 │   └── parametric_modeling/       参数化 Feature History → OCCT B-Rep/STEP
 ├── data/                          示例数据与性能验证样例
-├── docs/                          架构、实现计划和依赖安装说明
+├── docs/                          当前模块契约与重构计划，旧资料位于 Outdated/
 ├── outputs/                       默认运行输出目录
 ├── tools/                         输出清理、性能验证等辅助脚本
 ├── packaging/                     Windows 完整离线 Release 打包与安装脚本
@@ -302,7 +302,9 @@ Bochu_Capstone/
 
 ## 6. 第一次进入仓库时从哪里开始
 
-**第一次克隆后，请先按 [`docs/development_setup.md`](docs/development_setup.md) 完成开发环境安装、依赖检查、Release 编译和客户端启动。**
+开发环境和客户端启动说明见 [客户端 README](apps/ParamCAD%20Studio/README.md)。旧版环境配置指南已归档。 [历史环境配置指南](docs/Outdated/development_setup.md)
+
+当前点云到 CAD 的模块边界和重构计划见 [模块契约与重构计划](docs/Point_Cloud_to_CAD_Module_Contracts_and_Refactoring_Plan.md)。
 
 仓库提供统一命令行入口 `pcad`。运行 `& .\tools\install_pcad.ps1` 注册当前用户
 PATH 后，可以使用 `pcad studio` 打开客户端、`pcad clean output --dry-run` 预览
@@ -313,7 +315,7 @@ PATH 后，可以使用 `pcad studio` 打开客户端、`pcad clean output --dry
 2. 想了解图片如何变成点云：阅读 [`core/reconstruction/README.md`](core/reconstruction/README.md)。
 3. 想开发点云拟合与特征识别：阅读 [`core/geometric_reconstruction/README.md`](core/geometric_reconstruction/README.md)。
 4. 想开发草图、特征和 B-Rep：阅读 [`core/parametric_modeling/README.md`](core/parametric_modeling/README.md)。
-5. 想查看本地二进制依赖的目录约定：阅读 [`deps/README.md`](deps/README.md) 和 [`docs/colmap_installation.md`](docs/colmap_installation.md)。
+5. 本地二进制依赖的目录约定见 [依赖目录说明](deps/README.md)。旧版 COLMAP 安装说明已归档。 [历史安装说明](docs/Outdated/colmap_installation.md)
 6. 想制作或安装 Windows 发布包：阅读 [`packaging/PACKAGE_README.md`](packaging/PACKAGE_README.md)。
 
 在仓库根目录可以先执行非递归依赖检查：

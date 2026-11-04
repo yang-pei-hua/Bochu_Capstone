@@ -37,8 +37,7 @@ python tools/run_step_surface_validation.py data/real-workpieces-step/cover-plat
 边界杂线与壳闭合问题可用 `diagnose_assembly_boundaries.py --baseline <批处理输出> --output <新目录> --probe`
 复测。默认、alpha 半径增大、全输入点三个探针直接调用同一部件分离实现，保留输入校验和、
 参数及开放边/轮廓统计；不会读取参考 STEP 或将实验参数改成生产默认。
-四工件的原因分析与结果见 [边界诊断](../docs/Assembly_Boundary_Investigation_20261101.md)。
-首轮轮廓修复、客户端边界显示及前后验收见 [修复报告](../docs/Assembly_Boundary_Repair_20261101.md)。
+此前的四工件边界分析、首轮轮廓修复及验收记录已归档。 [历史边界诊断](../docs/Outdated/Assembly_Boundary_Investigation_20261101.md) · [历史修复报告](../docs/Outdated/Assembly_Boundary_Repair_20261101.md)
 
 客户端与批处理均只使用点云坐标、法向、单位及用户手动指定的模板。
 原 STEP 的自动发现、读取、逐面对应、拓扑引导和相关重建命令已删除。
@@ -57,7 +56,7 @@ python tools/run_point_cloud_cad.py --input scan=path/to/scan.ply --unit mm --ou
 多部件重建还输出 `segmented.ply` 与 `parts.json`，记录候选归属、有限边界、连接和未闭合原因。
 仅部分闭合时报告 `cad_exported_partial`；没有可验证实体时报告 `unsupported`，仍保留分离诊断。
 分离流程的 `surface_coverage` 是归属于闭合候选的观测点比例，不是原模型恢复率；`coverage_basis` 明确语义。
-不会读取旁边的模型文件来补齐。四份案例结果和客户端用法见 [纯点云 CAD 说明](../docs/Real_Workpieces_Editable_CAD.md)。
+不会读取旁边的模型文件来补齐。此前的四份案例结果和客户端用法已归档。 [历史纯点云 CAD 说明](../docs/Outdated/Real_Workpieces_Editable_CAD.md)
 
 前一节的 STEP 采样／逐面评测仅用于离线制作与评估测试数据；
 参考拓扑只在曲面检测完成后用于评测，不进入本节的重建任务。

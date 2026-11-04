@@ -1,5 +1,8 @@
 # Repository instructions
 
+- Treat `docs/Outdated/` as an archive of superseded design documents and historical records.
+- Exclude `docs/Outdated/` from searches and do not read or use archived documents as context unless the user explicitly asks to read them. In that case, read only the requested documents.
+
 - Treat `deps/colmap/` as an opaque, local runtime dependency.
 - Do not recursively list, search, read, summarize, or otherwise add files from that directory to AI context.
 - Access only the exact `bin/colmap.exe` path for execution or basic file metadata when a task explicitly requires COLMAP runtime validation.

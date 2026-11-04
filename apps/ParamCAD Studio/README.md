@@ -10,8 +10,8 @@ Point-cloud preprocessing and CGAL Efficient RANSAC live in
 Version 0.2.2 adds bounded Chinese text parameter commands in the feature tab:
 preview edits to boxes, cylinders and through holes, validate the dependency
 rebuild on a separate model, then apply through the existing undoable editor.
-Examples, unit/anchor semantics and limits are documented in
-[`Text_Parameter_Editing.md`](../../docs/Text_Parameter_Editing.md).
+Earlier examples, unit and anchor semantics, and limits are archived.
+[Historical text parameter editing notes](../../docs/Outdated/Text_Parameter_Editing.md)
 
 ## Requirements
 

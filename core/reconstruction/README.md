@@ -1,6 +1,6 @@
 # Layer 2：无界面多视角点云重建
 
-本目录实现 `docs/project_definition.md` 中的 Layer 2：输入多视角图片和可选
+本目录实现 Layer 2，输入多视角图片和可选
 `CameraInfo`，输出彩色 PLY 点云。重建引擎为官方 COLMAP 4.2.0，固定于提交
 `be5e29168d4aff238409d60424812df66aac919f`，源码以浅克隆方式保存在
 `third_party/colmap`。运行路径只有命令行，不依赖 COLMAP GUI。
@@ -19,8 +19,7 @@
 
 ## 构建 COLMAP
 
-Windows 预编译包的完整下载、安装与验证流程见
-[`docs/colmap_installation.md`](../../docs/colmap_installation.md)。
+Windows 预编译包的旧版安装与验证流程已归档。 [历史安装说明](../../docs/Outdated/colmap_installation.md)
 
 COLMAP 的第三方依赖较多。Windows 推荐使用 Visual Studio + vcpkg；Linux 可先按
 `third_party/colmap/doc/install.rst` 安装系统依赖。随后在 PowerShell 中运行：

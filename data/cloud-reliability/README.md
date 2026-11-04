@@ -4,4 +4,4 @@
 
 新增实测数据清单需声明 `provenance: real-capture`、采集来源 `source`、点云 `cloud`、独立 STEP 真值 `reference`、尺寸/验收定义 `definition` 和预期 `expectation`。路径相对于清单文件解析。每份输入必须注明毫米或米，坐标系须与真值加载后的坐标系一致。
 
-完整样例、运行命令与结果见 [评测说明](../../docs/Cloud_Reliability_Validation.md)。当前仓库没有带独立 CAD 真值的真实机械扫描基准。
+此前的完整样例、运行命令与结果已归档。当前仓库没有带独立 CAD 真值的真实机械扫描基准。 [历史评测说明](../../docs/Outdated/Cloud_Reliability_Validation.md)
