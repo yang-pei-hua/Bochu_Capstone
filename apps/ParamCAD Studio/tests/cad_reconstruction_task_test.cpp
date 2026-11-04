@@ -127,6 +127,7 @@ int main(int argc, char** argv)
     try {
         const auto success = run(boxCloud());
         require(success.outcome == CadReconstructionResult::Outcome::Success
+                && success.branch == CadReconstructionResult::Branch::Conventional
                 && success.preprocessingComplete && success.preprocessing.inputPointCount == 600
                 && success.candidate.boxes.size() == 1, "snapshot reconstructs supported box");
         const auto& box = success.candidate.boxes.front().primitive;
@@ -156,13 +157,22 @@ int main(int argc, char** argv)
         for(reconstruction::PointId id=1;id<=100;++id) planeHint.points.push_back(id);
         const auto guided=run(boxCloud(),0,{planeHint});
         if(guided.outcome!=CadReconstructionResult::Outcome::Success) throw std::runtime_error(guided.error.toStdString());
-        require(guided.templateFits.size()==1 && guided.templateFits[0].regionId==7 && guided.templateFits[0].surface
+        require(guided.branch == CadReconstructionResult::Branch::Guided && guided.templateFits.size()==1 && guided.templateFits[0].regionId==7 && guided.templateFits[0].surface
                 && guided.candidate.boxes.size()==1,"manual plane is fitted and whole closed box is recovered");
         auto meters = boxCloud();
         for (auto& point : meters.positions) for (auto& coordinate : point) coordinate /= 1000;
-        const auto metric = run(meters, 0, {planeHint}, reconstruction::LengthUnit::Meter);
+        auto sparseHint = planeHint;
+        for (auto& id : sparseHint.points) id = 2 * id + 99;
+        for (std::size_t row = 0; row < meters.positions.size(); ++row)
+            meters.sourceRows.push_back(100 + 2 * row);
+        meters.sourceRows.push_back(2000);
+        meters.positions.push_back({std::numeric_limits<float>::quiet_NaN(), 0, 0});
+        meters.normals.push_back({0, 0, 1});
+        const auto metric = run(meters, 0, {sparseHint}, reconstruction::LengthUnit::Meter);
         require(metric.outcome == CadReconstructionResult::Outcome::Success
                 && metric.preprocessing.appliedScaleToMillimeters == 1000
+                && metric.skippedInvalidObservations == 1
+                && metric.preprocessing.inputPointCount == 600
                 && std::abs(metric.candidate.boxes[0].primitive.sizeX - 6) < 0.01,
                 "guided observations in meters reconstruct millimeter CAD with stable hint IDs");
         auto boxHint=planeHint; boxHint.kind=reconstruction::TemplateKind::Box;
@@ -277,7 +287,8 @@ int main(int argc, char** argv)
         }
         const auto unsupported = run(plane);
         require(unsupported.outcome == CadReconstructionResult::Outcome::Unsupported
-                && !unsupported.error.isEmpty(), "unsupported geometry reported without throwing");
+                && unsupported.branch == CadReconstructionResult::Branch::Assembly
+                && !unsupported.error.isEmpty(), "open assembly branch reports unsupported geometry");
         PlyCloud invalid;
         invalid.positions.push_back({std::numeric_limits<float>::quiet_NaN(), 0, 0});
         require(run(invalid).outcome == CadReconstructionResult::Outcome::PreprocessingFailed,

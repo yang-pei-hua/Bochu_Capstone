@@ -206,3 +206,33 @@ tools/
 ```powershell
 python -m unittest discover -s tools/tests -p test_pcad_cli.py -v
 ```
+
+
+## 点云重建模块契约测试
+
+v1 清单覆盖模块 01–34。每次运行中，每个数据集只准备一份 PLY。清单通过数据集 ID 将用例映射到固定参考产物和串联依赖。参考产物由解析几何生成，点与证据通过源点 ID 引用同一份点云。盲孔样本用于基元检测、通孔拒绝、投影搜索、建模、工程重开和 STEP 回读。
+
+```powershell
+cmake --build "apps/ParamCAD Studio/build/msvc-debug" --config Release --target cad_reconstruction_validation
+python tools/run_reconstruction_contracts.py --output outputs/contracts-all
+python tools/run_reconstruction_contracts.py --mode cloud --case m21.two_boxes.closure --output outputs/contracts-closure
+python tools/run_reconstruction_contracts.py --mode fixture --case m24.u_channel.profile --output outputs/contracts-profile
+python tools/run_reconstruction_contracts.py --case m11.surface_box.revalidate --output outputs/contracts-repair
+python tools/run_reconstruction_contracts.py --case m13.blind_hole.reject_short_wall --output outputs/contracts-hole
+python tools/run_reconstruction_contracts.py --case m33.blind_hole.step_roundtrip --output outputs/contracts-step
+python tools/run_reconstruction_contracts.py --case m34.surface_box.production --output outputs/contracts-workflow
+```
+
+默认同时运行两种模式。`fixture` 直接读取参考上游 JSON，只执行目标阶段。`cloud` 按依赖运行当前实现，同一次运行中共享上游结果。装配串联顺序为面片提取、分组、边界恢复、全量回填、闭合。回填在报告中单独记为 19 的 `backfill` 阶段，也可作为目标用例直接运行。上游未达到验收条件时，下游标记 `blocked_upstream`。
+
+也可以重放串联模式保存的 `artifact.json`。例如将 `cloud/two_boxes/19/artifact.json` 传给 `--mode fixture --case m20.two_boxes.boundary --upstream <文件>`。模块 21 的上游产物是包含全量归属的 `cloud/two_boxes/19-backfill/artifact.json`。外部产物若引用不同的 PLY，用 `--cloud` 显式提供其原始文件。驱动会核对快照身份。投影串联测试按配置选一条候选轴传递，整件的多轴竞争仍由 `fit-projection` 回归覆盖。
+
+`summary.json` 记录用例、实测指标、阻断原因、实际执行次数和输入、清单及验证程序的哈希。每次运行使用新的输出目录。同一数据集在同一阶段配置多个断言用例时，用 `upstream_gate` 指定供下游判断是否可继续的用例。新增模块时，需要声明依赖、注册阶段入口，再为该阶段补独立夹具和验收指标。
+
+输入与分析串联顺序为 01 → 02 → 03 → 04。05 独立验证一次基元检测。06 从 04 的工作点汇集证据，按配置自行运行分族或多尺度检测，然后进入 07–11。可将 `cloud/surface_box/6/artifact.json` 传给 `--mode fixture --case m07.surface_box.patches --upstream <文件>`，只复验面片索引。10 通过清单中的探测坐标选定当前面片作为待恢复区域。11 读取该局部提案，合并观测与证据后复验候选，原始 PLY 仍通过同一数据集引用。
+
+识别阶段 12 从 07 的面片识别宿主箱体，13 读取 12 的宿主和已有圆柱证据识别通孔。14 从 07 识别有界曲面体，15 从 04 识别组合体，16 从 08 识别混合特征，17 从 04 的工作点和引导种子识别实体。可用 `cloud/blind_hole/12/artifact.json` 重放 13 的盲孔拒绝用例。
+
+28–33 读取 27 选中的投影操作，依次生成建模计划、验证草图、重建实体、提交事务、保存并重开 PCAD、导出并回读 STEP。模块 31 校验失败回滚和过期版本拒绝，模块 33 校验实体数量及材料体积交并比。可将 `cloud/blind_hole/32/artifact.json` 传给 `--mode fixture --case m33.blind_hole.step_roundtrip --upstream <文件>`。报告目录同时保留 `roundtrip.pcad` 和 `roundtrip.step`。
+
+34 从原始 PLY 或指定了活动源点 ID 的参考产物启动应用的异步重建任务，校验任务结果投递、取消和建模提交。工作区交互由 `workspace_interaction_test` 覆盖。

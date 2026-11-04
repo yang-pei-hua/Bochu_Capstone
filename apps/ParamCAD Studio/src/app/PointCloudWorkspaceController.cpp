@@ -443,9 +443,8 @@ void PointCloudWorkspaceController::startCadReconstruction(bool projectionFallba
     }
     std::vector<vtkIdType> ids;
     PlyCloud cloud = m_document->workingCloud(&ids);
-    m_cadOriginalPointIds.assign(ids.begin(),ids.end());
     std::map<vtkIdType, reconstruction::PointId> pointIds;
-    for (size_t i = 0; i < ids.size(); ++i) pointIds[ids[i]] = i + 1;
+    for (const auto id : ids) pointIds[id] = static_cast<reconstruction::PointId>(id) + 1;
     std::vector<reconstruction::TemplateHint> hints;
     for (const auto& region : m_document->selection().regions()) {
         if (!region.templateLocked || m_document->selection().regionPointCount(region.id) == 0)
@@ -617,7 +616,9 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
                 group.surface.parameters["projection_accepted"]=fitted;
                 group.surface.parameters["projection_reason"]=QString::fromStdString(part.projection->reason);
             }
-            for(auto id:part.pointIds)if(id>0&&id<=m_cadOriginalPointIds.size())group.points.push_back(vtkIdType(m_cadOriginalPointIds[id-1]));
+            for (const auto id : part.pointIds)
+                if (id > 0 && id <= m_document->sourceCloud().positions.size())
+                    group.points.push_back(static_cast<vtkIdType>(id - 1));
             if(!group.points.empty())groups.push_back(std::move(group));if(part.closed)++closed;
         }
         m_document->replacePartCandidates(groups,false);

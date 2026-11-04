@@ -39,6 +39,17 @@ class AssemblyBoundaryDiagnosticsTests(unittest.TestCase):
             patch["boundary_loops_mm"][1] = hole[::-1]
             (directory / "parts.json").write_text(json.dumps(data))
             self.assertEqual(metrics(directory, 3)["patches_with_disconnected_outer_loops"], 1)
+            patch["boundary_before_closure"] = {"normal": [0, 0, 1],
+                "boundary_loops_mm": [outer, hole], "revision_source": "convex_support_planes"}
+            patch["boundary_loops_mm"] = [outer]
+            data["summary"]["unassigned_working_points"] = 0
+            (directory / "parts.json").write_text(json.dumps(data))
+            value = metrics(directory, 3)
+            self.assertEqual(value["boundary_basis"], "observed")
+            self.assertEqual(value["boundary_loops"], 2)
+            self.assertEqual(value["raw_boundary_segments"], 8)
+            self.assertEqual(value["closure_boundary_segments"], 4)
+
 
 
 if __name__ == "__main__":

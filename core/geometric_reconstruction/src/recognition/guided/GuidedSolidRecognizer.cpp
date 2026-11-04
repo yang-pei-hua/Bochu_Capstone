@@ -6,35 +6,20 @@
 namespace reconstruction {
 using namespace detail::guided;
 
-bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOptions& planes,
-                            const CylinderDetectionOptions& cylinders,
-                            const std::vector<TemplateHint>& hints, GuidedSolidResult& output,
-                            std::string& error, const std::function<bool()>& cancelled,
-                            const SurfaceAnalysisResult* sharedAnalysis,
-                            const std::vector<SurfaceRelationHint>& relationHints, const PointStore* source)
-{
+namespace detail::guided {
+bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& planes,
+    const CylinderDetectionOptions& cylinders, const std::vector<TemplateHint>& hints,
+    TemplateRegions& output, std::string& error, const std::function<bool()>& cancelled) {
+    error.clear();
     output = {};
-    if (hints.empty()) {
-        const auto options = recognitionAnalysisOptions(points, planes, cylinders);
-        if (sharedAnalysis && analysisInputMatches(points, *sharedAnalysis) &&
-            analysisSettingsMatch(options,sharedAnalysis->options)) {
-            output.analysis = *sharedAnalysis;
-            output.analysisReused = true;
-        }
-        else if (!analyzeSurfaces(points, options,
-                                  output.analysis, error, {}, cancelled)) return false;
-        RepairTransactionReport transaction;
-        const bool recognized=recognizeAndRepairParametricSolid(points, output.analysis, output.candidate, error, source, &transaction, relationHints);
-        if(!recognized)output.analysis.localFailures=std::move(transaction.failures);
-        return recognized;
-    }
-    auto samples = points.points();
+    output.adjustedPoints = points.points();
+    auto& samples = output.adjustedPoints;
     std::map<PointId, std::size_t> indices;
     for (std::size_t i = 0; i < samples.size(); ++i)
         indices[samples[i].id] = i;
     std::set<PointId> assigned;
-    std::vector<PrimitiveEvidence> seeds;
-    std::vector<CurvedSolidCandidate> closed;
+    auto& seeds = output.seeds;
+    auto& closed = output.closed;
     for (const auto& hint : hints) {
         if (cancelled && cancelled()) {
             error = "Cancelled";
@@ -168,11 +153,44 @@ bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOption
         error = "Cancelled";
         return false;
     }
+    return true;
+}
+} // namespace detail::guided
+
+bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOptions& planes,
+                            const CylinderDetectionOptions& cylinders,
+                            const std::vector<TemplateHint>& hints, GuidedSolidResult& output,
+                            std::string& error, const std::function<bool()>& cancelled,
+                            const SurfaceAnalysisResult* sharedAnalysis,
+                            const std::vector<SurfaceRelationHint>& relationHints, const PointStore* source)
+{
+    output = {};
+    if (hints.empty()) {
+        const auto options = recognitionAnalysisOptions(points, planes, cylinders);
+        if (sharedAnalysis && analysisInputMatches(points, *sharedAnalysis) &&
+            analysisSettingsMatch(options,sharedAnalysis->options)) {
+            output.analysis = *sharedAnalysis;
+            output.analysisReused = true;
+        }
+        else if (!analyzeSurfaces(points, options,
+                                  output.analysis, error, {}, cancelled)) return false;
+        RepairTransactionReport transaction;
+        const bool recognized=recognizeAndRepairParametricSolid(points, output.analysis, output.candidate, error, source, &transaction, relationHints);
+        if(!recognized)output.analysis.localFailures=std::move(transaction.failures);
+        return recognized;
+    }
+    TemplateRegions templates;
+    const bool fitted = fitTemplateRegions(points, planes, cylinders, hints, templates, error, cancelled);
+    output.fits = std::move(templates.fits);
+    output.failedRegionId = templates.failedRegionId;
+    if (!fitted) return false;
+    auto& seeds = templates.seeds;
+    const auto& closed = templates.closed;
     // A complete manually identified curved component is fixed first. Its
     // remaining observed boundary is consumed, and automatic reconstruction
     // operates on the remaining material rather than refitting that component.
     std::vector<PointSample> remaining;
-    for (const auto& p : samples) {
+    for (const auto& p : templates.adjustedPoints) {
         const bool consumed = std::any_of(closed.begin(), closed.end(), [&](const auto& solid) {
             return matchesCurvedBoundary(solid.primitive, p, planes.distanceThreshold * 3);
         });

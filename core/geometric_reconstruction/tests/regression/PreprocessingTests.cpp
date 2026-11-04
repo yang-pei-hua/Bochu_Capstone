@@ -182,6 +182,24 @@ void testScaleAwarePreprocessingAndNormalEstimation() {
     }
     requireNear(processed.points().back().position.x, 10.0, 1.0e-12,
                 "meter-to-millimetre position conversion");
+
+    const reconstruction::ObservationSnapshot snapshot(meters);
+    require(snapshot.sourceUnit() == reconstruction::LengthUnit::Meter &&
+        snapshot.sourceToWorkingScale() == 1000 && snapshot.observations().size() == meters.size(),
+        "snapshot retains source units, transform and the full observation count");
+    require(snapshot.observations().points().back().id == outlierId &&
+        snapshot.observations().points().back().position.x == 1000,
+        "full-resolution recovery retains scaled observations removed from the work cloud");
+    const reconstruction::ObservationSnapshot millimeters(snapshot.observations());
+    require(snapshot.fingerprint() == millimeters.fingerprint(),
+        "equivalent metre and millimetre observations identify the same geometry");
+    reconstruction::PointStore fromSnapshot({});
+    require(reconstruction::preprocessPointCloud(snapshot, options, fromSnapshot, report, error), error);
+    require(reconstruction::pointStoreFingerprint(fromSnapshot) == reconstruction::pointStoreFingerprint(processed),
+        "legacy and snapshot preprocessing produce the same working observations");
+    options.protectedPointIds = {outlierId};
+    require(reconstruction::preprocessPointCloud(snapshot, options, fromSnapshot, report, error), error);
+    require(fromSnapshot.size() == meters.size(), "protected source IDs survive snapshot preprocessing");
 }
 
 void testVoxelDownsamplingPreservesOriginalPointIds() {

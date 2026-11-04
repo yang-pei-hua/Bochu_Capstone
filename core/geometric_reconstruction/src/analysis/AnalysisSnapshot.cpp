@@ -3,22 +3,6 @@
 namespace reconstruction {
 using namespace detail::analysis;
 
-std::uint64_t pointStoreFingerprint(const PointStore& points) noexcept {
-    std::uint64_t h = 1469598103934665603ULL;
-    auto mix = [&](const auto& value) {
-        const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
-        for (std::size_t i = 0; i < sizeof(value); ++i) h = (h ^ bytes[i])*1099511628211ULL;
-    };
-    const auto unit = static_cast<int>(points.unit()); mix(unit);
-    for (const auto& p : points.points()) {
-        mix(p.id); mix(p.position.x); mix(p.position.y); mix(p.position.z);
-        const bool has = p.normal.has_value(); mix(has); mix(p.normalOrientationKnown);
-        if (p.normal) { mix(p.normal->x); mix(p.normal->y); mix(p.normal->z); }
-        mix(p.confidence);
-    }
-    return h;
-}
-
 bool analysisMatches(const PointStore& p, const SurfaceAnalysisResult& a) noexcept {
     return a.unit == p.unit() && a.pointFingerprint == pointStoreFingerprint(p);
 }

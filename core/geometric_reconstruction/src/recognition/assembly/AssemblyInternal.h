@@ -14,8 +14,22 @@ struct WorkingData {
     std::vector<std::vector<std::size_t>> groups;
     double tolerance=0;
 };
-void recoverBoundaries(const WorkingData&,const AssemblyOptions&,AssemblyReconstructionResult&,
-    const std::function<bool()>&);
-void closeParts(const WorkingData&,const AssemblyOptions&,AssemblyReconstructionResult&,
-    const std::function<bool()>&);
+struct PatchExtraction {
+    WorkingData work;
+    std::vector<FiniteSurfacePatch> patches;
+    std::vector<PointId> unassignedPointIds;
+};
+struct PatchGrouping {
+    std::vector<PatchConnection> connections;
+    std::vector<AssemblyPart> parts;
+    std::vector<std::size_t> patchParts; // Patch index to part index.
+};
+PatchExtraction extractPatches(const PointStore&, const AssemblyOptions&, const std::function<bool()>&);
+PatchGrouping groupPatches(const WorkingData&, const std::vector<FiniteSurfacePatch>&, const AssemblyOptions&);
+std::vector<PointId> assignSourceObservations(const PointStore&, const WorkingData&, const AssemblyOptions&,
+    std::vector<FiniteSurfacePatch>&, PatchGrouping&, const std::function<bool()>&);
+void recoverBoundaries(const WorkingData&, const AssemblyOptions&, const std::vector<PatchConnection>&,
+    std::vector<FiniteSurfacePatch>&, const std::function<bool()>&);
+CompoundCandidate closeParts(const WorkingData&, const AssemblyOptions&, std::vector<FiniteSurfacePatch>&,
+    std::vector<AssemblyPart>&, std::size_t inputPoints, const std::function<bool()>&);
 }

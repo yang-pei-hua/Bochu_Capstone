@@ -13,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <type_traits>
+#include <unordered_map>
 
 namespace {
 using Vec = modeling::Vec3;
@@ -120,13 +121,20 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
         std::visit([&](auto& surface) { surface.supportPointIds=patch.supportPointIds; },evidence);
         detection.evidence.push_back(std::move(evidence));
     }
+    std::unordered_map<reconstruction::PointId, const Vec*> positionById;
+    positionById.reserve(source.size());
+    for (const auto& point : source.points()) positionById.emplace(point.id, &point.position);
     std::vector<vtkSmartPointer<vtkStaticPointLocator>> supports;
     std::vector<std::vector<vtkIdType>> owners(detection.evidence.size());
     for (const auto& evidence : detection.evidence) {
         vtkNew<vtkPoints> coordinates;
         std::visit([&](const auto& surface) {
-            for (auto id : surface.supportPointIds) if (id > 0 && id <= cloud.positions.size())
-                coordinates->InsertNextPoint(cloud.positions[static_cast<size_t>(id-1)].data());
+            for (const auto id : surface.supportPointIds) {
+                const auto found = positionById.find(id);
+                if (found == positionById.end()) continue;
+                const auto& p = *found->second;
+                coordinates->InsertNextPoint(p.x, p.y, p.z);
+            }
         }, evidence);
         vtkNew<vtkPolyData> data; data->SetPoints(coordinates);
         auto locator = vtkSmartPointer<vtkStaticPointLocator>::New();

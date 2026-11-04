@@ -74,7 +74,8 @@ int main(int argc, char** argv)
         require(document.revision() > beforeDelete, "point edit invalidates pending jobs");
         std::vector<vtkIdType> ids;
         const auto snapshot = document.workingCloud(&ids);
-        require(ids == std::vector<vtkIdType>({0, 2, 3}) && snapshot.positions.size() == 3,
+        require(ids == std::vector<vtkIdType>({0, 2, 3}) && snapshot.positions.size() == 3
+                && snapshot.sourceRows == std::vector<std::size_t>({0, 2, 3}),
                 "working snapshot preserves original IDs");
         require(snapshot.normals.size() == 3 && snapshot.colors.size() == 3
                 && snapshot.colors[1] == document.sourceCloud().colors[2], "snapshot preserves normals and colors");

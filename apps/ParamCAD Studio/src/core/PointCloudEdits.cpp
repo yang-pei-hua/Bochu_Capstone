@@ -205,6 +205,7 @@ PlyCloud PointCloudSelection::workingCloud(std::vector<vtkIdType>* originalIds, 
         if (unassignedOnly && m_memberships[i] != 0) continue;
         if (regionId >= 0 && m_memberships[i] != regionId) continue;
         result.positions.push_back(m_sourceCloud.positions[i]);
+        result.sourceRows.push_back(i);
         if (normals) result.normals.push_back(m_sourceCloud.normals[i]);
         if (colors) result.colors.push_back(m_sourceCloud.colors[i]);
         if (originalIds) originalIds->push_back(id);

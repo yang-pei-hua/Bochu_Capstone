@@ -12,8 +12,9 @@ from pathlib import Path
 import random
 import subprocess
 
+from run_point_cloud_cad import DEFAULT_ENGINE as ENGINE
+
 ROOT = Path(__file__).resolve().parents[1]
-ENGINE = ROOT / 'apps/ParamCAD Studio/build/msvc-debug/Release/cad_reconstruction_validation.exe'
 
 
 def rotation(yaw=0, pitch=0):

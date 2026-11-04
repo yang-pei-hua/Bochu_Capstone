@@ -8,11 +8,13 @@ import os
 import random
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-EXECUTABLE = ROOT / "apps/ParamCAD Studio/build/msvc-debug/Release/cad_reconstruction_validation.exe"
+sys.path.insert(0, str(ROOT / "tools"))
+from run_point_cloud_cad import DEFAULT_ENGINE as EXECUTABLE
 CASE = ROOT / "data/performance-validation/box-through-hole"
 
 

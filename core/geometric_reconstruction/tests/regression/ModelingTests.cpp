@@ -90,8 +90,20 @@ void testProjectionBooleanIsScoped() {
     CompoundCandidate candidate;
     candidate.projectionPrograms={{neighbor},{base,cut}};
     ModelingCore core;
-    const auto committed=commitCompoundCandidate(candidate,core);
-    require(committed.success,committed.error);
+    std::string error;
+    const auto plan = planCompoundCandidate(candidate, core, error);
+    require(plan && plan->commands.size() == 6, error);
+    require(core.features().empty() && plan->expectedRevision == core.revision(),
+        "Planning is read-only and bound to the current feature revision");
+    const auto committed = core.apply(*plan);
+    require(committed.success, committed.error);
+    const auto& cutCommand = std::get<AddFeatureCommand>(plan->commands.back());
+    const auto& cutParams = std::get<ExtrudeFeatureParams>(cutCommand.params);
+    require(cutParams.sketchId == committed.affectedFeatures[4] &&
+        cutParams.targetBody == committed.affectedFeatures[3], "Plan explicitly scopes the cut and its sketch");
+    const auto revision = core.revision();
+    require(!core.apply(*plan).success && core.revision() == revision && core.features().size() == 6,
+        "Applying the same plan twice rejects the stale revision");
     requireNear(volumeOf(core.bodyShape()),88,1e-6,"Scoped cut cannot remove adjacent body material");
     ModelingCore reopened;
     require(reopened.restoreFeatures(core.features()),reopened.lastError());

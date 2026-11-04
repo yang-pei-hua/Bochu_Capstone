@@ -47,7 +47,7 @@ std::vector<std::vector<PointId>> connectedPointComponents(const PointStore& poi
     return result;
 }
 
-bool indexSurfaceEvidence(const PointStore& points, const std::vector<PrimitiveEvidence>& evidence,
+bool indexSurfacePatches(const PointStore& points, const std::vector<PrimitiveEvidence>& evidence,
                           const SurfaceAnalysisOptions& options, SurfaceAnalysisResult& output, std::string& error) {
     output = {}; error.clear();
     if (!valid(options)) { error = "Invalid surface analysis options"; return false; }
@@ -55,7 +55,6 @@ bool indexSurfaceEvidence(const PointStore& points, const std::vector<PrimitiveE
     output.surfaces = evidence;
     const auto map = pointMap(points);
     std::unordered_set<PointId> assigned;
-    std::vector<RelationSurface> nodes;
     SurfaceId surface = 0;
     for (auto& e : output.surfaces) {
         std::visit([&](auto& s) { s.id = ++surface; }, e);
@@ -94,11 +93,43 @@ bool indexSurfaceEvidence(const PointStore& points, const std::vector<PrimitiveE
             }
             patch.centroid = scale(patch.centroid,1.0/queue.size());
             patch.materialNormal = scale(patch.materialNormal,1.0/queue.size());
-            nodes.push_back({patch.id,e,patch.supportPointIds});
             output.patches.push_back(std::move(patch));
         }
     }
     for (const auto& p : points.points()) if (!assigned.count(p.id)) output.unassignedPointIds.push_back(p.id);
-    return inferSurfaceRelations(points,nodes,options.relations,output.relations,error);
+    return true;
+}
+
+namespace {
+bool inferIndexedRelations(const PointStore& points, const SurfaceAnalysisResult& index,
+    std::vector<SurfaceRelation>& output, std::string& error) {
+    std::vector<RelationSurface> nodes;
+    nodes.reserve(index.patches.size());
+    for (const auto& patch : index.patches) {
+        if (patch.surfaceId == 0 || patch.surfaceId > index.surfaces.size()) {
+            error = "Patch references a missing surface";
+            return false;
+        }
+        nodes.push_back({patch.id, index.surfaces[patch.surfaceId - 1], patch.supportPointIds});
+    }
+    return inferSurfaceRelations(points, nodes, index.options.relations, output, error);
+}
+
+} // namespace
+
+bool inferPatchRelations(const PointStore& points, const SurfaceAnalysisResult& index,
+    std::vector<SurfaceRelation>& output, std::string& error) {
+    output.clear();
+    if (!analysisMatches(points, index)) {
+        error = "Patch index refers to a different point snapshot";
+        return false;
+    }
+    return inferIndexedRelations(points, index, output, error);
+}
+
+bool indexSurfaceEvidence(const PointStore& points, const std::vector<PrimitiveEvidence>& evidence,
+    const SurfaceAnalysisOptions& options, SurfaceAnalysisResult& output, std::string& error) {
+    return indexSurfacePatches(points, evidence, options, output, error) &&
+        inferIndexedRelations(points, output, output.relations, error);
 }
 } // namespace reconstruction

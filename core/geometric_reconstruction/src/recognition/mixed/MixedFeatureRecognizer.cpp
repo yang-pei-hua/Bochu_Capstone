@@ -3,6 +3,30 @@
 namespace reconstruction {
 using namespace detail::mixed;
 
+namespace detail::mixed {
+bool recognizeLocalFeature(const PointStore& observed, const SurfaceAnalysisResult& candidates,
+    const Frame& frame, double tolerance, bool subtractive, CompoundCandidate& output, std::string& error) {
+    if(subtractive) {
+        PrismCandidate cut;
+        if(!rectangularCut(observed,candidates,frame,tolerance,cut)) {
+            error="Unexplained host cavity; refusing incomplete mixed model";return false;
+        }
+        output.prisms.push_back(cut);return true;
+    }
+    CurvedSolidCandidate curved;
+    if(attachedCurved(observed,candidates,frame,tolerance,curved)) {output.curvedSolids.push_back(curved);return true;}
+    CompoundRecognitionOptions options;options.distanceTolerance=tolerance;
+    options.interfacePlanes.push_back({frame.z,-frame.c[1]});
+    for(const auto& e:candidates.surfaces) if(auto plane=std::get_if<PlaneEvidence>(&e)) options.boundaryEvidence.push_back(*plane);
+    CompoundCandidate planar;
+    if(!reconstructCompound(observed,options,planar,error)) {
+        error="Unsupported attached component: "+error;return false;
+    }
+    output.boxes.insert(output.boxes.end(),planar.boxes.begin(),planar.boxes.end());
+    output.prisms.insert(output.prisms.end(),planar.prisms.begin(),planar.prisms.end());return true;
+}
+} // namespace detail::mixed
+
 bool recognizeMixedFeatures(const PointStore& points,const SurfaceAnalysisResult& analysis,
                             CompoundCandidate& output,std::string& error,
                             std::vector<LocalAnalysisFailure>* failures,const PointStore* source) {
@@ -50,25 +74,8 @@ bool recognizeMixedFeatures(const PointStore& points,const SurfaceAnalysisResult
             PointStore local(std::move(samples),points.unit());
             SurfaceAnalysisResult restricted;
             if(!indexSurfaceEvidence(local,restrictEvidence(analysis,group),analysis.options,restricted,error)) return false;
-            auto attempt=[&](const PointStore& observed,const SurfaceAnalysisResult& candidates) {
-                if(subtractive) {
-                    PrismCandidate cut;
-                    if(!rectangularCut(observed,candidates,frame,tolerance,cut)) {
-                        error="Unexplained host cavity; refusing incomplete mixed model";return false;
-                    }
-                    output.prisms.push_back(cut);return true;
-                }
-                CurvedSolidCandidate curved;
-                if(attachedCurved(observed,candidates,frame,tolerance,curved)) {output.curvedSolids.push_back(curved);return true;}
-                CompoundRecognitionOptions options;options.distanceTolerance=tolerance;
-                options.interfacePlanes.push_back({frame.z,-frame.c[1]});
-                for(const auto& e:candidates.surfaces) if(auto plane=std::get_if<PlaneEvidence>(&e)) options.boundaryEvidence.push_back(*plane);
-                CompoundCandidate planar;
-                if(!reconstructCompound(observed,options,planar,error)) {
-                    error="Unsupported attached component: "+error;return false;
-                }
-                output.boxes.insert(output.boxes.end(),planar.boxes.begin(),planar.boxes.end());
-                output.prisms.insert(output.prisms.end(),planar.prisms.begin(),planar.prisms.end());return true;
+            auto attempt = [&](const PointStore& observed, const SurfaceAnalysisResult& candidates) {
+                return recognizeLocalFeature(observed, candidates, frame, tolerance, subtractive, output, error);
             };
             if(group.size()>=20 && attempt(local,restricted)) continue;
             if(group.size()<20)error="Insufficient local observations";

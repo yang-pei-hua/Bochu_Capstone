@@ -4,9 +4,102 @@
 #include <QPointer>
 #include <QThread>
 
+#include <algorithm>
 #include <exception>
 #include <string>
 #include <utility>
+
+namespace {
+using Stage = CadReconstructionTask::Stage;
+struct CadWork {
+    PlyCloud cloud;
+    reconstruction::LengthUnit unit;
+    std::vector<reconstruction::TemplateHint> hints;
+    double sourceTolerance;
+    std::optional<reconstruction::SurfaceAnalysisResult> analysis;
+    std::vector<reconstruction::SurfaceRelationHint> relations;
+    bool projectionFallback;
+};
+
+void runCadWork(const CadWork& input, CadReconstructionResult& result,
+    const std::function<bool()>& cancelled, const std::function<void(Stage)>& stageChanged) {
+    const auto& [cloud, unit, hints, sourceTolerance, analysis, relations, projectionFallback] = input;
+    if (cancelled()) return;
+    const reconstruction::ObservationSnapshot source(PointCloudAdapter::toPointStore(cloud, unit));
+    result.skippedInvalidObservations = cloud.positions.size() - source.observations().size();
+    if (cancelled()) return;
+    reconstruction::PointStore points({}, unit);
+    std::string failure;
+    auto preprocessing = PointCloudAdapter::preprocessingOptionsFor(cloud);
+    // Keep every manual observation identifiable through preprocessing.
+    for (const auto& hint : hints)
+        preprocessing.protectedPointIds.insert(preprocessing.protectedPointIds.end(),
+                                               hint.points.begin(), hint.points.end());
+    if (!reconstruction::preprocessPointCloud(source, preprocessing, points,
+            result.preprocessing, failure)) {
+        result.outcome = CadReconstructionResult::Outcome::PreprocessingFailed;
+        result.error = QString::fromStdString(failure);
+        return;
+    }
+    result.preprocessingComplete = true;
+    if (cancelled()) return;
+    result.branch = hints.empty() ? CadReconstructionResult::Branch::Conventional
+                                  : CadReconstructionResult::Branch::Guided;
+    stageChanged(hints.empty() ? Stage::Recognizing : Stage::FittingTemplates);
+    auto planes=PointCloudAdapter::planeOptionsFor(points);
+    auto cylinders=PointCloudAdapter::cylinderOptionsFor(points);
+    if(sourceTolerance > 0) {
+        planes.distanceThreshold=cylinders.distanceThreshold=
+            sourceTolerance*result.preprocessing.appliedScaleToMillimeters;
+    }
+    const auto& recoverySource = source.observations();
+    reconstruction::GuidedSolidResult guided;
+    const bool recognized=reconstruction::reconstructGuidedSolid(points,planes,cylinders,hints,guided,failure,
+            cancelled, analysis ? &*analysis : nullptr,relations,&recoverySource);
+    if(cancelled())return;
+    // Decompose failed/multiple-body observations before attempting
+    // finite-shell closure. Explicit user constraints stay authoritative.
+    const size_t bodies=guided.candidate.boxes.size()+guided.candidate.prisms.size()+guided.candidate.curvedSolids.size();
+    if(hints.empty() && relations.empty() && (!recognized || bodies>1)) {
+        stageChanged(Stage::SeparatingParts);
+        reconstruction::AssemblyOptions options;
+        if (projectionFallback) options.maximumProjectionParts = 6;
+        // The decomposition estimates local noise independently of the
+        // coarse, whole-cloud detection tolerance.
+        result.assembly.emplace();std::string decompositionError;
+        if(reconstruction::reconstructAssembly(recoverySource,options,*result.assembly,decompositionError,cancelled)) {
+            result.branch = CadReconstructionResult::Branch::Assembly;
+            const auto& separated = result.assembly->candidate;
+            if(!separated.profileBodies.empty() || !separated.curvedSolids.empty() ||
+               !separated.projectionPrograms.empty()) {
+                result.partialAssembly = !result.assembly->unassignedPointIds.empty() ||
+                    std::any_of(result.assembly->parts.begin(), result.assembly->parts.end(), [](const auto& part) {
+                        return !part.closed && (!part.projection || part.projection->operations.empty());
+                    });
+                result.candidate=separated;result.analysis=std::move(guided.analysis);
+                result.outcome=CadReconstructionResult::Outcome::Success;return;
+            }
+            result.analysis=std::move(guided.analysis);
+            result.outcome=CadReconstructionResult::Outcome::Unsupported;
+            result.error=QStringLiteral("Separated %1 candidates; no verified closed solid").arg(result.assembly->parts.size());
+            return;
+        } else if(!recognized)failure += "; decomposition: "+decompositionError;
+    }
+    if (!recognized) {
+        result.analysis=std::move(guided.analysis);
+        result.analysisReused=guided.analysisReused;
+        result.outcome = CadReconstructionResult::Outcome::Unsupported;
+        result.failedRegionId = guided.failedRegionId;
+        result.error = QString::fromStdString(failure);
+        return;
+    }
+    result.candidate=std::move(guided.candidate);
+    result.analysis=std::move(guided.analysis);
+    result.analysisReused=guided.analysisReused;
+    result.templateFits=std::move(guided.fits);
+    result.outcome = CadReconstructionResult::Outcome::Success;
+}
+} // namespace
 
 CadReconstructionTask::CadReconstructionTask(QObject* parent)
     : QObject(parent)
@@ -48,82 +141,17 @@ bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit uni
     auto cancelled = std::make_shared<std::atomic_bool>(false);
     m_cancelled = cancelled;
     m_running = true;
-    m_thread = QThread::create([this, cloud = std::move(cloud), unit, result, cancelled,
-                              hints = std::move(hints), sourceTolerance, analysis = std::move(analysis),
-                              relations = std::move(relations), projectionFallback] {
+    m_thread = QThread::create([this, result, cancelled, input = CadWork{
+            std::move(cloud), unit, std::move(hints), sourceTolerance, std::move(analysis),
+            std::move(relations), projectionFallback}] {
         try {
-            if (cancelled->load()) return;
-            const auto source = PointCloudAdapter::toPointStore(cloud, unit);
-            if (cancelled->load()) return;
-            reconstruction::PointStore points({}, unit);
-            std::string failure;
-            auto preprocessing = PointCloudAdapter::preprocessingOptionsFor(cloud);
-            // Keep every manual observation identifiable through preprocessing.
-            for (const auto& hint : hints)
-                preprocessing.protectedPointIds.insert(preprocessing.protectedPointIds.end(),
-                                                       hint.points.begin(), hint.points.end());
-            if (!reconstruction::preprocessPointCloud(source, preprocessing, points,
-                    result->preprocessing, failure)) {
-                result->outcome = CadReconstructionResult::Outcome::PreprocessingFailed;
-                result->error = QString::fromStdString(failure);
-                return;
-            }
-            result->preprocessingComplete = true;
-            if (cancelled->load()) return;
-            QMetaObject::invokeMethod(this, [this, cancelled, guided = !hints.empty()] {
-                if (m_running && m_cancelled == cancelled && !cancelled->load())
-                    emit stageChanged(guided ? Stage::FittingTemplates : Stage::Recognizing);
-            }, Qt::QueuedConnection);
-            auto planes=PointCloudAdapter::planeOptionsFor(points);
-            auto cylinders=PointCloudAdapter::cylinderOptionsFor(points);
-            if(sourceTolerance > 0) {
-                planes.distanceThreshold=cylinders.distanceThreshold=
-                    sourceTolerance*result->preprocessing.appliedScaleToMillimeters;
-            }
-            auto sourceSamples=source.points();
-            const double sourceScale=result->preprocessing.appliedScaleToMillimeters;
-            for(auto& p:sourceSamples) {p.position.x*=sourceScale;p.position.y*=sourceScale;p.position.z*=sourceScale;}
-            const reconstruction::PointStore recoverySource(std::move(sourceSamples),points.unit());
-            reconstruction::GuidedSolidResult guided;
-            const bool recognized=reconstruction::reconstructGuidedSolid(points,planes,cylinders,hints,guided,failure,
-                    [cancelled] { return cancelled->load(); }, analysis ? &*analysis : nullptr,relations,&recoverySource);
-            if(cancelled->load())return;
-            // Decompose failed/multiple-body observations before attempting
-            // finite-shell closure. Explicit user constraints stay authoritative.
-            const size_t bodies=guided.candidate.boxes.size()+guided.candidate.prisms.size()+guided.candidate.curvedSolids.size();
-            if(hints.empty() && relations.empty() && (!recognized || bodies>1)) {
-                QMetaObject::invokeMethod(this,[this,cancelled]{if(m_running&&m_cancelled==cancelled&&!cancelled->load())emit stageChanged(Stage::SeparatingParts);},Qt::QueuedConnection);
-                reconstruction::AssemblyOptions options;
-                if (projectionFallback) options.maximumProjectionParts = 6;
-                // The decomposition estimates local noise independently of the
-                // coarse, whole-cloud detection tolerance.
-                result->assembly.emplace();std::string decompositionError;
-                if(reconstruction::reconstructAssembly(recoverySource,options,*result->assembly,decompositionError,[cancelled]{return cancelled->load();})) {
-                    const auto& separated=result->assembly->candidate;
-                    if(!separated.profileBodies.empty() || !separated.curvedSolids.empty() ||
-                       !separated.projectionPrograms.empty()) {
-                        result->candidate=separated;result->analysis=std::move(guided.analysis);
-                        result->outcome=CadReconstructionResult::Outcome::Success;return;
-                    }
-                    result->analysis=std::move(guided.analysis);
-                    result->outcome=CadReconstructionResult::Outcome::Unsupported;
-                    result->error=QStringLiteral("Separated %1 candidates; no verified closed solid").arg(result->assembly->parts.size());
-                    return;
-                } else if(!recognized)failure += "; decomposition: "+decompositionError;
-            }
-            if (!recognized) {
-                result->analysis=std::move(guided.analysis);
-                result->analysisReused=guided.analysisReused;
-                result->outcome = CadReconstructionResult::Outcome::Unsupported;
-                result->failedRegionId = guided.failedRegionId;
-                result->error = QString::fromStdString(failure);
-                return;
-            }
-            result->candidate=std::move(guided.candidate);
-            result->analysis=std::move(guided.analysis);
-            result->analysisReused=guided.analysisReused;
-            result->templateFits=std::move(guided.fits);
-            result->outcome = CadReconstructionResult::Outcome::Success;
+            auto reportStage = [this, cancelled](Stage stage) {
+                QMetaObject::invokeMethod(this, [this, cancelled, stage] {
+                    if (m_running && m_cancelled == cancelled && !cancelled->load())
+                        emit stageChanged(stage);
+                }, Qt::QueuedConnection);
+            };
+            runCadWork(input, *result, [cancelled] { return cancelled->load(); }, reportStage);
         } catch (const std::exception& error) {
             result->outcome = CadReconstructionResult::Outcome::Failed;
             result->error = QString::fromUtf8(error.what());

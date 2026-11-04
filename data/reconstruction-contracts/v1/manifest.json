@@ -1,0 +1,1627 @@
+{
+  "schema": "paramcad.reconstruction-contracts",
+  "version": 1,
+  "stages": {
+    "18": null,
+    "19": 18,
+    "20": 19,
+    "21": 20,
+    "22": null,
+    "23": 22,
+    "24": 23,
+    "25": 24,
+    "26": 25,
+    "27": 26,
+    "1": null,
+    "2": 1,
+    "3": 2,
+    "4": 3,
+    "5": 4,
+    "6": 4,
+    "7": 6,
+    "8": 7,
+    "9": 8,
+    "10": 9,
+    "11": 10,
+    "12": 7,
+    "13": 12,
+    "14": 7,
+    "15": 4,
+    "16": 8,
+    "17": 4,
+    "28": 27,
+    "29": 28,
+    "30": 29,
+    "31": 30,
+    "32": 31,
+    "33": 32,
+    "34": null
+  },
+  "datasets": {
+    "two_boxes": {
+      "recipe": "boxes_v1",
+      "unit": "mm",
+      "options": {
+        "tolerance": 0.02,
+        "maximum_working_points": 2304,
+        "remove_outliers": false
+      },
+      "boxes": [
+        {
+          "center": [
+            -12,
+            0,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            5
+          ]
+        },
+        {
+          "center": [
+            12,
+            4,
+            2
+          ],
+          "size": [
+            3,
+            5,
+            9
+          ]
+        }
+      ],
+      "sha256": "acd2c394410645357337166d03c32aa032f12113c28df170e3b067fd76038048"
+    },
+    "open_box": {
+      "recipe": "boxes_v1",
+      "unit": "mm",
+      "options": {
+        "tolerance": 0.02
+      },
+      "boxes": [
+        {
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            5
+          ],
+          "missing_face": 5
+        }
+      ],
+      "sha256": "d3a0b403c554c47e5f25bc5dd258f84ba2dac82ea424647d7b3390ce58a37a5c"
+    },
+    "u_channel": {
+      "recipe": "u_channel_v1",
+      "unit": "mm",
+      "options": {
+        "tolerance": 0.075,
+        "maximum_operations": 1
+      },
+      "sha256": "256ad12ac64686dcd4cc93d03025cbb5568aa19e5d90fa753db9dd51abecd75e"
+    },
+    "blind_hole": {
+      "recipe": "blind_hole_v1",
+      "unit": "mm",
+      "options": {
+        "tolerance": 0.04,
+        "maximum_operations": 2,
+        "families": [
+          "plane",
+          "cylinder"
+        ],
+        "remove_outliers": false
+      },
+      "sha256": "d1f11f15a749f1280232c5cdc62293122854e840b25b7d30072ae6b99e81dded"
+    },
+    "surface_box": {
+      "recipe": "surface_box_v1",
+      "unit": "mm",
+      "boxes": [
+        {
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            5
+          ]
+        }
+      ],
+      "options": {
+        "tolerance": 0.04,
+        "voxel_mm": 0.5,
+        "seed": 4500,
+        "protected_ids": [
+          "1"
+        ],
+        "normal_neighbors": 12,
+        "recovery_probe": [
+          0,
+          0,
+          2.5
+        ],
+        "relation_probes": [
+          [
+            0,
+            0,
+            2.5
+          ],
+          [
+            3,
+            0,
+            0
+          ]
+        ],
+        "template_z_mm": 2.5,
+        "template_region_id": 17
+      },
+      "sha256": "7c28151f3b1aca84eb013981b3c66e3f331ecf65dd699e312ac33b4dd9f23c16"
+    },
+    "surface_box_m": {
+      "recipe": "surface_box_v1",
+      "unit": "m",
+      "boxes": [
+        {
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            5
+          ]
+        }
+      ],
+      "options": {
+        "tolerance": 0.04,
+        "voxel_mm": 0.5,
+        "seed": 4500,
+        "protected_ids": [
+          "1"
+        ],
+        "normal_neighbors": 12,
+        "recovery_probe": [
+          0,
+          0,
+          2.5
+        ]
+      },
+      "outlier": false,
+      "sha256": "cf27363b402dabdc5625151e6f965825f8fc7aefafe580c8a53773e014f6ba2f"
+    },
+    "capped_cylinder": {
+      "recipe": "cylinder_v1",
+      "unit": "mm",
+      "options": {
+        "families": [
+          "plane",
+          "cylinder"
+        ],
+        "tolerance": 0.05,
+        "remove_outliers": false,
+        "minimum_support": 30,
+        "connectivity_mm": 0,
+        "seed": 4500,
+        "required_curved_kind": 1
+      },
+      "sha256": "4e7c99318b38adf11f20c84c7a165569a406d85232f4b214f5239a77a44c7f2b"
+    },
+    "open_cylinder": {
+      "recipe": "cylinder_v1",
+      "unit": "mm",
+      "options": {
+        "families": [
+          "plane",
+          "cylinder"
+        ],
+        "tolerance": 0.05,
+        "remove_outliers": false,
+        "minimum_support": 30,
+        "connectivity_mm": 0,
+        "seed": 4500,
+        "required_curved_kind": 1
+      },
+      "missing_cap": true,
+      "sha256": "25f9e757edacf9df12d79a7f1f8bb8828c645bfc4e1940acc27c22e3853d45e0"
+    },
+    "mixed_plate": {
+      "recipe": "mixed_plate_v1",
+      "unit": "mm",
+      "options": {
+        "families": [
+          "plane",
+          "cylinder"
+        ],
+        "tolerance": 0.05,
+        "remove_outliers": false,
+        "minimum_support": 30,
+        "connectivity_mm": 0,
+        "seed": 4500
+      },
+      "sha256": "92d33a1f21c422493560f10b780f1ec8a7e9d6e1385da5cd3b5d6b3bef7d6d92"
+    }
+  },
+  "fixtures": {
+    "two_boxes.m00.reference": {
+      "dataset": "two_boxes",
+      "module": 0
+    },
+    "two_boxes.m18.reference": {
+      "dataset": "two_boxes",
+      "module": 18
+    },
+    "two_boxes.m19.reference": {
+      "dataset": "two_boxes",
+      "module": 19
+    },
+    "two_boxes.m20.reference": {
+      "dataset": "two_boxes",
+      "module": 20
+    },
+    "open_box.m00.reference": {
+      "dataset": "open_box",
+      "module": 0
+    },
+    "open_box.m18.reference": {
+      "dataset": "open_box",
+      "module": 18
+    },
+    "open_box.m19.reference": {
+      "dataset": "open_box",
+      "module": 19
+    },
+    "open_box.m20.reference": {
+      "dataset": "open_box",
+      "module": 20
+    },
+    "u_channel.m00.reference": {
+      "dataset": "u_channel",
+      "module": 0
+    },
+    "u_channel.m22.reference": {
+      "dataset": "u_channel",
+      "module": 22
+    },
+    "u_channel.m23.reference": {
+      "dataset": "u_channel",
+      "module": 23
+    },
+    "u_channel.m24.reference": {
+      "dataset": "u_channel",
+      "module": 24
+    },
+    "u_channel.m25.reference": {
+      "dataset": "u_channel",
+      "module": 25
+    },
+    "u_channel.m26.reference": {
+      "dataset": "u_channel",
+      "module": 26
+    },
+    "blind_hole.m00.reference": {
+      "dataset": "blind_hole",
+      "module": 0
+    },
+    "blind_hole.m22.reference": {
+      "dataset": "blind_hole",
+      "module": 22
+    },
+    "blind_hole.m23.reference": {
+      "dataset": "blind_hole",
+      "module": 23
+    },
+    "blind_hole.m24.reference": {
+      "dataset": "blind_hole",
+      "module": 24
+    },
+    "blind_hole.m25.reference": {
+      "dataset": "blind_hole",
+      "module": 25
+    },
+    "blind_hole.m26.reference": {
+      "dataset": "blind_hole",
+      "module": 26
+    },
+    "two_boxes.m20.boundary_reference": {
+      "dataset": "two_boxes",
+      "module": 20
+    },
+    "open_box.m20.boundary_reference": {
+      "dataset": "open_box",
+      "module": 20
+    },
+    "surface_box_m.m00.reference": {
+      "dataset": "surface_box_m",
+      "module": 0
+    },
+    "surface_box.m00.reference": {
+      "dataset": "surface_box",
+      "module": 0
+    },
+    "surface_box.m01.reference": {
+      "dataset": "surface_box",
+      "module": 1
+    },
+    "surface_box.m02.reference": {
+      "dataset": "surface_box",
+      "module": 2
+    },
+    "surface_box.m03.reference": {
+      "dataset": "surface_box",
+      "module": 3
+    },
+    "surface_box.m04.reference": {
+      "dataset": "surface_box",
+      "module": 4
+    },
+    "surface_box.m06.reference": {
+      "dataset": "surface_box",
+      "module": 6
+    },
+    "surface_box.m07.reference": {
+      "dataset": "surface_box",
+      "module": 7
+    },
+    "surface_box.m08.reference": {
+      "dataset": "surface_box",
+      "module": 8
+    },
+    "surface_box.m09.reference": {
+      "dataset": "surface_box",
+      "module": 9
+    },
+    "surface_box.m10.reference": {
+      "dataset": "surface_box",
+      "module": 10
+    },
+    "blind_hole.m01.reference": {
+      "dataset": "blind_hole",
+      "module": 1
+    },
+    "blind_hole.m02.reference": {
+      "dataset": "blind_hole",
+      "module": 2
+    },
+    "blind_hole.m03.reference": {
+      "dataset": "blind_hole",
+      "module": 3
+    },
+    "blind_hole.m04.reference": {
+      "dataset": "blind_hole",
+      "module": 4
+    },
+    "blind_hole.m06.reference": {
+      "dataset": "blind_hole",
+      "module": 6
+    },
+    "blind_hole.m07.reference": {
+      "dataset": "blind_hole",
+      "module": 7
+    },
+    "blind_hole.m12.reference": {
+      "dataset": "blind_hole",
+      "module": 12
+    },
+    "two_boxes.m01.reference": {
+      "dataset": "two_boxes",
+      "module": 1
+    },
+    "two_boxes.m02.reference": {
+      "dataset": "two_boxes",
+      "module": 2
+    },
+    "two_boxes.m03.reference": {
+      "dataset": "two_boxes",
+      "module": 3
+    },
+    "two_boxes.m04.reference": {
+      "dataset": "two_boxes",
+      "module": 4
+    },
+    "capped_cylinder.m00.reference": {
+      "dataset": "capped_cylinder",
+      "module": 0
+    },
+    "capped_cylinder.m01.reference": {
+      "dataset": "capped_cylinder",
+      "module": 1
+    },
+    "capped_cylinder.m02.reference": {
+      "dataset": "capped_cylinder",
+      "module": 2
+    },
+    "capped_cylinder.m03.reference": {
+      "dataset": "capped_cylinder",
+      "module": 3
+    },
+    "capped_cylinder.m04.reference": {
+      "dataset": "capped_cylinder",
+      "module": 4
+    },
+    "capped_cylinder.m06.reference": {
+      "dataset": "capped_cylinder",
+      "module": 6
+    },
+    "capped_cylinder.m07.reference": {
+      "dataset": "capped_cylinder",
+      "module": 7
+    },
+    "open_cylinder.m00.reference": {
+      "dataset": "open_cylinder",
+      "module": 0
+    },
+    "open_cylinder.m01.reference": {
+      "dataset": "open_cylinder",
+      "module": 1
+    },
+    "open_cylinder.m02.reference": {
+      "dataset": "open_cylinder",
+      "module": 2
+    },
+    "open_cylinder.m03.reference": {
+      "dataset": "open_cylinder",
+      "module": 3
+    },
+    "open_cylinder.m04.reference": {
+      "dataset": "open_cylinder",
+      "module": 4
+    },
+    "open_cylinder.m06.reference": {
+      "dataset": "open_cylinder",
+      "module": 6
+    },
+    "open_cylinder.m07.reference": {
+      "dataset": "open_cylinder",
+      "module": 7
+    },
+    "mixed_plate.m00.reference": {
+      "dataset": "mixed_plate",
+      "module": 0
+    },
+    "mixed_plate.m01.reference": {
+      "dataset": "mixed_plate",
+      "module": 1
+    },
+    "mixed_plate.m02.reference": {
+      "dataset": "mixed_plate",
+      "module": 2
+    },
+    "mixed_plate.m03.reference": {
+      "dataset": "mixed_plate",
+      "module": 3
+    },
+    "mixed_plate.m04.reference": {
+      "dataset": "mixed_plate",
+      "module": 4
+    },
+    "mixed_plate.m06.reference": {
+      "dataset": "mixed_plate",
+      "module": 6
+    },
+    "mixed_plate.m07.reference": {
+      "dataset": "mixed_plate",
+      "module": 7
+    },
+    "mixed_plate.m12.reference": {
+      "dataset": "mixed_plate",
+      "module": 12
+    },
+    "mixed_plate.m08.reference": {
+      "dataset": "mixed_plate",
+      "module": 8
+    },
+    "blind_hole.m27.reference": {
+      "dataset": "blind_hole",
+      "module": 27
+    },
+    "blind_hole.m28.reference": {
+      "dataset": "blind_hole",
+      "module": 28
+    },
+    "blind_hole.m29.reference": {
+      "dataset": "blind_hole",
+      "module": 29
+    },
+    "blind_hole.m30.reference": {
+      "dataset": "blind_hole",
+      "module": 30
+    },
+    "blind_hole.m31.reference": {
+      "dataset": "blind_hole",
+      "module": 31
+    },
+    "blind_hole.m32.reference": {
+      "dataset": "blind_hole",
+      "module": 32
+    },
+    "surface_box.m00.active_reference": {
+      "dataset": "surface_box",
+      "module": 0,
+      "reference": "0-active"
+    }
+  },
+  "cases": [
+    {
+      "id": "m18.two_boxes.extract",
+      "module": 18,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m00.reference",
+      "metrics": {
+        "patch_count": 12,
+        "working_count": 2304
+      },
+      "partitions": {
+        "patches": "working_ids"
+      }
+    },
+    {
+      "id": "m19.two_boxes.group",
+      "module": 19,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m18.reference",
+      "metrics": {
+        "part_count": 2
+      },
+      "partitions": {
+        "parts": "working_ids"
+      }
+    },
+    {
+      "id": "m20.two_boxes.boundary",
+      "module": 20,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m19.reference",
+      "metrics": {
+        "loop_count": 12
+      },
+      "partitions": {
+        "parts": "working_ids"
+      }
+    },
+    {
+      "id": "m21.two_boxes.closure",
+      "module": 21,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m20.reference",
+      "metrics": {
+        "closed_count": 2,
+        "volume_mm3": {
+          "min": 374.99999,
+          "max": 375.00001
+        }
+      }
+    },
+    {
+      "id": "m18.open_box.extract",
+      "module": 18,
+      "dataset": "open_box",
+      "fixture": "open_box.m00.reference",
+      "metrics": {
+        "patch_count": 5,
+        "working_count": 1280
+      },
+      "partitions": {
+        "patches": "working_ids"
+      }
+    },
+    {
+      "id": "m19.open_box.group",
+      "module": 19,
+      "dataset": "open_box",
+      "fixture": "open_box.m18.reference",
+      "metrics": {
+        "part_count": 1
+      },
+      "partitions": {
+        "parts": "working_ids"
+      }
+    },
+    {
+      "id": "m20.open_box.boundary",
+      "module": 20,
+      "dataset": "open_box",
+      "fixture": "open_box.m19.reference",
+      "metrics": {
+        "loop_count": 5
+      },
+      "partitions": {
+        "parts": "working_ids"
+      }
+    },
+    {
+      "id": "m21.open_box.closure",
+      "module": 21,
+      "dataset": "open_box",
+      "fixture": "open_box.m20.reference",
+      "metrics": {
+        "closed_count": 0,
+        "volume_mm3": {
+          "min": -1e-05,
+          "max": 1e-05
+        }
+      }
+    },
+    {
+      "id": "m22.u_channel.axes",
+      "module": 22,
+      "dataset": "u_channel",
+      "fixture": "u_channel.m00.reference",
+      "metrics": {
+        "axis_count": {
+          "min": 1
+        },
+        "maximum_abs_z": {
+          "min": 0.999
+        }
+      }
+    },
+    {
+      "id": "m23.u_channel.interval",
+      "module": 23,
+      "dataset": "u_channel",
+      "fixture": "u_channel.m22.reference",
+      "metrics": {
+        "depth_mm": {
+          "min": 5.95,
+          "max": 6.05
+        },
+        "abs_z": {
+          "min": 0.999
+        }
+      }
+    },
+    {
+      "id": "m24.u_channel.profile",
+      "module": 24,
+      "dataset": "u_channel",
+      "fixture": "u_channel.m23.reference",
+      "metrics": {
+        "linear_profile_area_mm2": {
+          "min": 88,
+          "max": 96
+        }
+      }
+    },
+    {
+      "id": "m25.u_channel.proposals",
+      "module": 25,
+      "dataset": "u_channel",
+      "fixture": "u_channel.m24.reference",
+      "metrics": {
+        "base_count": {
+          "min": 1
+        },
+        "secondary_count": 0
+      }
+    },
+    {
+      "id": "m26.u_channel.score",
+      "module": 26,
+      "dataset": "u_channel",
+      "fixture": "u_channel.m25.reference",
+      "metrics": {
+        "volume_mm3": {
+          "min": 528,
+          "max": 576
+        },
+        "inlier_fraction": {
+          "min": 0.9
+        },
+        "p95_mm": {
+          "max": 0.225
+        }
+      }
+    },
+    {
+      "id": "m27.u_channel.search",
+      "module": 27,
+      "dataset": "u_channel",
+      "fixture": "u_channel.m26.reference",
+      "metrics": {
+        "accepted": true,
+        "operation_count": 1,
+        "volume_mm3": {
+          "min": 528,
+          "max": 576
+        }
+      }
+    },
+    {
+      "id": "m22.blind_hole.axes",
+      "module": 22,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m00.reference",
+      "metrics": {
+        "axis_count": {
+          "min": 1
+        },
+        "maximum_abs_z": {
+          "min": 0.999
+        }
+      }
+    },
+    {
+      "id": "m23.blind_hole.interval",
+      "module": 23,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m22.reference",
+      "metrics": {
+        "depth_mm": {
+          "min": 7.95,
+          "max": 8.05
+        },
+        "abs_z": {
+          "min": 0.999
+        }
+      }
+    },
+    {
+      "id": "m24.blind_hole.profile",
+      "module": 24,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m23.reference",
+      "metrics": {
+        "linear_profile_area_mm2": {
+          "min": 47,
+          "max": 49
+        }
+      }
+    },
+    {
+      "id": "m25.blind_hole.proposals",
+      "module": 25,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m24.reference",
+      "metrics": {
+        "base_count": {
+          "min": 1
+        },
+        "secondary_count": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "id": "m26.blind_hole.score",
+      "module": 26,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m25.reference",
+      "metrics": {
+        "volume_mm3": {
+          "min": 370,
+          "max": 395
+        },
+        "valid_program_count": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "id": "m27.blind_hole.search",
+      "module": 27,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m26.reference",
+      "metrics": {
+        "accepted": true,
+        "operation_count": 2,
+        "volume_mm3": {
+          "min": 355,
+          "max": 357
+        }
+      }
+    },
+    {
+      "id": "m19.two_boxes.backfill",
+      "dataset": "two_boxes",
+      "module": 19,
+      "phase": "backfill",
+      "fixture": "two_boxes.m20.boundary_reference",
+      "metrics": {
+        "unassigned_source_count": {
+          "min": 0,
+          "max": 3
+        }
+      },
+      "partitions": {
+        "parts": "source_ids"
+      },
+      "allow_unassigned_source": true
+    },
+    {
+      "id": "m19.open_box.backfill",
+      "dataset": "open_box",
+      "module": 19,
+      "phase": "backfill",
+      "fixture": "open_box.m20.boundary_reference",
+      "metrics": {
+        "unassigned_source_count": 0
+      },
+      "partitions": {
+        "parts": "source_ids"
+      }
+    },
+    {
+      "id": "m01.surface_box_m.units",
+      "module": 1,
+      "dataset": "surface_box_m",
+      "fixture": "surface_box_m.m00.reference",
+      "metrics": {
+        "points": 1536,
+        "scale_to_mm": 1000,
+        "skipped_rows": 0,
+        "span_x_mm": {
+          "min": 5.99999,
+          "max": 6.00001
+        },
+        "span_y_mm": {
+          "min": 7.99999,
+          "max": 8.00001
+        }
+      },
+      "point_ids": {
+        "point_ids": {
+          "required": [
+            "1",
+            "1536"
+          ]
+        }
+      }
+    },
+    {
+      "id": "m01.surface_box.import",
+      "module": 1,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m00.reference",
+      "metrics": {
+        "points": 1537,
+        "scale_to_mm": 1,
+        "skipped_rows": 0
+      }
+    },
+    {
+      "id": "m02.surface_box.voxel",
+      "module": 2,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m01.reference",
+      "metrics": {
+        "removed": {
+          "min": 1
+        },
+        "points": {
+          "min": 300,
+          "max": 1500
+        }
+      },
+      "point_ids": {
+        "point_ids": {
+          "required": [
+            "1"
+          ]
+        }
+      }
+    },
+    {
+      "id": "m03.surface_box.outliers",
+      "module": 3,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m02.reference",
+      "metrics": {
+        "removed": {
+          "min": 1
+        },
+        "points": {
+          "min": 300
+        }
+      },
+      "point_ids": {
+        "point_ids": {
+          "required": [
+            "1"
+          ],
+          "excluded": [
+            "1537"
+          ]
+        }
+      }
+    },
+    {
+      "id": "m04.surface_box.normals",
+      "module": 4,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m03.reference",
+      "metrics": {
+        "normals_estimated": {
+          "min": 1
+        },
+        "oriented": {
+          "min": 300
+        }
+      }
+    },
+    {
+      "id": "m05.surface_box.detect",
+      "module": 5,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m04.reference",
+      "metrics": {
+        "surface_count": 6,
+        "passes": 1
+      }
+    },
+    {
+      "id": "m06.surface_box.collect",
+      "module": 6,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m04.reference",
+      "metrics": {
+        "surface_count": 6,
+        "passes": 1
+      }
+    },
+    {
+      "id": "m07.surface_box.patches",
+      "module": 7,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m06.reference",
+      "metrics": {
+        "patch_count": 6
+      }
+    },
+    {
+      "id": "m08.surface_box.relations",
+      "module": 8,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m07.reference",
+      "metrics": {
+        "parallel_count": 3,
+        "perpendicular_count": 12,
+        "manual_hint_accepted": true,
+        "conflicting_hint_rejected": true
+      }
+    },
+    {
+      "id": "m09.surface_box.optimize",
+      "module": 9,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m08.reference",
+      "metrics": {
+        "accepted_count": {
+          "min": 1
+        },
+        "after_error": {
+          "max": 0.01
+        }
+      }
+    },
+    {
+      "id": "m10.surface_box.retrieve",
+      "module": 10,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m09.reference",
+      "metrics": {
+        "recovered_count": {
+          "min": 1
+        },
+        "local_surface_count": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "id": "m11.surface_box.revalidate",
+      "module": 11,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m10.reference",
+      "metrics": {
+        "accepted": true,
+        "box_count": 1,
+        "added_count": {
+          "min": 1
+        },
+        "mapping_count": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "id": "m01.blind_hole.import",
+      "module": 1,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m00.reference",
+      "metrics": {
+        "points": 5750
+      }
+    },
+    {
+      "id": "m02.blind_hole.voxel",
+      "module": 2,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m01.reference",
+      "metrics": {
+        "points": 5750,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m03.blind_hole.filter",
+      "module": 3,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m02.reference",
+      "metrics": {
+        "points": 5750,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m04.blind_hole.normals",
+      "module": 4,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m03.reference",
+      "metrics": {
+        "oriented": 5750
+      }
+    },
+    {
+      "id": "m05.blind_hole.detect_families",
+      "module": 5,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m04.reference",
+      "metrics": {
+        "cylinder_count": {
+          "min": 1
+        },
+        "passes": 1
+      }
+    },
+    {
+      "id": "m06.blind_hole.collect_families",
+      "module": 6,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m04.reference",
+      "metrics": {
+        "cylinder_count": {
+          "min": 1
+        },
+        "passes": 2
+      }
+    },
+    {
+      "id": "m12.surface_box.box",
+      "module": 12,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m07.reference",
+      "metrics": {
+        "recognized": true,
+        "box_count": 1,
+        "box_volume_mm3": {
+          "min": 239.99,
+          "max": 240.01
+        }
+      }
+    },
+    {
+      "id": "m17.surface_box.guided_plane",
+      "module": 17,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m04.reference",
+      "metrics": {
+        "recognized": true,
+        "box_count": 1,
+        "template_fit_count": 1,
+        "failed_region": 0,
+        "template_support": {
+          "min": 20
+        },
+        "surface_coverage": {
+          "min": 0.98
+        }
+      }
+    },
+    {
+      "id": "m07.blind_hole.patches",
+      "module": 7,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m06.reference",
+      "metrics": {
+        "patch_count": {
+          "min": 7
+        }
+      }
+    },
+    {
+      "id": "m12.blind_hole.host",
+      "module": 12,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m07.reference",
+      "metrics": {
+        "recognized": true,
+        "box_count": 1,
+        "box_volume_mm3": {
+          "min": 383.95,
+          "max": 384.05
+        }
+      }
+    },
+    {
+      "id": "m13.blind_hole.reject_short_wall",
+      "module": 13,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m12.reference",
+      "metrics": {
+        "recognized": true,
+        "hole_count": 0,
+        "wall_count": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "id": "m01.two_boxes.import",
+      "module": 1,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m00.reference",
+      "metrics": {
+        "points": 3072,
+        "scale_to_mm": 1,
+        "skipped_rows": 0
+      }
+    },
+    {
+      "id": "m02.two_boxes.voxel",
+      "module": 2,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m01.reference",
+      "metrics": {
+        "points": 3072,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m03.two_boxes.filter",
+      "module": 3,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m02.reference",
+      "metrics": {
+        "points": 3072,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m04.two_boxes.normals",
+      "module": 4,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m03.reference",
+      "metrics": {
+        "oriented": 3072,
+        "normals_estimated": 0
+      }
+    },
+    {
+      "id": "m15.two_boxes.compound",
+      "module": 15,
+      "dataset": "two_boxes",
+      "fixture": "two_boxes.m04.reference",
+      "metrics": {
+        "recognized": true,
+        "box_count": 2,
+        "prism_count": 0,
+        "box_volume_mm3": {
+          "min": 374.99,
+          "max": 375.01
+        },
+        "minimum_box_count_proven": true
+      }
+    },
+    {
+      "id": "m01.capped_cylinder.import",
+      "module": 1,
+      "dataset": "capped_cylinder",
+      "fixture": "capped_cylinder.m00.reference",
+      "metrics": {
+        "points": 2880,
+        "scale_to_mm": 1,
+        "skipped_rows": 0
+      }
+    },
+    {
+      "id": "m02.capped_cylinder.voxel",
+      "module": 2,
+      "dataset": "capped_cylinder",
+      "fixture": "capped_cylinder.m01.reference",
+      "metrics": {
+        "points": 2880,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m03.capped_cylinder.filter",
+      "module": 3,
+      "dataset": "capped_cylinder",
+      "fixture": "capped_cylinder.m02.reference",
+      "metrics": {
+        "points": 2880,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m04.capped_cylinder.normals",
+      "module": 4,
+      "dataset": "capped_cylinder",
+      "fixture": "capped_cylinder.m03.reference",
+      "metrics": {
+        "oriented": 2880,
+        "normals_estimated": 0
+      }
+    },
+    {
+      "id": "m06.capped_cylinder.collect",
+      "module": 6,
+      "dataset": "capped_cylinder",
+      "fixture": "capped_cylinder.m04.reference",
+      "metrics": {
+        "cylinder_count": {
+          "min": 1
+        },
+        "passes": 2
+      }
+    },
+    {
+      "id": "m07.capped_cylinder.patches",
+      "module": 7,
+      "dataset": "capped_cylinder",
+      "fixture": "capped_cylinder.m06.reference",
+      "metrics": {
+        "patch_count": {
+          "min": 3
+        }
+      }
+    },
+    {
+      "id": "m14.capped_cylinder.cylinder",
+      "module": 14,
+      "dataset": "capped_cylinder",
+      "fixture": "capped_cylinder.m07.reference",
+      "metrics": {
+        "recognized": true,
+        "curved_count": 1,
+        "radius_mm": {
+          "min": 2.99,
+          "max": 3.01
+        },
+        "height_mm": {
+          "min": 7.99,
+          "max": 8.01
+        },
+        "boundary_coverage": {
+          "min": 0.9
+        }
+      }
+    },
+    {
+      "id": "m01.open_cylinder.import",
+      "module": 1,
+      "dataset": "open_cylinder",
+      "fixture": "open_cylinder.m00.reference",
+      "metrics": {
+        "points": 2016,
+        "scale_to_mm": 1,
+        "skipped_rows": 0
+      }
+    },
+    {
+      "id": "m02.open_cylinder.voxel",
+      "module": 2,
+      "dataset": "open_cylinder",
+      "fixture": "open_cylinder.m01.reference",
+      "metrics": {
+        "points": 2016,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m03.open_cylinder.filter",
+      "module": 3,
+      "dataset": "open_cylinder",
+      "fixture": "open_cylinder.m02.reference",
+      "metrics": {
+        "points": 2016,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m04.open_cylinder.normals",
+      "module": 4,
+      "dataset": "open_cylinder",
+      "fixture": "open_cylinder.m03.reference",
+      "metrics": {
+        "oriented": 2016,
+        "normals_estimated": 0
+      }
+    },
+    {
+      "id": "m06.open_cylinder.collect",
+      "module": 6,
+      "dataset": "open_cylinder",
+      "fixture": "open_cylinder.m04.reference",
+      "metrics": {
+        "cylinder_count": {
+          "min": 1
+        },
+        "passes": 2
+      }
+    },
+    {
+      "id": "m07.open_cylinder.patches",
+      "module": 7,
+      "dataset": "open_cylinder",
+      "fixture": "open_cylinder.m06.reference",
+      "metrics": {
+        "patch_count": {
+          "min": 2
+        }
+      }
+    },
+    {
+      "id": "m14.open_cylinder.reject_missing_cap",
+      "module": 14,
+      "dataset": "open_cylinder",
+      "fixture": "open_cylinder.m07.reference",
+      "metrics": {
+        "recognized": false,
+        "curved_count": 0
+      }
+    },
+    {
+      "id": "m01.mixed_plate.import",
+      "module": 1,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m00.reference",
+      "metrics": {
+        "points": 26072,
+        "scale_to_mm": 1,
+        "skipped_rows": 0
+      }
+    },
+    {
+      "id": "m02.mixed_plate.voxel",
+      "module": 2,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m01.reference",
+      "metrics": {
+        "points": 26072,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m03.mixed_plate.filter",
+      "module": 3,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m02.reference",
+      "metrics": {
+        "points": 26072,
+        "removed": 0
+      }
+    },
+    {
+      "id": "m04.mixed_plate.normals",
+      "module": 4,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m03.reference",
+      "metrics": {
+        "oriented": 26072,
+        "normals_estimated": 0
+      }
+    },
+    {
+      "id": "m06.mixed_plate.collect",
+      "module": 6,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m04.reference",
+      "metrics": {
+        "cylinder_count": {
+          "min": 2
+        },
+        "passes": 2
+      }
+    },
+    {
+      "id": "m07.mixed_plate.patches",
+      "module": 7,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m06.reference",
+      "metrics": {
+        "patch_count": {
+          "min": 8
+        }
+      }
+    },
+    {
+      "id": "m08.mixed_plate.relations",
+      "module": 8,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m07.reference",
+      "metrics": {
+        "parallel_count": {
+          "min": 3
+        },
+        "perpendicular_count": {
+          "min": 12
+        }
+      }
+    },
+    {
+      "id": "m12.mixed_plate.host",
+      "module": 12,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m07.reference",
+      "metrics": {
+        "recognized": true,
+        "box_count": 1,
+        "box_volume_mm3": {
+          "min": 47997,
+          "max": 48003
+        }
+      }
+    },
+    {
+      "id": "m13.mixed_plate.through_hole",
+      "module": 13,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m12.reference",
+      "metrics": {
+        "recognized": true,
+        "hole_count": 1,
+        "wall_count": {
+          "min": 2
+        },
+        "hole_radius_mm": {
+          "min": 6.975,
+          "max": 7.025
+        },
+        "body_thickness_mm": {
+          "min": 4.98,
+          "max": 5.02
+        }
+      }
+    },
+    {
+      "id": "m16.mixed_plate.mixed_features",
+      "module": 16,
+      "dataset": "mixed_plate",
+      "fixture": "mixed_plate.m08.reference",
+      "metrics": {
+        "recognized": true,
+        "box_count": 1,
+        "hole_count": 1,
+        "curved_count": 1,
+        "prism_count": 0,
+        "surface_coverage": {
+          "min": 0.98
+        }
+      }
+    },
+    {
+      "id": "m28.blind_hole.plan",
+      "module": 28,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m27.reference",
+      "metrics": {
+        "command_count": 4,
+        "scoped_cuts": 1,
+        "source_revision": 0
+      }
+    },
+    {
+      "id": "m29.blind_hole.profiles",
+      "module": 29,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m28.reference",
+      "metrics": {
+        "face_count": 2,
+        "area_mm2": {
+          "min": 54.9,
+          "max": 55.25
+        }
+      }
+    },
+    {
+      "id": "m30.blind_hole.rebuild",
+      "module": 30,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m29.reference",
+      "metrics": {
+        "solid_count": 1,
+        "volume_mm3": {
+          "min": 355.52566611769186,
+          "max": 355.92566611769183
+        },
+        "feature_count": 4
+      }
+    },
+    {
+      "id": "m31.blind_hole.atomic_commit",
+      "module": 31,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m30.reference",
+      "metrics": {
+        "solid_count": 1,
+        "volume_mm3": {
+          "min": 355.52566611769186,
+          "max": 355.92566611769183
+        },
+        "rollback_verified": true,
+        "stale_plan_rejected": true,
+        "revision": 1,
+        "affected_count": 4
+      }
+    },
+    {
+      "id": "m32.blind_hole.pcad_roundtrip",
+      "module": 32,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m31.reference",
+      "metrics": {
+        "solid_count": 1,
+        "volume_mm3": {
+          "min": 355.52566611769186,
+          "max": 355.92566611769183
+        },
+        "features_preserved": true,
+        "feature_count": 4
+      }
+    },
+    {
+      "id": "m33.blind_hole.step_roundtrip",
+      "module": 33,
+      "dataset": "blind_hole",
+      "fixture": "blind_hole.m32.reference",
+      "metrics": {
+        "solid_count": 1,
+        "volume_mm3": {
+          "min": 355.52566611769186,
+          "max": 355.92566611769183
+        },
+        "solid_count_preserved": true,
+        "material_iou": {
+          "min": 0.99999
+        }
+      }
+    },
+    {
+      "id": "m34.surface_box.production",
+      "module": 34,
+      "dataset": "surface_box",
+      "fixture": "surface_box.m00.active_reference",
+      "metrics": {
+        "branch": "conventional",
+        "cancelled": true,
+        "owner_thread_delivery": true,
+        "partial_assembly": false,
+        "committed_revision": 1,
+        "feature_count": 1,
+        "volume_mm3": {
+          "min": 239.95,
+          "max": 240.05
+        }
+      }
+    }
+  ],
+  "bridges": {
+    "21": {
+      "module": 19,
+      "phase": "backfill"
+    }
+  }
+}

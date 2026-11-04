@@ -85,7 +85,6 @@ struct SurfaceAnalysisResult {
     std::vector<SurfaceIdMapping> repairMappings, repairPatchMappings;
 };
 
-std::uint64_t pointStoreFingerprint(const PointStore& points) noexcept;
 bool analysisInputMatches(const PointStore& points, const SurfaceAnalysisResult& analysis) noexcept;
 bool materializeAnalysisPoints(const PointStore& base, const SurfaceAnalysisResult& analysis,
                               PointStore& output, std::string& error);
@@ -105,6 +104,24 @@ bool inferSurfaceRelations(const PointStore& points, const std::vector<RelationS
 // entering recognition. They do not move geometry or silently override data.
 bool applySurfaceRelationHints(const PointStore& points, const std::vector<SurfaceRelationHint>& hints,
                               SurfaceAnalysisResult& analysis, std::string& error);
+struct SurfaceEvidenceCollection {
+    std::vector<PrimitiveEvidence> evidence;
+    std::vector<PointId> unassignedPointIds;
+    std::size_t detectionPasses = 0;
+};
+
+// Collects multi-family evidence and merges explicit seeds before indexing.
+bool collectSurfaceEvidence(const PointStore& points, const SurfaceAnalysisOptions& options,
+    SurfaceEvidenceCollection& output, std::string& error,
+    const std::vector<PrimitiveEvidence>& seeds = {}, const std::function<bool()>& cancelled = {});
+
+// Builds the observation patches and their surface references.
+bool indexSurfacePatches(const PointStore& points, const std::vector<PrimitiveEvidence>& evidence,
+    const SurfaceAnalysisOptions& options, SurfaceAnalysisResult& output, std::string& error);
+// Infers relations from a supplied patch index in the same observation snapshot.
+bool inferPatchRelations(const PointStore& points, const SurfaceAnalysisResult& index,
+    std::vector<SurfaceRelation>& output, std::string& error);
+
 // Build from detected/manual evidence, without invoking a detector. Overlapping
 // candidate supports are retained; this function does not force unique labels.
 bool indexSurfaceEvidence(const PointStore& points, const std::vector<PrimitiveEvidence>& evidence,
@@ -113,6 +130,18 @@ bool indexSurfaceEvidence(const PointStore& points, const std::vector<PrimitiveE
 // Transactional, observation-bounded optimization of a feasible relation subset.
 bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& analysis,
     const std::vector<SurfaceRelation>& proposals, RelationOptimizationReport& report, std::string& error);
+struct LocalObservationRecovery {
+    PointStore observations{std::vector<PointSample>{}};
+    std::vector<PointId> recoveredPointIds;
+    std::uint64_t sourceFingerprint = 0;
+    double searchHalo = 0;
+};
+
+// Uses the default tolerance-derived halo when none is supplied.
+bool retrieveLocalObservations(const PointStore& working, const PointStore& source,
+    const SurfaceAnalysisResult& analysis, const std::vector<PointId>& regionIds,
+    LocalObservationRecovery& output, std::string& error, std::optional<double> searchHalo = {});
+
 // Source must use the same coordinate frame and units as the working cloud.
 // Only actual source samples inside the failed region (plus tolerance halo) are retrieved.
 bool recoverLocalSurfaces(const PointStore& working, const PointStore& source,

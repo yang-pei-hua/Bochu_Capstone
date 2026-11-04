@@ -32,42 +32,26 @@ bool validOptions(
 
 namespace reconstruction {
 using namespace detail::preprocessing;
-bool preprocessPointCloud(
-    const PointStore& input,
-    const PointCloudPreprocessingOptions& options,
-    PointStore& output,
-    PointCloudPreprocessingReport& report,
-    std::string& error) {
+namespace {
+bool validateInput(const PointStore& input, const PointCloudPreprocessingOptions& options,
+    PointCloudPreprocessingReport& report, std::string& error) {
     report = {};
     error.clear();
-    if (!validOptions(options, error)) {
-        return false;
-    }
+    if (!validOptions(options, error)) return false;
     if (input.empty()) {
         error = "Point-cloud preprocessing requires at least one point";
         return false;
     }
+    return true;
+}
 
+bool preprocessInFrame(const PointStore& input, double scale,
+    const PointCloudPreprocessingOptions& options, PointStore& output,
+    PointCloudPreprocessingReport& report, std::string& error) {
     report.inputPointCount = input.size();
+    report.appliedScaleToMillimeters = scale;
     std::vector<PointSample> points = input.points();
-    LengthUnit outputUnit = input.unit();
-    if (options.convertKnownUnitsToMillimeters) {
-        const std::optional<double> scale = millimetersPerUnit(input.unit());
-        if (scale.has_value()) {
-            report.appliedScaleToMillimeters = *scale;
-            if (*scale != 1.0) {
-                for (PointSample& point : points) {
-                    point.position = math3::scale(point.position, *scale);
-                }
-            }
-            outputUnit = LengthUnit::Millimeter;
-        }
-    }
-
-    double voxelSize = options.voxelSize;
-    if (input.unit() == LengthUnit::Meter && outputUnit == LengthUnit::Millimeter) {
-        voxelSize *= 1000.0;
-    }
+    const double voxelSize = options.voxelSize * scale;
     const std::unordered_set<PointId> protectedIds(options.protectedPointIds.begin(),
                                                  options.protectedPointIds.end());
     points = voxelDownsample(points, voxelSize, protectedIds);
@@ -82,7 +66,33 @@ bool preprocessPointCloud(
         return false;
     }
 
-    output = PointStore(std::move(points), outputUnit);
+    output = PointStore(std::move(points), input.unit());
     return true;
+}
+} // namespace
+
+bool preprocessPointCloud(
+    const PointStore& input,
+    const PointCloudPreprocessingOptions& options,
+    PointStore& output,
+    PointCloudPreprocessingReport& report,
+    std::string& error) {
+    if (!validateInput(input, options, report, error)) return false;
+    if (!options.convertKnownUnitsToMillimeters || input.unit() != LengthUnit::Meter)
+        return preprocessInFrame(input, 1.0, options, output, report, error);
+    const ObservationSnapshot snapshot(input);
+    return preprocessInFrame(snapshot.observations(), snapshot.sourceToWorkingScale(),
+        options, output, report, error);
+}
+
+bool preprocessPointCloud(
+    const ObservationSnapshot& input,
+    const PointCloudPreprocessingOptions& options,
+    PointStore& output,
+    PointCloudPreprocessingReport& report,
+    std::string& error) {
+    if (!validateInput(input.observations(), options, report, error)) return false;
+    return preprocessInFrame(input.observations(), input.sourceToWorkingScale(),
+        options, output, report, error);
 }
 } // namespace reconstruction

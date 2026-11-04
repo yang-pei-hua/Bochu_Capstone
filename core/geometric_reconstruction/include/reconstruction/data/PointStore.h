@@ -52,4 +52,24 @@ private:
     LengthUnit unit_;
 };
 
+// Identifies the point order, unit, IDs, positions and normal evidence.
+std::uint64_t pointStoreFingerprint(const PointStore& points) noexcept;
+
+// Full-resolution observations in the reconstruction frame. The only
+// coordinate transform is uniform scaling, and point IDs are preserved.
+class ObservationSnapshot {
+public:
+    explicit ObservationSnapshot(PointStore source, bool convertKnownUnits = true);
+
+    const PointStore& observations() const noexcept { return observations_; }
+    LengthUnit sourceUnit() const noexcept { return sourceUnit_; }
+    double sourceToWorkingScale() const noexcept { return scale_; }
+    std::uint64_t fingerprint() const noexcept { return pointStoreFingerprint(observations_); }
+
+private:
+    LengthUnit sourceUnit_;
+    double scale_;
+    PointStore observations_;
+};
+
 }  // namespace reconstruction

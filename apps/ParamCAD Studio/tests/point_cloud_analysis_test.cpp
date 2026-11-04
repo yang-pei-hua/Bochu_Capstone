@@ -38,12 +38,20 @@ int main(int argc, char** argv)
         invalid.positions.insert(invalid.positions.begin(),{std::numeric_limits<float>::quiet_NaN(),0,0});
         invalid.normals.insert(invalid.normals.begin(),{0,0,1});
         std::vector<vtkIdType> original;
-        for(size_t i=0;i<invalid.positions.size();++i) original.push_back(static_cast<vtkIdType>(i+500));
+        for (std::size_t i = 0; i < invalid.positions.size(); ++i) {
+            const auto sourceRow = 2 * i + 500;
+            invalid.sourceRows.push_back(sourceRow);
+            original.push_back(static_cast<vtkIdType>(sourceRow));
+        }
         const auto finiteResult=analysePointCloud(invalid,original,0.01);
         require(finiteResult.error.isEmpty() && finiteResult.assignedPoints==cloud.positions.size(),
                 "invalid source rows do not shift support IDs");
-        for(const auto& surface:finiteResult.surfaces) for(auto id:surface.points)
-            require(id>500,"non-finite original observation is never assigned");
+        for (const auto& surface : finiteResult.surfaces)
+            for (const auto id : surface.points)
+                require(id > 500 && id % 2 == 0, "memberships use surviving original rows");
+        for (const auto& patch : finiteResult.analysis.patches)
+            for (const auto id : patch.supportPointIds)
+                require(id > 501 && id % 2 == 1, "evidence keeps sparse one-based source IDs");
         PlyCloud dense;
         for(int repeat=0;repeat<24;++repeat) {
             dense.positions.insert(dense.positions.end(),cloud.positions.begin(),cloud.positions.end());

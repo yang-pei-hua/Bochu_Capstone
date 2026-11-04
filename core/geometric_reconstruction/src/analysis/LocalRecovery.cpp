@@ -11,21 +11,22 @@ const char* localFailureReasonName(LocalFailureReason reason) noexcept {
     }
     return "unknown";
 }
-bool recoverLocalSurfaces(const PointStore& working, const PointStore& source,
-    const SurfaceAnalysisResult& analysis, LocalAnalysisFailure& failure,
-    PointStore& local, SurfaceAnalysisResult& repaired, std::string& error) {
-    error.clear(); repaired={}; failure.repaired=false;
-    failure.observations.clear();
-    failure.recoveredPointIds.clear(); failure.repairedCandidates.clear();failure.candidates.clear();
-    failure.repairedPatches.clear();failure.repairedRelations.clear();failure.rejectedRelations.clear();
-    failure.sourceFingerprint=0;failure.localFingerprint=0;failure.detectionPasses=0;
+bool retrieveLocalObservations(const PointStore& working, const PointStore& source,
+    const SurfaceAnalysisResult& analysis, const std::vector<PointId>& regionIds,
+    LocalObservationRecovery& output, std::string& error, std::optional<double> searchHalo) {
+    output = {};
+    error.clear();
+    if (searchHalo && (!std::isfinite(*searchHalo) || *searchHalo < 0)) {
+        error = "Recovery search halo must be finite and non-negative";
+        return false;
+    }
     if(!analysisMatches(working,analysis) || working.unit()!=source.unit()) {
         error="Recovery requires matching working snapshot and source units"; return false;
     }
     const auto map=pointMap(working);
     Vec3 lo{INFINITY,INFINITY,INFINITY},hi{-INFINITY,-INFINITY,-INFINITY};
     std::unordered_set<PointId> region;
-    for(auto id:failure.pointIds) {
+    for(auto id:regionIds) {
         auto it=map.find(id);
         if(it==map.end()) {error="Foreign recovery point ID";return false;}
         region.insert(id); const auto p=it->second->position;
@@ -42,12 +43,14 @@ bool recoverLocalSurfaces(const PointStore& working, const PointStore& source,
         }
     }
     if(verified.size()!=region.size()) {error="Recovery source does not contain failed-region observations";return false;}
-    failure.sourceFingerprint=pointStoreFingerprint(source);
+    output.sourceFingerprint=pointStoreFingerprint(source);
     // The working observations (including estimated signed normals) win on ID.
     std::vector<PointSample> samples;
     for(const auto& p:working.points()) if(region.count(p.id)) samples.push_back(p);
     const double tolerance=analysis.options.detection.plane.distanceThreshold;
-    const double halo=region.size()<20 ? std::max(tolerance*2,analysis.options.relations.distanceTolerance*16) : tolerance*2;
+    const double halo = searchHalo.value_or(region.size() < 20
+        ? std::max(tolerance*2, analysis.options.relations.distanceTolerance*16) : tolerance*2);
+    output.searchHalo = halo;
     std::vector<PlaneEvidence> stablePlanes;
     for(const auto& e:analysis.surfaces)if(const auto* plane=std::get_if<PlaneEvidence>(&e)) {
         std::size_t overlap=0;for(auto id:plane->supportPointIds)overlap+=region.count(id);
@@ -66,7 +69,7 @@ bool recoverLocalSurfaces(const PointStore& working, const PointStore& source,
             if(surfaceResidual(plane,q)<=tolerance*2 && std::abs(dot(normalized(*observation.normal),normalized(plane.plane.normal)))>=0.95) {stableObservation=true;break;}
         }
         if(stableObservation)continue;
-        samples.push_back(observation); failure.recoveredPointIds.push_back(p.id);
+        samples.push_back(observation); output.recoveredPointIds.push_back(p.id);
     }
     if(region.size()<20 && samples.size()>region.size()) {
         PointStore neighborhood(samples,working.unit());std::vector<PointId> available;
@@ -76,10 +79,28 @@ bool recoverLocalSurfaces(const PointStore& working, const PointStore& source,
             if(std::any_of(component.begin(),component.end(),[&](auto id){return region.count(id)>0;}))connected.insert(component.begin(),component.end());
         }
         samples.erase(std::remove_if(samples.begin(),samples.end(),[&](const auto& p){return !connected.count(p.id);}),samples.end());
-        auto& recovered=failure.recoveredPointIds;
+        auto& recovered=output.recoveredPointIds;
         recovered.erase(std::remove_if(recovered.begin(),recovered.end(),[&](auto id){return !connected.count(id);}),recovered.end());
     }
-    local=PointStore(std::move(samples),working.unit());
+    output.observations = PointStore(std::move(samples), working.unit());
+    return true;
+}
+
+bool recoverLocalSurfaces(const PointStore& working, const PointStore& source,
+    const SurfaceAnalysisResult& analysis, LocalAnalysisFailure& failure,
+    PointStore& local, SurfaceAnalysisResult& repaired, std::string& error) {
+    error.clear(); repaired={}; failure.repaired=false;
+    failure.observations.clear();
+    failure.recoveredPointIds.clear(); failure.repairedCandidates.clear();failure.candidates.clear();
+    failure.repairedPatches.clear();failure.repairedRelations.clear();failure.rejectedRelations.clear();
+    failure.sourceFingerprint=0;failure.localFingerprint=0;failure.detectionPasses=0;
+    LocalObservationRecovery retrieved;
+    if (!retrieveLocalObservations(working, source, analysis, failure.pointIds, retrieved, error))
+        return false;
+    failure.sourceFingerprint = retrieved.sourceFingerprint;
+    failure.recoveredPointIds = std::move(retrieved.recoveredPointIds);
+    local = std::move(retrieved.observations);
+    const std::unordered_set<PointId> region(failure.pointIds.begin(), failure.pointIds.end());
     failure.candidates.clear();
     std::vector<PrimitiveEvidence> retained;
     for(auto e:analysis.surfaces) {

@@ -21,6 +21,10 @@ def read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def observed_patch(patch):
+    return {**patch, **patch.get("boundary_before_closure", {})}
+
+
 def projected(loop, patch):
     coordinates = np.asarray(loop, dtype=float) - patch["origin_mm"]
     x = np.asarray(patch["x_direction"])
@@ -53,7 +57,7 @@ def crosses_itself(polygon):
 
 def metrics(directory: Path, input_points: int) -> dict:
     data = read(directory / "parts.json")
-    patches = {p["id"]: p for p in data["patches"]}
+    patches = {p["id"]: observed_patch(p) for p in data["patches"]}
     parts = data["parts"]
     owner = {i: part for part in parts for i in part["patch_ids"]}
     segment_count = closed_segments = loops = sharp_turns = self_crossing = 0
@@ -97,6 +101,8 @@ def metrics(directory: Path, input_points: int) -> dict:
         # Historical name retained for saved reports. These are all raw patch
         # edges, before viewport deduplication and selection filtering.
         "display_segments": segment_count, "raw_boundary_segments": segment_count,
+        "boundary_basis": "observed" if "unassigned_working_points" in data["summary"] else "legacy",
+        "closure_boundary_segments": sum(len(loop) for p in data["patches"] for loop in p["boundary_loops_mm"]),
         "closed_candidate_segments": closed_segments,
         "open_candidate_segments": segment_count-closed_segments,
         "boundary_loops": loops,
@@ -143,7 +149,7 @@ def plot_boundaries(cases, destination):
     figure = plt.figure(figsize=(16, 12), layout="constrained")
     for index, case in enumerate(cases):
         data = read(Path(case["baseline_directory"]) / "parts.json")
-        patches = {p["id"]: p for p in data["patches"]}
+        patches = {p["id"]: observed_patch(p) for p in data["patches"]}
         axis = figure.add_subplot(2, 2, index+1)
         all_points = np.asarray([q for patch in patches.values() for loop in patch["boundary_loops_mm"] for q in loop])
         center = all_points.mean(axis=0)
@@ -266,7 +272,7 @@ def main():
     engine = args.executable.resolve()
     baseline = args.baseline.resolve()
     manifest = read(baseline / "summary.json")
-    summary = {"schema": "paramcad.assembly-boundary-diagnostics", "version": 1, "status": "running",
+    summary = {"schema": "paramcad.assembly-boundary-diagnostics", "version": 2, "status": "running",
                "source_model_read": False, "reference_labels_used": False,
                "baseline_manifest": str(baseline / "summary.json"),
                "probe_executable_sha256": sha256(engine) if args.probe else None,
@@ -291,7 +297,7 @@ def main():
                 provenance = run_probe(engine, cloud, destination, options, args.timeout)
                 case["probes"][name] = {**metrics(destination, count), "provenance": provenance}
                 if name == "default_probe":
-                    for field in ("candidate_parts", "closed_parts", "display_segments", "open_edges", "finite_patches"):
+                    for field in ("candidate_parts", "closed_parts", "closure_boundary_segments", "open_edges", "finite_patches"):
                         if case["probes"][name][field] != case["baseline"][field]:
                             raise RuntimeError(f"Default probe differs from client baseline: {case['name']}: {field}")
                 write_json(output / "summary.json", summary)

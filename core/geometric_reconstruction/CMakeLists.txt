@@ -49,6 +49,10 @@ add_library(GeometricReconstruction
     src/recognition/BoxRecognizer.cpp
     src/recognition/ParametricSolidRecognizer.cpp
     src/recognition/ProjectionExtrusion.cpp
+    src/recognition/ProjectionProfile.cpp
+    src/recognition/ProjectionProposals.cpp
+    src/recognition/ProjectionScoring.cpp
+    src/recognition/ProjectionSearch.cpp
     src/recognition/assembly/AssemblyReconstruction.cpp
     src/recognition/assembly/BoundaryGeometry.cpp
     src/recognition/assembly/FiniteBoundaries.cpp
@@ -97,6 +101,12 @@ endif()
 
 if(GEOMETRIC_RECONSTRUCTION_BUILD_TESTS)
     include(CTest)
+    add_executable(projection_stage_test tests/projection_stage_test.cpp)
+    target_include_directories(projection_stage_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(projection_stage_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    add_test(NAME projection_stage_test COMMAND projection_stage_test)
+    set_tests_properties(projection_stage_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${OpenCASCADE_BINARY_DIR}")
     add_executable(assembly_reconstruction_test tests/assembly_reconstruction_test.cpp)
     target_include_directories(assembly_reconstruction_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(assembly_reconstruction_test PRIVATE GeometricReconstruction::GeometricReconstruction)

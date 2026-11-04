@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cmath>
 #include "recognition/assembly/BoundaryGeometry.h"
+#include "recognition/assembly/AssemblyInternal.h"
 
 namespace {
 using modeling::Vec3;using reconstruction::PointSample;using reconstruction::PointStore;
@@ -45,6 +46,48 @@ void separatedAndRotated() {
     auto spatialRotate=[](Vec3 p){const Vec3 q{std::cos(.61)*p.x+std::sin(.61)*p.z,p.y,-std::sin(.61)*p.x+std::cos(.61)*p.z};return Vec3{q.x,std::cos(.29)*q.y-std::sin(.29)*q.z,std::sin(.29)*q.y+std::cos(.29)*q.z};};
     for(auto& point:shuffled){point.position=spatialRotate(point.position);point.normal=spatialRotate(*point.normal);}
     const auto tilted=run(shuffled,.14);require(closed(tilted)==2&&std::abs(volume(tilted.candidate)-375*343)<.01,"closure is invariant to arbitrary three-dimensional orientation");
+}
+void stagedAssembly() {
+    using namespace reconstruction;
+    using namespace detail::assembly;
+    std::vector<PointSample> points;
+    box(points, {-12, 0, 0}, {6, 8, 5});
+    const auto split = points.size();
+    box(points, {12, 4, 2}, {3, 5, 9}, .37);
+    const PointStore source(points);
+    AssemblyOptions options;
+    options.distanceTolerance = .02;
+    options.maximumWorkingPoints = points.size() * 3 / 4;
+    auto extraction = extractPatches(source, options, {});
+    auto& patches = extraction.patches;
+    require(patches.size() == 12 && extraction.work.points.size() == options.maximumWorkingPoints,
+        "extraction returns the twelve working patches within budget");
+    auto grouping = groupPatches(extraction.work, patches, options);
+    require(grouping.parts.size() == 2, "working patches group into two parts");
+    for (const auto& part : grouping.parts) {
+        require(!part.workingPointIds.empty() && part.pointIds.empty(), "grouping reports working IDs first");
+        const auto belongsToFirst = [&](PointId id) { return id < points[split].id; };
+        require(std::all_of(part.workingPointIds.begin(), part.workingPointIds.end(),
+            [&](PointId id) { return belongsToFirst(id) == belongsToFirst(part.workingPointIds.front()); }),
+            "working IDs agree with the synthetic instance labels");
+    }
+
+    recoverBoundaries(extraction.work, options, grouping.connections, patches, {});
+    const auto observed = patches.front().loops;
+    require(!observed.empty(), "boundary recovery can run before full-resolution assignment");
+    const auto unassigned = assignSourceObservations(source, extraction.work, options, patches, grouping, {});
+    const auto assigned = grouping.parts[0].pointIds.size() + grouping.parts[1].pointIds.size();
+    require(assigned + unassigned.size() == source.size() && assigned > extraction.work.points.size(),
+        "source assignment accounts for observations beyond the working sample");
+    const auto closed = closeParts(extraction.work, options, patches, grouping.parts, source.size(), {});
+    require(closed.profileBodies.size() == 2 && std::abs(volume(closed)-375) < 1e-5,
+        "closure independently recovers the two known solid volumes");
+    const auto& original = patches.front().boundaryBeforeClosure;
+    require(original && original->revisionSource == BoundaryRevisionSource::ConvexSupportPlanes &&
+        original->loops.size() == observed.size(), "closure retains the observed loops with revision provenance");
+    require(original->loops.front().size() == observed.front().size() &&
+        reconstruction::math3::length(reconstruction::math3::subtract(original->loops.front().front(), observed.front().front())) == 0,
+        "closure leaves the recorded observed vertices intact");
 }
 void missingFaceAndPartial() {
     std::vector<PointSample> points;box(points,{0,0,0},{6,8,5},.23,5);auto result=run(points);
@@ -145,5 +188,5 @@ void safeBoundaryRecovery() {
     require(sameBoundaryTopology({outer,hole},{outer,hole}),"unchanged inner holes retain their topology");
 }
 }
-int main(){try{safeBoundaryRecovery();separatedAndRotated();missingFaceAndPartial();finiteConcavityAndHole();noiseAndGaps();curvedParts();nonorthogonalFaces();invalidAndCancel();std::cout<<"Assembly reconstruction tests passed\n";return 0;}
+int main(){try{safeBoundaryRecovery();separatedAndRotated();stagedAssembly();missingFaceAndPartial();finiteConcavityAndHole();noiseAndGaps();curvedParts();nonorthogonalFaces();invalidAndCancel();std::cout<<"Assembly reconstruction tests passed\n";return 0;}
 catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

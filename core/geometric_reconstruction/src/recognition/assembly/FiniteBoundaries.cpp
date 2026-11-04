@@ -48,17 +48,18 @@ std::vector<std::vector<P>> alphaLoops(const std::vector<P>& points,double radiu
     if(!sameBoundaryTopology(original,loops)){loops=original;++diagnostics.topologyFallbacks;}
     std::sort(loops.begin(),loops.end(),[](const auto& a,const auto& b){return std::abs(boundaryArea(a))>std::abs(boundaryArea(b));});return loops;
 }
-void recoverBoundaries(const WorkingData& data,const AssemblyOptions& options,AssemblyReconstructionResult& result,
+void recoverBoundaries(const WorkingData& data,const AssemblyOptions& options,
+    const std::vector<PatchConnection>& connections, std::vector<FiniteSurfacePatch>& patches,
     const std::function<bool()>& cancelled) {
-    std::vector<std::vector<size_t>> neighbors(result.patches.size());
-    for(const auto& c:result.connections)if(c.accepted){neighbors[c.first-1].push_back(c.second-1);neighbors[c.second-1].push_back(c.first-1);}
-    for(size_t index=0;index<result.patches.size();++index) {
-        if(cancelled&&cancelled())throw std::runtime_error("Cancelled");auto& patch=result.patches[index];if(!patch.planar)continue;
+    std::vector<std::vector<size_t>> neighbors(patches.size());
+    for(const auto& c:connections)if(c.accepted){neighbors[c.first-1].push_back(c.second-1);neighbors[c.second-1].push_back(c.first-1);}
+    for(size_t index=0;index<patches.size();++index) {
+        if(cancelled&&cancelled())throw std::runtime_error("Cancelled");auto& patch=patches[index];if(!patch.planar)continue;
         const auto x=patch.xDirection,y=cross(patch.normal,x);std::vector<P> points;
         for(auto i:data.groups[index]){const auto d=subtract(data.points[i].position,patch.origin);points.push_back({dot(d,x),dot(d,y)});}
         auto loops=alphaLoops(points,std::max(data.tolerance*2,patch.spacing*options.alphaFactor),std::max(data.tolerance,patch.spacing*.45),patch.boundaryDiagnostics);
         std::vector<BoundaryLine> constraints;
-        for(auto j:neighbors[index]){const auto& other=result.patches[j];if(!other.planar)continue;BoundaryLine line;
+        for(auto j:neighbors[index]){const auto& other=patches[j];if(!other.planar)continue;BoundaryLine line;
             line.a=dot(other.normal,x);line.b=dot(other.normal,y);line.c=dot(other.normal,subtract(patch.origin,other.origin));const double norm=std::hypot(line.a,line.b);
             if(norm<.15)continue;line.a/=norm;line.b/=norm;line.c/=norm;line.identity=int(j)+1;constraints.push_back(line);}
         std::vector<BoundaryLoop> recovered;size_t snapped=0;

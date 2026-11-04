@@ -14,6 +14,9 @@ struct PlyCloud
     // vector is either empty or exactly aligned with positions.
     std::vector<std::array<float, 3>> normals;
     std::vector<std::array<unsigned char, 3>> colors;
+    // Active/subset snapshots carry their zero-based rows in the original
+    // observation. Empty means positions are already in source row order.
+    std::vector<std::size_t> sourceRows;
 };
 
 // Minimal PLY reader. The vendored VTK ships without the IOPLY module and the

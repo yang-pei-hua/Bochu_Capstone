@@ -1,3 +1,4 @@
+#include "ReconstructionContractStages.h"
 // Repository-owned validation: generate exact STEP fixtures, then exercise the
 // same cloud -> semantic features -> ModelingCore path as the desktop client.
 #include "io/PlyReader.h"
@@ -606,7 +607,8 @@ void fit(const QStringList &args, QJsonObject &report) {
     const auto unit = PointCloudAdapter::lengthUnitFor(args[2]);
     require(unit != reconstruction::LengthUnit::Arbitrary,
             "Metric cloud metadata is required; no implicit millimeter assumption");
-    const auto source = PointCloudAdapter::toPointStore(cloud, unit);
+    const reconstruction::ObservationSnapshot source(PointCloudAdapter::toPointStore(cloud, unit));
+    report["skipped_invalid_observations"] = qint64(cloud.positions.size() - source.observations().size());
     reconstruction::PointStore processed({}, unit);
     reconstruction::PointCloudPreprocessingReport pre;
     std::string text;
@@ -655,9 +657,7 @@ void fit(const QStringList &args, QJsonObject &report) {
         {"point_fingerprint", QString::number(analysis.pointFingerprint)}};
     reconstruction::CompoundCandidate compound;
     checkpoint("compound_reconstruction");
-    auto recoverySamples=source.points();
-    for(auto& p:recoverySamples) {p.position.x*=pre.appliedScaleToMillimeters;p.position.y*=pre.appliedScaleToMillimeters;p.position.z*=pre.appliedScaleToMillimeters;}
-    const reconstruction::PointStore recoverySource(std::move(recoverySamples),processed.unit());
+    const auto& recoverySource = source.observations();
     reconstruction::RepairTransactionReport repairTransaction;
     const bool compoundRecognized = analyzed &&
         reconstruction::recognizeAndRepairParametricSolid(processed, analysis, compound, text, &recoverySource, &repairTransaction);
@@ -1007,6 +1007,8 @@ int main(int argc, char **argv) {
         } else if(args.value(1) == "fit-projection") {
             validateProjectionCad(args,report);
             if(!report["cad_constructed"].toBool())exitCode=1;
+        } else if(args.value(1) == "contract-stage") {
+            runReconstructionContractStage(args, report);
         } else if(args.value(1) == "probe-assembly") {
             probeAssemblyBoundaries(args,report);
         } else if(args.value(1) == "analyze" || args.value(1) == "analyze-client") {

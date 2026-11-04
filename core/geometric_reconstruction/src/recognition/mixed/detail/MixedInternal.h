@@ -33,6 +33,9 @@ bool hostFrame(const PointStore& points,const SurfaceAnalysisResult& analysis,Fr
 bool attachedCurved(const PointStore& local,const SurfaceAnalysisResult& a,const Frame& host,
                     double tolerance,CurvedSolidCandidate& output);
 
+bool recognizeLocalFeature(const PointStore& observed, const SurfaceAnalysisResult& candidates,
+    const Frame& frame, double tolerance, bool subtractive, CompoundCandidate& output, std::string& error);
+
 bool rectangularCut(const PointStore& local,const SurfaceAnalysisResult& a,const Frame& host,
                     double tolerance,PrismCandidate& cut);
 } // namespace reconstruction::detail::mixed

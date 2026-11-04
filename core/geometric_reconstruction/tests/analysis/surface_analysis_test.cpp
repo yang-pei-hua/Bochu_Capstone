@@ -7,7 +7,9 @@
 #include "reconstruction/detection/MultiScaleDetector.h"
 #include <BRepGProp.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
-#include "../../src/recognition/mixed/detail/MixedInternal.h"
+#include "recognition/mixed/detail/MixedInternal.h"
+#include "recognition/guided/detail/GuidedInternal.h"
+#include "recognition/RepairInternal.h"
 #include <GProp_GProps.hxx>
 #include <TopExp_Explorer.hxx>
 #include <cmath>
@@ -30,7 +32,9 @@ void snapshotsAndPatches() {
     }
     PointStore points(samples);SurfaceAnalysisOptions options;options.connectivityDistance=2;
     SurfaceAnalysisResult analysis;std::string error;
-    require(indexSurfaceEvidence(points,{plane},options,analysis,error),error);
+    require(indexSurfacePatches(points, {plane}, options, analysis, error), error);
+    require(analysis.relations.empty(), "patch indexing can run with fixed evidence before relations");
+    require(inferPatchRelations(points, analysis, analysis.relations, error), error);
     require(analysis.surfaces.size()==1 && analysis.patches.size()==2,"one equation retains two disconnected patches");
     require(analysis.unassignedPointIds.empty(),"all observations accounted for");
     auto detectedOptions=options;
@@ -39,6 +43,10 @@ void snapshotsAndPatches() {
     detectedOptions.detection.plane.minimumSupportPoints=20;
     detectedOptions.detection.plane.maximumPlanes=1;
     detectedOptions.detection.plane.clusterEpsilon=2;
+    SurfaceEvidenceCollection collected;
+    require(collectSurfaceEvidence(points, detectedOptions, collected, error, {plane}), error);
+    require(collected.evidence.size() == 1 && collected.unassignedPointIds.empty() &&
+        collected.detectionPasses == 1, "manual evidence is merged during collection");
     SurfaceAnalysisResult detected;
     require(analyzeSurfaces(points,detectedOptions,detected,error),error);
     require(detected.surfaces.size()==1 && detected.patches.size()==2 && detected.unassignedPointIds.empty(),
@@ -73,6 +81,13 @@ void sharedBox() {
     SurfaceAnalysisResult analysis;std::string error;
     require(analyzeSurfaces(points,options,analysis,error),error);
     require(analysis.detectionPasses==1 && analysis.surfaces.size()==6,"one shared plane pass");
+    const auto& support = std::get<PlaneEvidence>(analysis.surfaces.front()).supportPointIds;
+    detail::guided::TemplateRegions templates;
+    require(detail::guided::fitTemplateRegions(points, plane, {}, {{19, TemplateKind::Plane, support}},
+        templates, error, {}), error);
+    require(templates.fits.size() == 1 && templates.fits.front().regionId == 19 &&
+        templates.seeds.size() == 1 && templates.closed.empty(),
+        "a known selected region yields a fit and seed independently of global recognition");
     BoxCandidate box;
     require(recognizeBoxFromAnalysis(points,analysis,{},box,error),error);
     require(std::abs(box.primitive.sizeX*box.primitive.sizeY*box.primitive.sizeZ-6000)<1e-6,"shared plane box geometry");
@@ -169,6 +184,23 @@ void localRecoveryAndConstraints() {
     const auto repairedFailure=std::find_if(failures.begin(),failures.end(),[](const auto& f){return f.repaired;});
     require(repairedFailure!=failures.end(),"sparse cap repaired by bounded source retrieval");
     require(!repairedFailure->recoveredPointIds.empty() && !repairedFailure->candidates.empty() && !repairedFailure->repairedCandidates.empty(),"failure keeps observations and alternative candidates");
+    LocalObservationRecovery observations;
+    require(retrieveLocalObservations(working, source, analysis, repairedFailure->pointIds,
+        observations, error), error);
+    require(observations.recoveredPointIds == repairedFailure->recoveredPointIds &&
+        observations.sourceFingerprint == pointStoreFingerprint(source) && observations.searchHalo > 0,
+        "local retrieval reproduces the selected source observations independently of fitting");
+    require(!retrieveLocalObservations(working, source, analysis, repairedFailure->pointIds,
+        observations, error, -1), "negative search radius is rejected");
+    const auto repairEvidence = detail::repair::collectRepairEvidence(working, analysis, failures);
+    require(repairEvidence.observations.size() > working.size() && !repairEvidence.mappings.empty(),
+        "merge stages supplemental observations and explicit surface mappings");
+    auto changedCandidate = result;
+    changedCandidate.throughHoles.clear();
+    RepairTransactionReport comparison;
+    require(detail::repair::validateRepairCandidate(working, options, result, changedCandidate,
+        failures, comparison) == "Repair changed feature counts",
+        "repair acceptance independently rejects changed feature structure");
     require(before==pointStoreFingerprint(working),"recovery never mutates working observations");
     require(result.boxes.size()==1 && result.throughHoles.size()==1 && result.curvedSolids.size()==1,"recovery preserves host and hole");
     RepairTransactionReport transaction;

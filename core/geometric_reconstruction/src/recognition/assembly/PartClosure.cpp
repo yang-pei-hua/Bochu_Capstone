@@ -12,13 +12,13 @@ namespace {
 struct Vertex {Vec3 position{};std::vector<size_t> faces;};
 double signedArea(const std::vector<Vec3>& loop,const FiniteSurfacePatch& face){double area=0;const auto x=face.xDirection,y=cross(face.normal,x);
     for(size_t i=0;i<loop.size();++i){const auto a=subtract(loop[i],face.origin),b=subtract(loop[(i+1)%loop.size()],face.origin);area+=dot(a,x)*dot(b,y)-dot(b,x)*dot(a,y);}return area*.5;}
-bool convexBoundaries(const WorkingData& data,AssemblyReconstructionResult& output,AssemblyPart& part,
+bool convexBoundaries(const WorkingData& data,std::vector<FiniteSurfacePatch>& patches,AssemblyPart& part,
     std::vector<size_t>& active,double& confidence) {
     if(part.patchIds.size()<4 || part.patchIds.size()>32)return false;
     Vec3 center{};size_t centerCount=0;for(auto id:part.patchIds)for(auto i:data.groups[id-1]){center=add(center,data.points[i].position);++centerCount;}
     if(!centerCount)return false;center=scale(center,1.0/centerCount);const bool inferOrientation=!part.orientationKnown;
     struct Plane {size_t id=0;Vec3 normal{},origin{},x{};std::vector<size_t> patches,points;};std::vector<Plane> planes;
-    for(auto id:part.patchIds){const auto& patch=output.patches[id-1];if(!patch.planar)return false;
+    for(auto id:part.patchIds){const auto& patch=patches[id-1];if(!patch.planar)return false;
         const auto normal=inferOrientation&&dot(patch.normal,subtract(patch.origin,center))<0?scale(patch.normal,-1):patch.normal;
         if(inferOrientation)for(auto i:data.groups[id-1]){const auto& p=data.points[i];if(p.normal&&p.normalOrientationKnown&&dot(*p.normal,normal)<.5)return false;}
         for(const auto& loop:patch.loops)if(signedArea(loop,patch)<-data.tolerance*data.tolerance)return false;
@@ -51,8 +51,8 @@ bool convexBoundaries(const WorkingData& data,AssemblyReconstructionResult& outp
     }
     if(vertices.size()<4)return false;std::vector<std::vector<Vec3>> loops;confidence=1;
     for(size_t j=0;j<planes.size();++j){const auto& plane=planes[j];const auto y=cross(plane.normal,plane.x);std::vector<modeling::Point2D> projected;
-        double spacing=0;for(auto id:plane.patches)spacing=std::max(spacing,output.patches[id-1].spacing);
-        const auto& patch=output.patches[plane.id-1];const double reach=std::max(spacing,length(subtract(patch.upper,patch.lower))/std::sqrt(double(plane.points.size())))*6;
+        double spacing=0;for(auto id:plane.patches)spacing=std::max(spacing,patches[id-1].spacing);
+        const auto& patch=patches[plane.id-1];const double reach=std::max(spacing,length(subtract(patch.upper,patch.lower))/std::sqrt(double(plane.points.size())))*6;
         for(auto vertex:vertices){if(std::abs(dot(plane.normal,subtract(vertex,center))-offsets[j])>data.tolerance*4)continue;
             double nearest=INFINITY;for(auto i:plane.points)nearest=std::min(nearest,length(subtract(vertex,data.points[i].position)));
             if(nearest>reach)return false;confidence=std::min(confidence,1/(1+nearest/std::max(reach,1e-12)));
@@ -64,28 +64,48 @@ bool convexBoundaries(const WorkingData& data,AssemblyReconstructionResult& outp
         if(!hull.empty())hull.pop_back();if(hull.size()<3)return false;std::vector<Vec3> loop;
         for(auto p:hull)loop.push_back(add(plane.origin,add(scale(plane.x,p.x),scale(y,p.y))));loops.push_back(std::move(loop));
     }
-    active.clear();for(size_t j=0;j<planes.size();++j){const auto& plane=planes[j];active.push_back(plane.id);
-        auto& patch=output.patches[plane.id-1];patch.normal=plane.normal;patch.loops={loops[j]};patch.snappedVertices=loops[j].size();
-        for(auto id:plane.patches)if(id!=plane.id){output.patches[id-1].loops.clear();output.patches[id-1].snappedVertices=0;}}
+    active.clear();
+    for (size_t j = 0; j < planes.size(); ++j) {
+        const auto& plane = planes[j];
+        active.push_back(plane.id);
+        auto& patch = patches[plane.id - 1];
+        patch.boundaryBeforeClosure = ObservedPatchBoundary{
+            patch.normal, std::move(patch.loops), patch.snappedVertices,
+            BoundaryRevisionSource::ConvexSupportPlanes};
+        patch.normal = plane.normal;
+        patch.snappedVertices = loops[j].size();
+        patch.loops = {std::move(loops[j])};
+        for (const auto id : plane.patches) {
+            if (id == plane.id) continue;
+            auto& merged = patches[id - 1];
+            merged.boundaryBeforeClosure = ObservedPatchBoundary{
+                merged.normal, std::move(merged.loops), merged.snappedVertices,
+                BoundaryRevisionSource::MergedCoplanarPatch};
+            merged.loops.clear();
+            merged.snappedVertices = 0;
+        }
+    }
     if(inferOrientation){part.normalOrientationInferred=true;part.orientationKnown=true;confidence*=.8;}
     return true;
 }
 }
-void closeParts(const WorkingData& data,const AssemblyOptions& options,AssemblyReconstructionResult& output,
+CompoundCandidate closeParts(const WorkingData& data, const AssemblyOptions& options,
+    std::vector<FiniteSurfacePatch>& patches, std::vector<AssemblyPart>& parts, std::size_t inputPoints,
     const std::function<bool()>& cancelled) {
+    CompoundCandidate closed;
     size_t closedPoints=0;
-    for(auto& part:output.parts) {
+    for(auto& part:parts) {
         if(cancelled&&cancelled())throw std::runtime_error("Cancelled");
         part.status="open";part.reason="Finite boundaries do not yet form a closed shell";
         if(part.patchIds.size()>128){part.status="ambiguous";part.reason="Surface component exceeds bounded closure budget";continue;}
         std::vector<size_t> faceIds=part.patchIds;double boundaryConfidence=1;
-        convexBoundaries(data,output,part,faceIds,boundaryConfidence);
+        convexBoundaries(data,patches,part,faceIds,boundaryConfidence);
         const double weldTolerance=std::max(data.tolerance*4,1e-7);
         std::vector<Vertex> vertices;std::vector<std::vector<std::vector<size_t>>> faces;bool valid=true;
         auto vertex=[&](Vec3 p,size_t face){for(size_t i=0;i<vertices.size();++i)if(length(subtract(p,vertices[i].position))<=weldTolerance){vertices[i].faces.push_back(face);return i;}
             vertices.push_back({p,{face}});return vertices.size()-1;};
         for(auto id:faceIds) {
-            const auto& patch=output.patches[id-1];if(!patch.planar||patch.loops.empty()){valid=false;continue;}
+            const auto& patch=patches[id-1];if(!patch.planar||patch.loops.empty()){valid=false;continue;}
             if(patch.loops.size()>1 && std::any_of(patch.loops.begin()+1,patch.loops.end(),[&](const auto& loop){return signedArea(loop,patch)>0;})) {valid=false;part.reason="Disconnected boundary islands remain ambiguous";continue;}
             std::vector<std::vector<size_t>> loops;
             for(const auto& loop:patch.loops){std::vector<size_t> ids;for(auto p:loop){const auto index=vertex(p,id-1);if(ids.empty()||ids.back()!=index)ids.push_back(index);}
@@ -97,7 +117,7 @@ void closeParts(const WorkingData& data,const AssemblyOptions& options,AssemblyR
         // No original edge or model is used to supply those connections.
         for(auto& v:vertices){std::sort(v.faces.begin(),v.faces.end());v.faces.erase(std::unique(v.faces.begin(),v.faces.end()),v.faces.end());
             if(v.faces.size()<3)continue;Eigen::MatrixXd a(v.faces.size(),3);Eigen::VectorXd b(v.faces.size());
-            for(size_t i=0;i<v.faces.size();++i){const auto& face=output.patches[v.faces[i]];a.row(i)<<face.normal.x,face.normal.y,face.normal.z;b[i]=dot(face.normal,subtract(face.origin,v.position));}
+            for(size_t i=0;i<v.faces.size();++i){const auto& face=patches[v.faces[i]];a.row(i)<<face.normal.x,face.normal.y,face.normal.z;b[i]=dot(face.normal,subtract(face.origin,v.position));}
             const auto qr=a.colPivHouseholderQr();if(qr.rank()<3)continue;const Eigen::Vector3d shift=qr.solve(b);const Vec3 d{shift[0],shift[1],shift[2]};if(length(d)<=weldTolerance*2)v.position=add(v.position,d);}
         // Split a long boundary edge wherever another face has an observed
         // vertex on it, so T-junctions are explicit rather than silently sewn.
@@ -124,7 +144,7 @@ void closeParts(const WorkingData& data,const AssemblyOptions& options,AssemblyR
         modeling::ProfileBodyParams body;body.pose.origin={(low.x+high.x)*.5,(low.y+high.y)*.5,low.z};body.referenceSizeX=body.sizeX=high.x-low.x;
         body.referenceSizeY=body.sizeY=high.y-low.y;body.depth=body.sizeZ=high.z-low.z;body.boundary.emplace();
         body.boundary->tolerance=std::min(weldTolerance,std::min({body.sizeX,body.sizeY,body.sizeZ})*.05);
-        for(size_t i=0;i<faces.size();++i){const auto& patch=output.patches[faceIds[i]-1];modeling::BoundaryFace face;
+        for(size_t i=0;i<faces.size();++i){const auto& patch=patches[faceIds[i]-1];modeling::BoundaryFace face;
             face.surface.kind=modeling::BoundarySurface::Kind::Plane;face.surface.pose={subtract(patch.origin,body.pose.origin),patch.xDirection,patch.normal};
             const auto x=patch.xDirection,y=cross(patch.normal,x);
             for(const auto& loop:faces[i]){std::vector<modeling::BoundaryEdgeUse> wire;
@@ -136,23 +156,23 @@ void closeParts(const WorkingData& data,const AssemblyOptions& options,AssemblyR
         if(!modeling::buildProfileBody(body,built,failure)){part.status="invalid_shell";part.reason=failure;continue;}
         size_t conflicts=0;BRepClass3d_SolidClassifier classifier(built);
         for(const auto& p:data.points){const auto q=p.position;if(q.x<=low.x+weldTolerance||q.x>=high.x-weldTolerance||q.y<=low.y+weldTolerance||q.y>=high.y-weldTolerance||q.z<=low.z+weldTolerance||q.z>=high.z-weldTolerance)continue;
-            double boundary=INFINITY;for(auto id:part.patchIds){const auto& face=output.patches[id-1];boundary=std::min(boundary,std::abs(dot(subtract(q,face.origin),face.normal)));}
+            double boundary=INFINITY;for(auto id:part.patchIds){const auto& face=patches[id-1];boundary=std::min(boundary,std::abs(dot(subtract(q,face.origin),face.normal)));}
             if(boundary<=weldTolerance)continue;classifier.Perform(gp_Pnt(q.x,q.y,q.z),weldTolerance);if(classifier.State()==TopAbs_IN)++conflicts;}
         if(conflicts>std::max<size_t>(2,part.pointIds.size()/200)){part.status="material_conflict";part.reason="Observed interior surfaces contradict a filled solid";continue;}
         part.closed=true;part.status="closed_solid";part.reason.clear();part.lower=low;part.upper=high;
-        size_t snapped=0,total=0;for(auto id:part.patchIds){const auto& patch=output.patches[id-1];snapped+=patch.snappedVertices;for(const auto& loop:patch.loops)total+=loop.size();}
-        part.confidence=std::min(boundaryConfidence,double(snapped)/std::max<size_t>(1,total));closedPoints+=part.pointIds.size();output.candidate.profileBodies.push_back(std::move(body));
+        size_t snapped=0,total=0;for(auto id:part.patchIds){const auto& patch=patches[id-1];snapped+=patch.snappedVertices;for(const auto& loop:patch.loops)total+=loop.size();}
+        part.confidence=std::min(boundaryConfidence,double(snapped)/std::max<size_t>(1,total));closedPoints+=part.pointIds.size();closed.profileBodies.push_back(std::move(body));
     }
     // Closed analytic curved primitives still require actual caps and angular
     // support. Reuse that general verifier locally after separation.
     if(options.buildSolids) {
-        std::vector<size_t> order(output.parts.size());std::iota(order.begin(),order.end(),0);
-        std::sort(order.begin(),order.end(),[&](size_t a,size_t b){return output.parts[a].pointIds.size()>output.parts[b].pointIds.size();});
+        std::vector<size_t> order(parts.size());std::iota(order.begin(),order.end(),0);
+        std::sort(order.begin(),order.end(),[&](size_t a,size_t b){return parts[a].pointIds.size()>parts[b].pointIds.size();});
         size_t attempts=0;
-        for(auto index:order){auto& part=output.parts[index];if(part.closed||!part.orientationKnown)continue;
+        for(auto index:order){auto& part=parts[index];if(part.closed||!part.orientationKnown)continue;
             if(cancelled&&cancelled())throw std::runtime_error("Cancelled");
             const auto span=subtract(part.upper,part.lower);if(std::min({span.x,span.y,span.z})<=data.tolerance*5)continue;
-            if(part.patchIds.size()==1 && output.patches[part.patchIds.front()-1].planar)continue;
+            if(part.patchIds.size()==1 && patches[part.patchIds.front()-1].planar)continue;
             if(attempts>=options.maximumPrimitiveAttempts)continue;std::vector<PointSample> samples;
             for(auto id:part.patchIds)for(auto i:data.groups[id-1])samples.push_back(data.points[i]);
             if(samples.size()<80 || samples.size()>20000)continue;++attempts;
@@ -170,9 +190,10 @@ void closeParts(const WorkingData& data,const AssemblyOptions& options,AssemblyR
             if(conflicts>std::max<size_t>(2,part.pointIds.size()/200)){part.status="material_conflict";part.reason="Interior observations contradict the closed curved primitive";continue;}
             part.closed=true;part.status="closed_primitive";part.reason="Analytic boundary and cap coverage verified from local observations";
             part.confidence=std::min(candidate.surfaceCoverage,candidate.boundaryCoverage);part.openEdges=0;part.nonmanifoldEdges=0;
-            closedPoints+=part.pointIds.size();output.candidate.curvedSolids.push_back(std::move(candidate));
+            closedPoints+=part.pointIds.size();closed.curvedSolids.push_back(std::move(candidate));
         }
     }
-    output.candidate.surfaceCoverage=double(closedPoints)/std::max<size_t>(1,output.inputPoints);output.candidate.confidence=output.candidate.surfaceCoverage;
+    closed.surfaceCoverage=double(closedPoints)/std::max<size_t>(1,inputPoints);closed.confidence=closed.surfaceCoverage;
+    return closed;
 }
 }

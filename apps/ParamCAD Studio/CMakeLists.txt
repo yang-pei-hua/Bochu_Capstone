@@ -272,6 +272,12 @@ if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
         ../../tools/SurfaceCoverageValidation.cpp
         ../../tools/PointCloudCadValidation.cpp
         ../../tools/AssemblyDiagnostics.cpp
+        ../../tools/ReconstructionContractStages.cpp
+        ../../tools/ReconstructionAnalysisStages.cpp
+        ../../tools/ReconstructionModelingStages.cpp
+        ../../tools/ReconstructionWorkflowStage.cpp
+        ../../tools/ReconstructionAssemblyStages.cpp
+        ../../tools/ReconstructionProjectionStages.cpp
         src/app/CadReconstructionTask.h src/app/CadReconstructionTask.cpp
         src/io/ProjectStore.cpp src/io/FeatureCodec.cpp src/io/PlyWriter.cpp
         src/core/PointCloudDocument.h src/core/PointCloudDocument.cpp
@@ -281,7 +287,8 @@ if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
         src/io/PointCloudAdapter.cpp
         src/io/StepModelLoader.cpp
     )
-    target_include_directories(cad_reconstruction_validation PRIVATE src)
+    target_include_directories(cad_reconstruction_validation PRIVATE src
+        ../../core/geometric_reconstruction/src ../../core/parametric_modeling/src)
     target_link_directories(cad_reconstruction_validation PRIVATE ${OpenCASCADE_LIBRARY_DIR})
     target_link_libraries(cad_reconstruction_validation PRIVATE
         Qt6::Core Qt6::Gui VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction TKDE TKXSBase TKDESTEP)
@@ -297,6 +304,12 @@ endif()
 
 if(CAD_CLIENT_BUILD_TESTS)
     include(CTest)
+    add_executable(projection_stage_test ../../core/geometric_reconstruction/tests/projection_stage_test.cpp)
+    target_include_directories(projection_stage_test PRIVATE ../../core/geometric_reconstruction/src)
+    target_link_libraries(projection_stage_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    add_test(NAME projection_stage_test COMMAND projection_stage_test)
+    set_tests_properties(projection_stage_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
     add_executable(assembly_reconstruction_test ../../core/geometric_reconstruction/tests/assembly_reconstruction_test.cpp)
     target_include_directories(assembly_reconstruction_test PRIVATE ../../core/geometric_reconstruction/src)
     target_link_libraries(assembly_reconstruction_test PRIVATE GeometricReconstruction::GeometricReconstruction)

@@ -4,6 +4,17 @@
 #include "common/Math3.h"
 
 namespace reconstruction::detail::guided {
+struct TemplateRegions {
+    std::vector<PointSample> adjustedPoints;
+    std::vector<PrimitiveEvidence> seeds;
+    std::vector<CurvedSolidCandidate> closed;
+    std::vector<TemplateFit> fits;
+    int failedRegionId = 0;
+};
+bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& planes,
+    const CylinderDetectionOptions& cylinders, const std::vector<TemplateHint>& hints,
+    TemplateRegions& output, std::string& error, const std::function<bool()>& cancelled);
+
 PrimitiveDetectionOptions detectionFor(TemplateKind kind, double tolerance);
 
 std::size_t supportSize(const PrimitiveEvidence& e);

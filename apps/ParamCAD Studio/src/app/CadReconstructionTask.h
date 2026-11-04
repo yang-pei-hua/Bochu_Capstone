@@ -17,7 +17,10 @@ class QThread;
 struct CadReconstructionResult
 {
     enum class Outcome { Success, PreprocessingFailed, Unsupported, Failed, Cancelled };
+    enum class Branch { None, Conventional, Guided, Assembly };
     Outcome outcome = Outcome::Failed;
+    Branch branch = Branch::None;
+    bool partialAssembly = false;
     bool preprocessingComplete = false;
     reconstruction::PointCloudPreprocessingReport preprocessing;
     reconstruction::CompoundCandidate candidate;
@@ -27,6 +30,7 @@ struct CadReconstructionResult
     int failedRegionId = 0;
     QString error;
     std::optional<reconstruction::AssemblyReconstructionResult> assembly;
+    std::size_t skippedInvalidObservations = 0;
 };
 
 // Computes a candidate from an owned input snapshot. No view or modeling document

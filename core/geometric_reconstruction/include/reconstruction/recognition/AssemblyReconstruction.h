@@ -23,6 +23,16 @@ struct BoundaryRecoveryDiagnostics {
     std::size_t splitAlphaLoops=0,rejectedAlphaLoops=0,simplificationFallbacks=0;
     std::size_t constraintFallbacks=0,snappingFallbacks=0,topologyFallbacks=0;
 };
+enum class BoundaryRevisionSource { ConvexSupportPlanes, MergedCoplanarPatch };
+
+// The boundary as recovered from working observations before shell closure.
+struct ObservedPatchBoundary {
+    modeling::Vec3 normal{};
+    std::vector<std::vector<modeling::Vec3>> loops;
+    std::size_t snappedVertices = 0;
+    BoundaryRevisionSource revisionSource = BoundaryRevisionSource::ConvexSupportPlanes;
+};
+
 struct FiniteSurfacePatch {
     std::size_t id=0;
     modeling::Vec3 origin{},normal{},xDirection{},lower{},upper{};
@@ -34,6 +44,11 @@ struct FiniteSurfacePatch {
     std::vector<std::vector<modeling::Vec3>> loops;
     std::size_t snappedVertices=0;
     BoundaryRecoveryDiagnostics boundaryDiagnostics;
+    // Retained when closure replaces or removes the observed loops.
+    std::optional<ObservedPatchBoundary> boundaryBeforeClosure;
+    // Working IDs support the fitted plane and observed loops. pointIds
+    // records the separate assignment from the full-resolution snapshot.
+    std::vector<PointId> workingPointIds;
 };
 struct PatchConnection {
     std::size_t first=0,second=0;
@@ -53,6 +68,7 @@ struct AssemblyPart {
     double confidence=0;
     std::string status,reason;
     std::optional<ProjectionExtrusionResult> projection;
+    std::vector<PointId> workingPointIds;
 };
 struct AssemblyReconstructionResult {
     std::size_t inputPoints=0,workingPoints=0;
@@ -65,6 +81,7 @@ struct AssemblyReconstructionResult {
     // candidate.surfaceCoverage counts observations assigned to those parts;
     // it is not a source completeness score or an independent surface distance.
     CompoundCandidate candidate;
+    std::vector<PointId> unassignedWorkingPointIds;
 };
 // Observation-only convex-patch decomposition. Candidates are not asserted to
 // be original assembly instances; concave parts/contacts can remain ambiguous.

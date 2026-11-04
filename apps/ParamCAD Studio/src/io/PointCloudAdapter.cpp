@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -94,6 +95,9 @@ double robustDiagonalOf(const std::vector<std::array<float, 3>>& positions)
 reconstruction::PointStore PointCloudAdapter::toPointStore(
     const PlyCloud& cloud, reconstruction::LengthUnit unit)
 {
+    if (!cloud.sourceRows.empty() && cloud.sourceRows.size() != cloud.positions.size())
+        throw std::invalid_argument("Point-cloud source rows must align with positions");
+
     std::vector<reconstruction::PointSample> samples;
     samples.reserve(cloud.positions.size());
 
@@ -105,7 +109,8 @@ reconstruction::PointStore PointCloudAdapter::toPointStore(
         }
         reconstruction::PointSample sample;
         // IDs refer to original rows even when a non-finite row is skipped.
-        sample.id = static_cast<reconstruction::PointId>(index)+1;
+        const auto row = cloud.sourceRows.empty() ? index : cloud.sourceRows[index];
+        sample.id = static_cast<reconstruction::PointId>(row) + 1;
         sample.position = modeling::Vec3{position[0], position[1], position[2]};
         if (hasNormals && finitePoint(cloud.normals[index])) {
             const std::array<float, 3>& normal = cloud.normals[index];

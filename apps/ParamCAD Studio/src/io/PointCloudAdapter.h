@@ -16,7 +16,7 @@ class PointCloudAdapter
 public:
     // Builds the immutable observation store. Vertices that are not finite are
     // dropped here: the store rejects them, and a PLY written by an external
-    // tool may legitimately carry them. Ids are allocated densely from 1.
+    // tool may legitimately carry them. IDs are one-based source row numbers.
     static reconstruction::PointStore toPointStore(const PlyCloud& cloud,
                                                    reconstruction::LengthUnit unit);
 

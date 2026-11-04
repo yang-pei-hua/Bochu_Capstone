@@ -61,4 +61,13 @@ bool preprocessPointCloud(
     PointCloudPreprocessingReport& report,
     std::string& error);
 
+// Unit conversion is determined when creating the snapshot. Voxel size is
+// still specified in the original source unit.
+bool preprocessPointCloud(
+    const ObservationSnapshot& input,
+    const PointCloudPreprocessingOptions& options,
+    PointStore& output,
+    PointCloudPreprocessingReport& report,
+    std::string& error);
+
 }  // namespace reconstruction

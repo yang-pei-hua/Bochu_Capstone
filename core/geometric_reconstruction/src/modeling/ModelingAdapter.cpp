@@ -2,26 +2,35 @@
 
 namespace reconstruction {
 
-modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &candidate,
-                                                   modeling::ModelingCore &core,
-                                                   modeling::ModelRevision expectedRevision,
-                                                   bool replacePrevious, bool overwriteManual) {
+std::optional<modeling::ModelPatch> planCompoundCandidate(
+    const CompoundCandidate& candidate, const modeling::ModelingCore& snapshot,
+    std::string& error, modeling::ModelRevision expectedRevision,
+    bool replacePrevious, bool overwriteManual) {
     modeling::ModelPatch patch;
-    patch.expectedRevision = expectedRevision;
+    patch.expectedRevision = snapshot.revision();
+    error.clear();
+    auto reject = [&](const std::string& reason) -> std::optional<modeling::ModelPatch> {
+        error = reason;
+        return std::nullopt;
+    };
+    if (expectedRevision != modeling::kAnyModelRevision && expectedRevision != snapshot.revision()) {
+        return reject("Model revision mismatch: expected " + std::to_string(expectedRevision) +
+            ", current " + std::to_string(snapshot.revision()));
+    }
     // Allocate sketch IDs on a private copy; the final patch applies atomically.
-    auto staging = core;
+    auto staging = snapshot;
     if (replacePrevious) {
-        for (const auto& feature : core.features()) {
+        for (const auto& feature : snapshot.features()) {
             if (feature.reconstructed && feature.manuallyEdited && !overwriteManual)
-                return {false, core.revision(), {}, "Manually edited CAD features are protected; explicit replacement is required"};
+                return reject("Manually edited CAD features are protected; explicit replacement is required");
         }
         // Remove only this workflow's features, in dependency order. Authored
         // dependents make replacement fail atomically rather than being deleted.
-        const auto features = core.features();
+        const auto features = snapshot.features();
         for (auto i = features.rbegin(); i != features.rend(); ++i) if (i->reconstructed) {
             patch.commands.push_back(modeling::RemoveFeatureCommand{i->id, false});
             const auto removed = staging.execute(patch.commands.back());
-            if (!removed.success) return {false, core.revision(), {}, removed.error};
+            if (!removed.success) return reject(removed.error);
         }
     }
     auto append = [&](const modeling::FeatureParams &params) {
@@ -33,7 +42,7 @@ modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &cand
         params.join = true;
         const auto result = append(params);
         if (!result.success)
-            return {false, core.revision(), {}, result.error};
+            return reject(result.error);
     }
     for (const auto &prism : candidate.prisms) {
         modeling::SketchFeatureParams sketch;
@@ -45,7 +54,7 @@ modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &cand
         }
         const auto result = append(sketch);
         if (!result.success)
-            return {false, core.revision(), {}, result.error};
+            return reject(result.error);
         modeling::ExtrudeFeatureParams extrusion;
         extrusion.sketchId = result.featureId;
         extrusion.depth = prism.depth;
@@ -53,34 +62,44 @@ modeling::ModelPatchResult commitCompoundCandidate(const CompoundCandidate &cand
             (staging.features().size() > 1 ? modeling::ExtrudeOperation::Join : modeling::ExtrudeOperation::NewBody);
         const auto added = append(extrusion);
         if (!added.success)
-            return {false, core.revision(), {}, added.error};
+            return reject(added.error);
     }
     for (const auto &hole : candidate.throughHoles) {
         const auto added = append(hole.primitive);
-        if (!added.success) return {false, core.revision(), {}, added.error};
+        if (!added.success) return reject(added.error);
     }
     for (const auto& solid : candidate.curvedSolids) {
         const auto added = std::visit([&](const auto& params) { return append(params); }, solid.primitive);
-        if (!added.success) return {false, core.revision(), {}, added.error};
+        if (!added.success) return reject(added.error);
     }
     for(const auto& body:candidate.profileBodies) {
         const auto added=append(body);
-        if(!added.success)return {false,core.revision(),{},added.error};
+        if(!added.success)return reject(added.error);
     }
     for (const auto& program : candidate.projectionPrograms) {
         if (program.empty() || program.front().operation != modeling::ExtrudeOperation::NewBody)
-            return {false,core.revision(),{},"Projection program has no base extrusion"};
+            return reject("Projection program has no base extrusion");
         modeling::FeatureId target = modeling::kInvalidFeatureId;
         for (const auto& operation : program) {
             const auto sketch = append(operation.sketch);
-            if (!sketch.success) return {false,core.revision(),{},sketch.error};
+            if (!sketch.success) return reject(sketch.error);
             const auto extrude = append(modeling::ExtrudeFeatureParams{
                 sketch.featureId,operation.depth,operation.reverse,operation.operation,target});
-            if (!extrude.success) return {false,core.revision(),{},extrude.error};
+            if (!extrude.success) return reject(extrude.error);
             target = extrude.featureId;
         }
     }
-    return core.apply(patch);
+    return patch;
+}
+
+modeling::ModelPatchResult commitCompoundCandidate(
+    const CompoundCandidate& candidate, modeling::ModelingCore& core,
+    modeling::ModelRevision expectedRevision, bool replacePrevious, bool overwriteManual) {
+    std::string error;
+    const auto patch = planCompoundCandidate(candidate, core, error, expectedRevision,
+        replacePrevious, overwriteManual);
+    if (!patch) return {false, core.revision(), {}, std::move(error)};
+    return core.apply(*patch);
 }
 
 modeling::ModelPatchResult commitBoxCandidate(const BoxCandidate &candidate,

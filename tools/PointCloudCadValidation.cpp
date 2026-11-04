@@ -51,6 +51,13 @@ void validatePointCloudCad(const QStringList& args,QJsonObject& report) {
     if(result->preprocessingComplete)report["preprocessing"]=QJsonObject{{"input_points",double(result->preprocessing.inputPointCount)},
         {"output_points",double(result->preprocessing.outputPointCount)},{"removed_voxel_duplicates",double(result->preprocessing.removedByVoxel)},
         {"removed_outliers",double(result->preprocessing.removedAsOutliers)},{"estimated_normals",double(result->preprocessing.normalsEstimated)}};
+    using Branch = CadReconstructionResult::Branch;
+    switch (result->branch) {
+    case Branch::None: report["recognition_branch"] = "none"; break;
+    case Branch::Conventional: report["recognition_branch"] = "conventional"; break;
+    case Branch::Guided: report["recognition_branch"] = "guided"; break;
+    case Branch::Assembly: report["recognition_branch"] = "assembly"; break;
+    }
     report["detected_surface_patches"]=double(result->analysis.patches.size());
     if(result->assembly){stage("writing_separation_diagnostics");report["assembly"]=writeAssemblyDiagnostics(args[3],cloud,*result->assembly,report["unit"].toString());}
     if(result->outcome!=CadReconstructionResult::Outcome::Success) {
@@ -66,8 +73,7 @@ void validatePointCloudCad(const QStringList& args,QJsonObject& report) {
         report["assigned_observation_fraction"]=result->candidate.surfaceCoverage;
     } else report["coverage_basis"]="recognizer_surface_support";
     stage("exporting_cad");exportCad(core,args[4],report);
-    if(result->assembly && (report["assembly"].toObject()["unreconstructed_parts"].toInteger()>0 ||
-                           !result->assembly->unassignedPointIds.empty())) {
+    if(result->partialAssembly) {
         report["status"]="cad_exported_partial";report["partial_reconstruction"]=true;
     }
 }
@@ -126,12 +132,8 @@ void validateProjectionCad(const QStringList& args, QJsonObject& report) {
     PlyCloud cloud;
     QString readError;
     require(PlyReader::read(args[2],cloud,readError),readError.toStdString());
-    auto points=PointCloudAdapter::toPointStore(cloud,unit).points();
-    for (auto& point : points) {
-        point.position.x *= *scale;
-        point.position.y *= *scale;
-        point.position.z *= *scale;
-    }
+    const reconstruction::ObservationSnapshot input(PointCloudAdapter::toPointStore(cloud,unit));
+    const auto& points = input.observations();
     report["input_kind"]="point_cloud_only";
     report["source_model_read"]=false;
     report["reference_labels_used"]=false;
@@ -142,7 +144,7 @@ void validateProjectionCad(const QStringList& args, QJsonObject& report) {
     report["cad_constructed"]=false;
     reconstruction::ProjectionExtrusionResult fit;
     const bool accepted=reconstruction::fitProjectionExtrusion(
-        reconstruction::PointStore(std::move(points)),options,fit);
+        points,options,fit);
     QJsonArray axes,operations;
     for (const auto& axis : fit.axes) {
         axes.append(QJsonObject{{"direction",QJsonArray{axis.axis.x,axis.axis.y,axis.axis.z}},

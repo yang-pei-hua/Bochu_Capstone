@@ -1,4 +1,4 @@
-#include "reconstruction/recognition/CompoundRecognizer.h"
+#include "RepairInternal.h"
 #include "mixed/detail/MixedInternal.h"
 #include <unordered_set>
 namespace reconstruction {
@@ -29,7 +29,56 @@ double boundaryCoverage(const PointStore& points,const CompoundCandidate& c,doub
         count+=detail::mixed::material(c,subtract(p.position,shift)) && !detail::mixed::material(c,add(p.position,shift));}
     return double(count)/std::max<std::size_t>(1,points.size());
 }
+std::vector<SurfaceRelationHint> withExistingHints(const SurfaceAnalysisResult& analysis,
+    std::vector<SurfaceRelationHint> hints) {
+    for (const auto& relation : analysis.relations) {
+        if (relation.automatic || !relation.first || !relation.second ||
+            relation.first > analysis.patches.size() || relation.second > analysis.patches.size()) continue;
+        hints.push_back({analysis.patches[relation.first - 1].supportPointIds,
+                         analysis.patches[relation.second - 1].supportPointIds, relation.kind});
+    }
+    return hints;
 }
+} // namespace
+
+namespace detail::repair {
+RepairEvidence collectRepairEvidence(const PointStore& points, const SurfaceAnalysisResult& analysis,
+    const std::vector<LocalAnalysisFailure>& failures) {
+    auto samples=points.points();std::unordered_set<PointId> seen;
+    for(const auto& p:samples)seen.insert(p.id);
+    auto evidence = analysis.surfaces;
+    std::vector<SurfaceIdMapping> mappings;
+    for(const auto& f:failures)if(f.repaired) {
+        for(const auto& p:f.observations)if(seen.insert(p.id).second)samples.push_back(p);
+        for(const auto& e:f.repairedCandidates){
+            const auto local=std::visit([](const auto& s){return s.id;},e);
+            evidence.push_back(e);mappings.push_back({f.localFingerprint,local,SurfaceId(evidence.size())});
+        }
+    }
+    return {PointStore(std::move(samples), points.unit()), std::move(evidence), std::move(mappings)};
+}
+
+std::string validateRepairCandidate(const PointStore& points, const SurfaceAnalysisOptions& options,
+    const CompoundCandidate& baseline, const CompoundCandidate& checked,
+    const std::vector<LocalAnalysisFailure>& failures, RepairTransactionReport& status) {
+    status.beforeCoverage=boundaryCoverage(points,baseline,options.detection.plane.distanceThreshold);
+    status.afterCoverage=boundaryCoverage(points,checked,options.detection.plane.distanceThreshold);
+    if(baseline.boxes.size()!=checked.boxes.size() || baseline.prisms.size()!=checked.prisms.size() || baseline.throughHoles.size()!=checked.throughHoles.size() || baseline.curvedSolids.size()!=checked.curvedSolids.size())return "Repair changed feature counts";
+    for(const auto& f:failures)if(f.repaired) {
+        PointStore local(f.observations,points.unit());const double tolerance=options.detection.plane.distanceThreshold;
+        if(boundaryCoverage(local,checked,tolerance)+1e-6<boundaryCoverage(local,baseline,tolerance))return "Repair degraded local boundary coverage";
+    }
+    for(std::size_t i=0;i<baseline.curvedSolids.size();++i)if(checked.curvedSolids[i].meanResidual>baseline.curvedSolids[i].meanResidual+options.detection.plane.distanceThreshold*0.15)return "Repair increased local model error";
+    const double directionScale=options.detection.plane.distanceThreshold/options.relations.angularToleranceRadians;
+    const auto a=signature(baseline,directionScale),b=signature(checked,directionScale);
+    if(a.size()!=b.size())return "Repair changed feature structure";
+    const double budget=options.detection.plane.distanceThreshold*0.25;
+    for(std::size_t i=0;i<a.size();++i)if(!std::isfinite(b[i]) || std::abs(a[i]-b[i])>budget)return "Repair moved previously recognized geometry";
+    if(status.afterCoverage+1e-6<status.beforeCoverage || checked.surfaceCoverage<0.98)return "Repair degraded boundary coverage";
+    return {};
+}
+} // namespace detail::repair
+
 bool recognizeAndRepairParametricSolid(const PointStore& points,SurfaceAnalysisResult& analysis,
     CompoundCandidate& output,std::string& error,const PointStore* source,RepairTransactionReport* report,
     const std::vector<SurfaceRelationHint>& hints) {
@@ -40,9 +89,7 @@ bool recognizeAndRepairParametricSolid(const PointStore& points,SurfaceAnalysisR
     if(!materializeAnalysisPoints(points,analysis,observed,error))return reject(error);
     if(analysis.baseFingerprint && source && analysis.recoverySourceFingerprint!=pointStoreFingerprint(*source))return reject("Changed recovery source invalidates repaired analysis");
     auto staged=analysis;
-    auto requested=hints;
-    for(const auto& r:analysis.relations)if(!r.automatic && r.first && r.second && r.first<=analysis.patches.size() && r.second<=analysis.patches.size())
-        requested.push_back({analysis.patches[r.first-1].supportPointIds,analysis.patches[r.second-1].supportPointIds,r.kind});
+    auto requested = withExistingHints(analysis, hints);
     if(!applySurfaceRelationHints(observed,requested,staged,error))return reject(error);
     CompoundCandidate baseline;
     if(!recognizeParametricSolidFromAnalysis(observed,staged,baseline,error,&failures,source))return reject(error);
@@ -51,41 +98,23 @@ bool recognizeAndRepairParametricSolid(const PointStore& points,SurfaceAnalysisR
         status.reused=true;status.beforeCoverage=status.afterCoverage=baseline.surfaceCoverage;
         analysis=std::move(staged);output=std::move(baseline);if(report)*report=status;return true;
     }
-    auto samples=points.points();std::unordered_set<PointId> seen;
-    for(const auto& p:samples)seen.insert(p.id);
-    auto evidence=analysis.surfaces;std::vector<SurfaceIdMapping> mappings;
-    for(const auto& f:failures)if(f.repaired) {
-        for(const auto& p:f.observations)if(seen.insert(p.id).second)samples.push_back(p);
-        for(const auto& e:f.repairedCandidates){
-            const auto local=std::visit([](const auto& s){return s.id;},e);
-            evidence.push_back(e);mappings.push_back({f.localFingerprint,local,SurfaceId(evidence.size())});
-        }
-    }
-    if(mappings.empty()){staged.localFailures=std::move(failures);analysis=std::move(staged);output=std::move(baseline);if(report)*report=status;return true;}
-    PointStore combined(std::move(samples),points.unit());SurfaceAnalysisResult merged;
-    if(!indexSurfaceEvidence(combined,evidence,analysis.options,merged,error))return reject(error);
+    if (std::none_of(failures.begin(), failures.end(), [](const auto& failure) {
+            return failure.repaired && !failure.repairedCandidates.empty();
+        })){staged.localFailures=std::move(failures);analysis=std::move(staged);output=std::move(baseline);if(report)*report=status;return true;}
+    auto proposal = detail::repair::collectRepairEvidence(points, analysis, failures);
+    auto& mappings = proposal.mappings;
+    const auto& combined = proposal.observations;
+    SurfaceAnalysisResult merged;
+    if(!indexSurfaceEvidence(combined,proposal.evidence,analysis.options,merged,error))return reject(error);
     // Rebind manual constraints using observation IDs, never stale patch numbers.
-    std::vector<SurfaceRelationHint> manual=hints;
-    for(const auto& r:staged.relations)if(!r.automatic && r.first && r.second && r.first<=staged.patches.size() && r.second<=staged.patches.size())
-        manual.push_back({staged.patches[r.first-1].supportPointIds,staged.patches[r.second-1].supportPointIds,r.kind});
+    const auto manual = withExistingHints(staged, hints);
     if(!applySurfaceRelationHints(combined,manual,merged,error))return reject(error);
     CompoundCandidate checked;std::vector<LocalAnalysisFailure> retry;
     if(!recognizeParametricSolidFromAnalysis(combined,merged,checked,error,&retry,nullptr))return reject("Repair merge rejected: "+error);
     if(std::any_of(retry.begin(),retry.end(),[](const auto& f){return f.repaired;}))return reject("Merged analysis requires repeated recovery");
-    status.beforeCoverage=boundaryCoverage(points,baseline,analysis.options.detection.plane.distanceThreshold);
-    status.afterCoverage=boundaryCoverage(points,checked,analysis.options.detection.plane.distanceThreshold);
-    if(baseline.boxes.size()!=checked.boxes.size() || baseline.prisms.size()!=checked.prisms.size() || baseline.throughHoles.size()!=checked.throughHoles.size() || baseline.curvedSolids.size()!=checked.curvedSolids.size())return reject("Repair changed feature counts");
-    for(const auto& f:failures)if(f.repaired) {
-        PointStore local(f.observations,points.unit());const double tolerance=analysis.options.detection.plane.distanceThreshold;
-        if(boundaryCoverage(local,checked,tolerance)+1e-6<boundaryCoverage(local,baseline,tolerance))return reject("Repair degraded local boundary coverage");
-    }
-    for(std::size_t i=0;i<baseline.curvedSolids.size();++i)if(checked.curvedSolids[i].meanResidual>baseline.curvedSolids[i].meanResidual+analysis.options.detection.plane.distanceThreshold*0.15)return reject("Repair increased local model error");
-    const double directionScale=analysis.options.detection.plane.distanceThreshold/analysis.options.relations.angularToleranceRadians;
-    const auto a=signature(baseline,directionScale),b=signature(checked,directionScale);
-    if(a.size()!=b.size())return reject("Repair changed feature structure");
-    const double budget=analysis.options.detection.plane.distanceThreshold*0.25;
-    for(std::size_t i=0;i<a.size();++i)if(!std::isfinite(b[i]) || std::abs(a[i]-b[i])>budget)return reject("Repair moved previously recognized geometry");
-    if(status.afterCoverage+1e-6<status.beforeCoverage || checked.surfaceCoverage<0.98)return reject("Repair degraded boundary coverage");
+    if (const auto reason = detail::repair::validateRepairCandidate(
+            points, analysis.options, baseline, checked, failures, status); !reason.empty())
+        return reject(reason);
     merged.baseFingerprint=pointStoreFingerprint(points);merged.recoverySourceFingerprint=pointStoreFingerprint(source?*source:points);
     std::unordered_set<PointId> original;for(const auto& p:points.points())original.insert(p.id);
     for(const auto& p:combined.points())if(!original.count(p.id))merged.supplementalPoints.push_back(p);

@@ -4,8 +4,8 @@
 namespace reconstruction {
 using namespace detail::analysis;
 
-bool analyzeSurfaces(const PointStore& points, const SurfaceAnalysisOptions& options,
-                     SurfaceAnalysisResult& output, std::string& error,
+bool collectSurfaceEvidence(const PointStore& points, const SurfaceAnalysisOptions& options,
+                     SurfaceEvidenceCollection& output, std::string& error,
                      const std::vector<PrimitiveEvidence>& seeds, const std::function<bool()>& cancelled) {
     output = {}; error.clear();
     if (!valid(options)) { error = "Invalid surface analysis options"; return false; }
@@ -47,8 +47,24 @@ bool analyzeSurfaces(const PointStore& points, const SurfaceAnalysisOptions& opt
     }
     if (cancelled && cancelled()) { error = "Cancelled"; return false; }
     if (evidence.empty()) { error = failure.empty() ? "No supported surface evidence" : failure; return false; }
-    if (!indexSurfaceEvidence(points,evidence,options,output,error)) return false;
+    std::unordered_set<PointId> covered;
+    for (const auto& entry : evidence)
+        covered.insert(ids(entry).begin(), ids(entry).end());
+    for (const auto& point : points.points())
+        if (!covered.count(point.id)) output.unassignedPointIds.push_back(point.id);
+    output.evidence = std::move(evidence);
     output.detectionPasses = passes;
+    return true;
+}
+
+bool analyzeSurfaces(const PointStore& points, const SurfaceAnalysisOptions& options,
+    SurfaceAnalysisResult& output, std::string& error,
+    const std::vector<PrimitiveEvidence>& seeds, const std::function<bool()>& cancelled) {
+    output = {};
+    SurfaceEvidenceCollection collected;
+    if (!collectSurfaceEvidence(points, options, collected, error, seeds, cancelled)) return false;
+    if (!indexSurfaceEvidence(points, collected.evidence, options, output, error)) return false;
+    output.detectionPasses = collected.detectionPasses;
     return true;
 }
 
