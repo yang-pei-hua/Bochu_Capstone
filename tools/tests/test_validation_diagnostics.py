@@ -8,11 +8,10 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "core" / "reconstruction"))
-from diagnose_performance_validation import diagnose
+from tools.diagnostics.diagnose_performance_validation import diagnose
 from colmap_reconstruction.pipeline import _Runner, ReconstructionError
-import refit_performance_validation as replay
+from tools.validation import refit_performance_validation as replay
 
 
 class ValidationDiagnosticsTests(unittest.TestCase):

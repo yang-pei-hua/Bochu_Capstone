@@ -14,7 +14,7 @@ import time
 
 import numpy as np
 
-from run_point_cloud_cad import DEFAULT_ENGINE, sha256, write_json
+from tools.reconstruction.run_point_cloud_cad import DEFAULT_ENGINE, sha256, write_json
 
 
 def read(path: Path) -> dict:

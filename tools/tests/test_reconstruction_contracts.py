@@ -1,12 +1,10 @@
 """Integration coverage for staged contract inputs and shared dependencies."""
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from run_point_cloud_cad import DEFAULT_ENGINE, read_json, write_json
-from run_reconstruction_contracts import DEFAULT_MANIFEST, main
+from tools.reconstruction.run_point_cloud_cad import DEFAULT_ENGINE, read_json, write_json
+from tools.contracts.run_reconstruction_contracts import DEFAULT_MANIFEST, main
 
 
 @unittest.skipUnless(DEFAULT_ENGINE.is_file(), "Build cad_reconstruction_validation first")

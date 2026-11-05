@@ -1,10 +1,7 @@
 """Check that repeatability diagnostics detect real geometry changes."""
-import sys
-from pathlib import Path
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from check_cad_validation_stability import geometry_parameters, parameter_spread
+from tools.diagnostics.check_cad_validation_stability import geometry_parameters, parameter_spread
 
 
 class StabilityDiagnosticTests(unittest.TestCase):

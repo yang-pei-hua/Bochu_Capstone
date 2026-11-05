@@ -13,9 +13,9 @@ import subprocess
 import sys
 import numpy as np
 
-from generate_mixed_template_board import ROOT, solids
-from generate_compound_test_clouds import ENGINE
-from run_performance_validation import hidden_process_options
+from tools.fixtures.generate_mixed_template_board import ROOT, solids
+from tools.fixtures.generate_compound_test_clouds import ENGINE
+from tools.validation.run_performance_validation import hidden_process_options
 
 
 def parameter_errors(case, report):
@@ -74,7 +74,7 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     generated = args.output/'input'
-    subprocess.run([sys.executable, str(ROOT/'tools/generate_mixed_template_board.py'),
+    subprocess.run([sys.executable, str(ROOT/'tools/fixtures/generate_mixed_template_board.py'),
                     '--output', str(generated), '--seed', str(args.seed)], check=True,
                    stdout=subprocess.DEVNULL, **hidden_process_options())
     definition = generated/'case.json'

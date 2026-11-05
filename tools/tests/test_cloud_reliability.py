@@ -1,12 +1,10 @@
 """Safety and provenance contracts for the independent cloud evaluator."""
 import json
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from run_cloud_reliability import evaluate, manifest_cases, stress_cloud, write_cloud
+from tools.validation.run_cloud_reliability import evaluate, manifest_cases, stress_cloud, write_cloud
 
 
 class CloudReliabilityTests(unittest.TestCase):

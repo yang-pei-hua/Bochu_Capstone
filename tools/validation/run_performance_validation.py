@@ -35,7 +35,7 @@ import time
 from typing import Any, Sequence
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 OUTPUTS_ROOT = REPOSITORY_ROOT / "outputs"
 RECONSTRUCTION_SCRIPT = REPOSITORY_ROOT / "core" / "reconstruction" / "reconstruct.py"
 DEFAULT_COLMAP = REPOSITORY_ROOT / "deps" / "colmap" / "bin" / "colmap.exe"
@@ -590,7 +590,7 @@ def write_readme(
     lines = [
         f"# {case.name}",
         "",
-        "本目录由 `tools/run_performance_validation.py` 自动生成，所有输入快照、拍摄图片、",
+        "本目录由 `tools/validation/run_performance_validation.py` 自动生成，所有输入快照、拍摄图片、",
         "CameraInfo、COLMAP 工作区、点云、拟合日志和报告均保存在本目录内。",
         "",
         "## 摘要",

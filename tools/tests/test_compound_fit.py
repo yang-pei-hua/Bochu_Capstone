@@ -2,13 +2,11 @@
 from contextlib import redirect_stdout
 import io
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from generate_compound_test_clouds import ENGINE
-from run_compound_fit_tests import run_suite
+from tools.fixtures.generate_compound_test_clouds import ENGINE
+from tools.validation.run_compound_fit_tests import run_suite
 
 
 @unittest.skipUnless(ENGINE.is_file(),"Build cad_reconstruction_validation first")

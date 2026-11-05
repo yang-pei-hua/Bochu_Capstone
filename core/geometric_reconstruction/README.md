@@ -198,7 +198,7 @@ range only chooses resolution; it does not remove source observations. Protected
 manual observations continue to survive both filters.
 
 Independent stress fixtures and explicitly sourced recorded-cloud replay are
-available through `tools/run_cloud_reliability.py`. The earlier validation
+available through `tools/validation/run_cloud_reliability.py`. The earlier validation
 commands and results are archived. [Historical reliability report](../../docs/Outdated/Cloud_Reliability_Validation.md)
 The next steps are partial-visibility handling, acquiring orientation when no
 signed observations exist, independently oriented components and richer
@@ -207,8 +207,8 @@ curved-feature semantics.
 Direct analytic-cloud regression (no capture or COLMAP):
 
 ```powershell
-python tools/run_compound_fit_tests.py --noise 0
-python tools/run_compound_fit_tests.py --noise 0.02 --output outputs/compound-fit-tests-noisy
+python -m tools.validation.run_compound_fit_tests --noise 0
+python -m tools.validation.run_compound_fit_tests --noise 0.02 --output outputs/compound-fit-tests-noisy
 python -m unittest discover -s tools/tests -p test_compound_fit.py -v
 ```
 
@@ -273,5 +273,5 @@ recovery, and observation-checked joint parallel/perpendicular/coaxial fitting f
 planes and cylinders. Mixed recognition retries failed regions without changing
 previously recognized host/features; local snapshots and candidate alternatives
 remain available in `SurfaceAnalysisResult::localFailures`. Run
-`python tools/run_local_recovery_tests.py` for the mixed-board acceptance matrix.
+`python -m tools.validation.run_local_recovery_tests` for the mixed-board acceptance matrix.
 The earlier workflow description is archived. [Historical surface analysis design](../../docs/Outdated/Shared_Surface_Analysis_Refactor.md)

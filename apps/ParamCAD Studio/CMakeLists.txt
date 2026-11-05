@@ -267,17 +267,17 @@ vtk_module_autoinit(
 
 if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
     add_executable(cad_reconstruction_validation
-        ../../tools/cad_reconstruction_validation.cpp
-        ../../tools/StepCloudSampler.cpp
-        ../../tools/SurfaceCoverageValidation.cpp
-        ../../tools/PointCloudCadValidation.cpp
-        ../../tools/AssemblyDiagnostics.cpp
-        ../../tools/ReconstructionContractStages.cpp
-        ../../tools/ReconstructionAnalysisStages.cpp
-        ../../tools/ReconstructionModelingStages.cpp
-        ../../tools/ReconstructionWorkflowStage.cpp
-        ../../tools/ReconstructionAssemblyStages.cpp
-        ../../tools/ReconstructionProjectionStages.cpp
+        ../../tools/validation/native/cad_reconstruction_validation.cpp
+        ../../tools/validation/native/StepCloudSampler.cpp
+        ../../tools/validation/native/SurfaceCoverageValidation.cpp
+        ../../tools/validation/native/PointCloudCadValidation.cpp
+        ../../tools/validation/native/AssemblyDiagnostics.cpp
+        ../../tools/validation/native/ReconstructionContractStages.cpp
+        ../../tools/validation/native/ReconstructionAnalysisStages.cpp
+        ../../tools/validation/native/ReconstructionModelingStages.cpp
+        ../../tools/validation/native/ReconstructionWorkflowStage.cpp
+        ../../tools/validation/native/ReconstructionAssemblyStages.cpp
+        ../../tools/validation/native/ReconstructionProjectionStages.cpp
         src/app/CadReconstructionTask.h src/app/CadReconstructionTask.cpp
         src/io/ProjectStore.cpp src/io/FeatureCodec.cpp src/io/PlyWriter.cpp
         src/core/PointCloudDocument.h src/core/PointCloudDocument.cpp

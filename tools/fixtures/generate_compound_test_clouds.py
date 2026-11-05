@@ -12,9 +12,9 @@ from pathlib import Path
 import random
 import subprocess
 
-from run_point_cloud_cad import DEFAULT_ENGINE as ENGINE
+from tools.reconstruction.run_point_cloud_cad import DEFAULT_ENGINE as ENGINE
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def rotation(yaw=0, pitch=0):

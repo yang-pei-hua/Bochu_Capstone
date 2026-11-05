@@ -27,7 +27,7 @@ flowchart TD
     CAD --> STEP["STEP 导出回读"]
 ```
 
-上图把任务编排中的主要数据边画出来。当前任务从同一份输入生成工作点云和只做尺度转换的全量恢复观测。无显式模板和关系时，常规识别失败或任务按当前规则判定为多体，才尝试装配分支。装配结束后，可选回退从开放部件的点 ID 取得单件观测，再执行投影拟合。单件验证命令可以直接进入投影分支。 [生产任务](<../apps/ParamCAD Studio/src/app/CadReconstructionTask.cpp#L41>) · [装配回退](../core/geometric_reconstruction/src/recognition/assembly/AssemblyReconstruction.cpp#L20) · [独立拟合命令](../tools/cad_reconstruction_validation.cpp#L1007)
+上图把任务编排中的主要数据边画出来。当前任务从同一份输入生成工作点云和只做尺度转换的全量恢复观测。无显式模板和关系时，常规识别失败或任务按当前规则判定为多体，才尝试装配分支。装配结束后，可选回退从开放部件的点 ID 取得单件观测，再执行投影拟合。单件验证命令可以直接进入投影分支。 [生产任务](<../apps/ParamCAD Studio/src/app/CadReconstructionTask.cpp#L41>) · [装配回退](../core/geometric_reconstruction/src/recognition/assembly/AssemblyReconstruction.cpp#L20) · [独立拟合命令](../tools/validation/native/cad_reconstruction_validation.cpp#L1007)
 
 | 当前交界 | 实际耦合 | 拆分时的约束 |
 | --- | --- | --- |
@@ -110,7 +110,7 @@ flowchart TD
 | 30 特征重建和 B-rep 运算 | 特征历史、参数、依赖、目标体及参考平面 | 重放后的 B-rep、各特征状态和语义面解析结果 | [RebuildEngine::rebuild](../core/parametric_modeling/src/RebuildEngine.cpp#L212)、[resolveSketchPlane](../core/parametric_modeling/src/SemanticFaces.cpp#L115)、[OCCT 构造器入口](../core/parametric_modeling/src/occt/Builders.h) | P2 |
 | 31 编辑和原子提交 | 当前模型、命令或补丁、预期修订 | 新模型修订和变更项，或失败及回滚结果 | [ModelingCore::apply](../core/parametric_modeling/src/ModelingCore.cpp#L65)、[PartDocument](../core/parametric_modeling/src/PartDocument.cpp) | P2 |
 | 32 PCAD 编解码与重开 | 工程快照或 PCAD 文件、格式版本 | 可重开的工程、复原的特征与引用、版本或校验诊断 | [FeatureCodec](<../apps/ParamCAD Studio/src/io/FeatureCodec.cpp#L313>)、[ProjectStore::save](<../apps/ParamCAD Studio/src/io/ProjectStore.cpp#L199>)、[ProjectStore::load](<../apps/ParamCAD Studio/src/io/ProjectStore.cpp#L284>) | P2 |
-| 33 STEP 导出和回读验证 | 已验证的 B-rep、导出选项，或导出的 STEP | STEP 文件或回读的几何与转换诊断 | [核心 STEP 导出](../core/parametric_modeling/src/StepExporter.cpp#L39)、[客户端 STEP 载入](<../apps/ParamCAD Studio/src/io/StepModelLoader.cpp#L118>)、[验证工具的回读](../tools/PointCloudCadValidation.cpp#L76) | P2 |
+| 33 STEP 导出和回读验证 | 已验证的 B-rep、导出选项，或导出的 STEP | STEP 文件或回读的几何与转换诊断 | [核心 STEP 导出](../core/parametric_modeling/src/StepExporter.cpp#L39)、[客户端 STEP 载入](<../apps/ParamCAD Studio/src/io/StepModelLoader.cpp#L118>)、[验证工具的回读](../tools/validation/native/PointCloudCadValidation.cpp#L76) | P2 |
 | 34 生产流程编排与结果交接 | 输入快照、配置、人工模板与关系、取消信号和工作区修订 | 采用的分支、完整或部分候选、阶段诊断、取消和结果交接状态 | [CadReconstructionTask](<../apps/ParamCAD Studio/src/app/CadReconstructionTask.cpp#L41>)、[常规候选分支](../core/geometric_reconstruction/src/recognition/ParametricSolidRecognizer.cpp#L30)、[工作区接收与提交](<../apps/ParamCAD Studio/src/app/PointCloudWorkspaceController.cpp#L567>) | P1 |
 
 ## 3. 固定接口与固定验证集
@@ -137,7 +137,7 @@ flowchart TD
 
 记录工作树或构建标识、执行程序哈希、配置、种子和样本哈希。先选择一个解析 U 形槽、一个已知实例标签的双部件装配、一个带通孔或盲孔的实体及一个明确开放的壳。给这些样本保存标准观测和各阶段可重放夹具。用 `box-wall_019` 作为已有工件回归。人工审核的 226 个候选保留为项目样本，进入完整点云正例集前逐件检查对应特征的观测完整性。
 
-现有工具已有逐面采样、装配探针、独立投影和纯点云重建命令，以及曲面和建模回归。先保存这些结果作为对照，复用评测与产物检查。 [验证命令入口](../tools/cad_reconstruction_validation.cpp#L986) · [工具与现有指标](../tools/README.md#step-点云与逐面识别验证) · [曲面分析测试](../core/geometric_reconstruction/tests/analysis/surface_analysis_test.cpp) · [装配测试](../core/geometric_reconstruction/tests/assembly_reconstruction_test.cpp) · [建模烟测](../core/parametric_modeling/tests/modeling_core_smoke_test.cpp)
+现有工具已有逐面采样、装配探针、独立投影和纯点云重建命令，以及曲面和建模回归。先保存这些结果作为对照，复用评测与产物检查。 [验证命令入口](../tools/validation/native/cad_reconstruction_validation.cpp#L986) · [工具与现有指标](../tools/README.md#step-点云与逐面识别验证) · [曲面分析测试](../core/geometric_reconstruction/tests/analysis/surface_analysis_test.cpp) · [装配测试](../core/geometric_reconstruction/tests/assembly_reconstruction_test.cpp) · [建模烟测](../core/parametric_modeling/tests/modeling_core_smoke_test.cpp)
 
 ### 阶段 1 · 建立观测契约和装配边界
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 COLORS = np.array([[170, 180, 195], [65, 160, 220], [235, 155, 50],
                    [65, 185, 140], [180, 110, 220], [230, 100, 110],
                    [100, 155, 235], [220, 185, 65], [110, 195, 190]], dtype=np.uint8)

@@ -21,7 +21,7 @@ import time
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from run_point_cloud_cad import DEFAULT_ENGINE, sha256, write_json
+from tools.reconstruction.run_point_cloud_cad import DEFAULT_ENGINE, sha256, write_json
 
 
 SCALARS = {"char": "i1", "int8": "i1", "uchar": "u1", "uint8": "u1",
@@ -573,9 +573,9 @@ def main():
               "所有候选都可以单独用于后续算法测试；务必将 cloud.json 与 cloud.ply 放在一起，以保留毫米/米单位。",
               "validation.json 保存全量逐点/属性比对、点覆盖、图像完整性及编号引线所属集合检查结果。", "",
               "## 批量重建检查包", "", "在仓库根目录运行，输出目录使用一个新目录：", "", "```powershell",
-              f'python tools/export_component_clouds.py --reconstruction "{root}" --output outputs/component-cloud-review-new --workers 4',
+              f'python -m tools.component_review.export_component_clouds --reconstruction "{root}" --output outputs/component-cloud-review-new --workers 4',
               "```", "", "## 测试一个孤立点云", "", "```powershell",
-              f'python tools/run_point_cloud_cad.py --input isolated="{output / sample_cloud}" --output outputs/isolated-cloud-test-new --timeout 300',
+              f'python -m tools.reconstruction.run_point_cloud_cad --input isolated="{output / sample_cloud}" --output outputs/isolated-cloud-test-new --timeout 300',
               "```"]
     (output/"README.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
     print(f"Completed: {len(tasks)} clouds/contact sheets; {len(summary['cases'])} locator atlases; {output}", flush=True)

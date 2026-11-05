@@ -7,9 +7,9 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from generate_curved_test_clouds import ROOT,KINDS,definition,write_case
-from generate_compound_test_clouds import ENGINE
-from run_performance_validation import hidden_process_options
+from tools.fixtures.generate_curved_test_clouds import ROOT,KINDS,definition,write_case
+from tools.fixtures.generate_compound_test_clouds import ENGINE
+from tools.validation.run_performance_validation import hidden_process_options
 
 
 def run_case(directory, kind, noise=0, rotated=False, seed=4500, incomplete=False):

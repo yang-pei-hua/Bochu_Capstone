@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import time
 
-from generate_compound_test_clouds import ENGINE, ROOT, generate
+from tools.fixtures.generate_compound_test_clouds import ENGINE, ROOT, generate
 
 
 def run_suite(directory, noise=0.02, executable=ENGINE):

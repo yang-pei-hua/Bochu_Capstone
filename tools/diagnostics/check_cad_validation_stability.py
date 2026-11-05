@@ -15,11 +15,11 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "tools" / "tests"))
-from test_cad_validation import CadValidationTests, EXECUTABLE
-from refit_performance_validation import local_artifact
-from run_performance_validation import hidden_process_options
+from tools.tests.test_cad_validation import CadValidationTests, EXECUTABLE
+from tools.validation.refit_performance_validation import local_artifact
+from tools.validation.run_performance_validation import hidden_process_options
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def geometry_parameters(report: dict) -> dict:

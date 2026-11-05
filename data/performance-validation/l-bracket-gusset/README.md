@@ -64,4 +64,4 @@ Studio 已接入相同的 `reconstructParametricSolid()` 入口。
 
 无图像重建的回归测试还覆盖单体、共面合并、重叠、T/U 型、三/四层台阶、分离物块、
 任意整体旋转与打乱点序；分别使用理想点云与 0.02 mm 位置噪声。生成和验收脚本：
-`tools/generate_compound_test_clouds.py`、`tools/run_compound_fit_tests.py`。
+`tools/fixtures/generate_compound_test_clouds.py`、`tools/validation/run_compound_fit_tests.py`。

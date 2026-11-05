@@ -218,7 +218,7 @@ Bochu_Capstone/
 ├── data/                          示例数据与性能验证样例
 ├── docs/                          当前模块契约与重构计划，旧资料位于 Outdated/
 ├── outputs/                       默认运行输出目录
-├── tools/                         输出清理、性能验证等辅助脚本
+├── tools/                         重建、验证、测试数据生成和诊断工具
 ├── packaging/                     Windows 完整离线 Release 打包与安装脚本
 └── deps/                          本地二进制 SDK/运行时，不提交到 Git
 ```
@@ -297,7 +297,7 @@ Bochu_Capstone/
 
 稳定性修复已消除精确点云上退化圆柱候选引发的原生崩溃，并隔离随机采样状态。
 圆柱使用完整支持点精修轴线、中心和半径；同一孔壁的重复证据会合并。
-`tools/check_cad_validation_stability.py` 输出重复结果的几何指纹、参数波动和精度验收，
+`tools/diagnostics/check_cad_validation_stability.py` 输出重复结果的几何指纹、参数波动和精度验收，
 默认只读取结构化报告，也支持对已有照片点云重复拟合。
 
 ## 6. 第一次进入仓库时从哪里开始

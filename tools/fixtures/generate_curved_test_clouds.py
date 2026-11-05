@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 import random
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 KINDS = ("sphere", "cylinder", "cone", "torus", "frustum")
 
 
@@ -136,8 +136,8 @@ def main():
                 "单位为毫米。" + placements[kind] + "\n\n"
                 "`case.json` 记录尺寸、实体数量和验收阈值，`model.step` 为独立构造的标准实体，"
                 "`model_report.json` 记录有效性、解析体积和 STEP 回读检查。\n\n"
-                "使用 `python tools/generate_standard_models.py --cases " + kind + "` 重新生成。"
-                "运行 `python tools/run_curved_fit_tests.py --cases " + kind + "` 验证重建；"
+                "使用 `python -m tools.fixtures.generate_standard_models --cases " + kind + "` 重新生成。"
+                "运行 `python -m tools.validation.run_curved_fit_tests --cases " + kind + "` 验证重建；"
                 "生成的点云、重建 STEP、诊断和日志位于 `outputs/curved-fit-tests/`。\n",encoding="utf-8")
             print(json.dumps({"case":kind,"parameters":case["parameters"]}))
         else:

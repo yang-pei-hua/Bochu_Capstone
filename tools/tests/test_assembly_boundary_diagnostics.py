@@ -1,14 +1,12 @@
 """Geometric interpretation contracts for the offline boundary report."""
 import json
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from diagnose_assembly_boundaries import crosses_itself, metrics
+from tools.diagnostics.diagnose_assembly_boundaries import crosses_itself, metrics
 
 
 class AssemblyBoundaryDiagnosticsTests(unittest.TestCase):

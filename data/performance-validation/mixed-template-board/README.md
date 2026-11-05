@@ -1,10 +1,10 @@
 # 大底板混合特征点云
 
 这是直接从解析几何采样的混合特征测试输入，不经过图片重建，也不依赖识别算法。
-生成器：`tools/generate_mixed_template_board.py`（依赖 NumPy、Matplotlib）。
+生成器：`tools/fixtures/generate_mixed_template_board.py`（依赖 NumPy、Matplotlib）。
 
 ```powershell
-python tools/generate_mixed_template_board.py
+python -m tools.fixtures.generate_mixed_template_board
 ```
 
 输出：`outputs/mixed-template-board/`。默认点间距约 1 mm，随机种子 4500。
@@ -54,7 +54,7 @@ PLY 使用 binary little endian，字段为 XYZ、单位外法向 NX/NY/NZ、RGB
 这些生成检查验证输入点云。共享曲面重构后的完整模型验收另外运行：
 
 ```powershell
-python tools/run_mixed_feature_fit_tests.py
+python -m tools.validation.run_mixed_feature_fit_tests
 ```
 
 默认在 `outputs/shared-surface-mixed-validation/` 保存独立参考 STEP、无噪声/噪声版

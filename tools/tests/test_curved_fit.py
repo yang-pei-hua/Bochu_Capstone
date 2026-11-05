@@ -1,14 +1,12 @@
 """Complete curved solids must export accurately; partial scans must be rejected."""
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from generate_compound_test_clouds import ENGINE
-from generate_curved_test_clouds import KINDS
-from run_curved_fit_tests import run_case
-from check_cad_validation_stability import geometry_parameters
+from tools.fixtures.generate_compound_test_clouds import ENGINE
+from tools.fixtures.generate_curved_test_clouds import KINDS
+from tools.validation.run_curved_fit_tests import run_case
+from tools.diagnostics.check_cad_validation_stability import geometry_parameters
 
 
 @unittest.skipUnless(ENGINE.is_file(),"Build cad_reconstruction_validation first")

@@ -6,7 +6,7 @@ from xml.sax.saxutils import escape
 from PIL import Image, ImageDraw
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DESTINATION = ROOT / "apps" / "ParamCAD Studio" / "resources" / "icons"
 SCALE = 4
 # Fill the desktop icon tile while keeping a small transparent safety margin.

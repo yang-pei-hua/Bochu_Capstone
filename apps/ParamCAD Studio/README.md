@@ -62,7 +62,7 @@ beside the staged DLLs, otherwise startup fails with errors such as
 
 The application icon is embedded in both the Windows executable and the Qt
 window. Editable SVG, PNG and multi-size ICO assets live in `resources/icons/`.
-To regenerate them, run `python tools/generate_client_icon.py` from the repository
+To regenerate them, run `python -m tools.assets.generate_client_icon` from the repository
 root with Pillow installed, then rebuild the client. Desktop shortcuts should
 target the executable above and use its Release directory as the working directory.
 

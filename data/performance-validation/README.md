@@ -20,7 +20,7 @@ VTK, OCCT, CGAL and vcpkg must already be configured):
 ```powershell
 cmake -S "apps/ParamCAD Studio" -B "apps/ParamCAD Studio/build/msvc-debug" -DCAD_CLIENT_BUILD_VALIDATION_TOOLS=ON
 cmake --build "apps/ParamCAD Studio/build/msvc-debug" --config Release --target cad_reconstruction_validation
-python tools/generate_standard_models.py
+python -m tools.fixtures.generate_standard_models
 ```
 
 The generator reads each `case.json`, writes its `model.step`, verifies one valid
@@ -32,8 +32,8 @@ coordinates remain attached to the model during capture.
 Run each case with a **new or empty** output directory:
 
 ```powershell
-python tools/run_performance_validation.py --model data/performance-validation/box-through-hole/model.step --texture data/performance-validation/textures/standard_capture.png --output outputs/performance-validation-box-through-hole --gpu
-python tools/run_performance_validation.py --model data/performance-validation/l-bracket-gusset/model.step --texture data/performance-validation/textures/standard_capture.png --output outputs/performance-validation-l-bracket-gusset --gpu
+python -m tools.validation.run_performance_validation --model data/performance-validation/box-through-hole/model.step --texture data/performance-validation/textures/standard_capture.png --output outputs/performance-validation-box-through-hole --gpu
+python -m tools.validation.run_performance_validation --model data/performance-validation/l-bracket-gusset/model.step --texture data/performance-validation/textures/standard_capture.png --output outputs/performance-validation-l-bracket-gusset --gpu
 ```
 
 The full path is 62-view capture → camera metadata validation → GPU dense COLMAP
@@ -45,7 +45,7 @@ recognition succeeds. `--no-gpu` deliberately selects CPU sparse reconstruction.
 ## Compact diagnostics, without loading engine logs
 
 ```powershell
-python tools/diagnose_performance_validation.py outputs/performance-validation-box-through-hole outputs/performance-validation-l-bracket-gusset
+python -m tools.diagnostics.diagnose_performance_validation outputs/performance-validation-box-through-hole outputs/performance-validation-l-bracket-gusset
 ```
 
 The diagnostic reads structured stage status and reports only. It includes the
@@ -60,7 +60,7 @@ reading logs; `--evidence` includes compact per-surface fitting evidence.
 To iterate on CAD fitting without repeating the expensive image reconstruction:
 
 ```powershell
-python tools/refit_performance_validation.py outputs/performance-validation-l-bracket-gusset
+python -m tools.validation.refit_performance_validation outputs/performance-validation-l-bracket-gusset
 ```
 
 This uses saved input snapshots and metric cloud metadata, preserves the initial
@@ -78,11 +78,11 @@ For inexpensive validator/kernel stability checks on mathematically sampled
 clouds (these are **not** repeated photo reconstruction runs):
 
 ```powershell
-python tools/check_cad_validation_stability.py --runs 10
-python tools/check_cad_validation_stability.py --exact --runs 10 --output outputs/cad-validator-exact.json
-python tools/check_cad_validation_stability.py --exact --seed-sweep --seed 0 --runs 30 --output outputs/cad-validator-exact-seeds.json
-python tools/check_cad_validation_stability.py --case outputs/performance-validation-box-through-hole --runs 10 --output outputs/cad-validator-photo-repeat.json
-python tools/check_cad_validation_stability.py --case outputs/performance-validation-box-through-hole --seed-sweep --seed 0 --runs 20 --output outputs/cad-validator-photo-seeds.json
+python -m tools.diagnostics.check_cad_validation_stability --runs 10
+python -m tools.diagnostics.check_cad_validation_stability --exact --runs 10 --output outputs/cad-validator-exact.json
+python -m tools.diagnostics.check_cad_validation_stability --exact --seed-sweep --seed 0 --runs 30 --output outputs/cad-validator-exact-seeds.json
+python -m tools.diagnostics.check_cad_validation_stability --case outputs/performance-validation-box-through-hole --runs 10 --output outputs/cad-validator-photo-repeat.json
+python -m tools.diagnostics.check_cad_validation_stability --case outputs/performance-validation-box-through-hole --seed-sweep --seed 0 --runs 20 --output outputs/cad-validator-photo-seeds.json
 ```
 
 The default sample adds seeded 0.005 mm position noise and 0.0001 normal-component
@@ -181,8 +181,8 @@ Direct analytic point clouds provide inexpensive regression independent of
 capture and COLMAP:
 
 ```powershell
-python tools/run_compound_fit_tests.py --noise 0
-python tools/run_compound_fit_tests.py --noise 0.02 --output outputs/compound-fit-tests-noisy
+python -m tools.validation.run_compound_fit_tests --noise 0
+python -m tools.validation.run_compound_fit_tests --noise 0.02 --output outputs/compound-fit-tests-noisy
 python -m unittest discover -s tools/tests -p test_compound_fit.py -v
 ```
 
@@ -218,12 +218,12 @@ includes a frustum (base radius 12, top radius 5, height 30). Source constructio
 and analytic surface sampling are independent of the reconstruction algorithm.
 
 ```powershell
-python tools/generate_curved_test_clouds.py --standard-definitions
-python tools/generate_standard_models.py --cases sphere cylinder cone torus
-python tools/run_curved_fit_tests.py --output outputs/curved-fit-exact
-python tools/run_curved_fit_tests.py --noise 0.02 --output outputs/curved-fit-noisy
-python tools/run_curved_fit_tests.py --rotated --noise 0.02 --seed 0 --seed-sweep 5 --output outputs/curved-fit-rotated-seeds
-python tools/run_curved_fit_tests.py --rotated --noise 0.02 --incomplete --output outputs/curved-fit-incomplete-rotated
+python -m tools.fixtures.generate_curved_test_clouds --standard-definitions
+python -m tools.fixtures.generate_standard_models --cases sphere cylinder cone torus
+python -m tools.validation.run_curved_fit_tests --output outputs/curved-fit-exact
+python -m tools.validation.run_curved_fit_tests --noise 0.02 --output outputs/curved-fit-noisy
+python -m tools.validation.run_curved_fit_tests --rotated --noise 0.02 --seed 0 --seed-sweep 5 --output outputs/curved-fit-rotated-seeds
+python -m tools.validation.run_curved_fit_tests --rotated --noise 0.02 --incomplete --output outputs/curved-fit-incomplete-rotated
 python -m unittest discover -s tools/tests -p test_curved_fit.py -v
 ```
 
@@ -234,8 +234,8 @@ output case, and never reads engine logs. Direct-cloud cases have replay manifes
 for the existing stability tool, e.g.:
 
 ```powershell
-python tools/check_cad_validation_stability.py --case outputs/curved-fit-noisy/torus-seed-4500 --runs 5 --output outputs/curved-torus-repeat.json
-python tools/diagnose_performance_validation.py outputs/curved-fit-exact/sphere-seed-4500 --brief
+python -m tools.diagnostics.check_cad_validation_stability --case outputs/curved-fit-noisy/torus-seed-4500 --runs 5 --output outputs/curved-torus-repeat.json
+python -m tools.diagnostics.diagnose_performance_validation outputs/curved-fit-exact/sphere-seed-4500 --brief
 ```
 
 Analytic-source validation uses 32,768 independent membership samples for curved

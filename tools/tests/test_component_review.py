@@ -3,15 +3,13 @@ import copy
 import csv
 import json
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from component_review.store import Dataset, ReviewLock, ReviewStore, digest
+from tools.component_review.store import Dataset, ReviewLock, ReviewStore, digest
 
 
 def fixture(root):
@@ -65,7 +63,7 @@ class ReviewStoreTests(unittest.TestCase):
             if Path(destination) == self.store.path:
                 raise OSError("simulated disk failure")
             return real_replace(source, destination)
-        with patch("component_review.store.os.replace", side_effect=fail_current):
+        with patch("tools.component_review.store.os.replace", side_effect=fail_current):
             with self.assertRaises(OSError):
                 self.store.decide(self.dataset.items[0], "correct", cursor=self.dataset.items[1].name)
         self.assertEqual(self.store.data, before)
@@ -109,7 +107,7 @@ class ReviewStoreTests(unittest.TestCase):
 class ReviewUiTests(unittest.TestCase):
     def test_buttons_filters_zoom_and_resume_use_real_widgets(self):
         import tkinter as tk
-        from component_review.app import ReviewApp
+        from tools.component_review.app import ReviewApp
         with tempfile.TemporaryDirectory() as temp:
             dataset = fixture(Path(temp));store = ReviewStore(dataset)
             root = tk.Tk();root.withdraw()

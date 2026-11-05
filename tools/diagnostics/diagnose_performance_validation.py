@@ -81,7 +81,7 @@ def main() -> int:
             parser.error(f"case directory does not exist: {case}")
         result = diagnose(case.resolve(), args.log_tail)
         if args.inspect_sparse:
-            from run_performance_validation import database_statistics, find_colmap, find_sparse_model, parse_model_analyzer, PipelineError, hidden_process_options
+            from tools.validation.run_performance_validation import database_statistics, find_colmap, find_sparse_model, parse_model_analyzer, PipelineError, hidden_process_options
             try:
                 workspace = case.resolve() / "workspace"
                 model = find_sparse_model(workspace)

@@ -9,8 +9,8 @@ import subprocess
 import sys
 import time
 
-from reconstruction_contract_fixtures import materialize
-from run_point_cloud_cad import DEFAULT_ENGINE, ROOT, read_json, sha256, write_json
+from tools.contracts.reconstruction_contract_fixtures import materialize
+from tools.reconstruction.run_point_cloud_cad import DEFAULT_ENGINE, ROOT, read_json, sha256, write_json
 
 DEFAULT_MANIFEST = ROOT / "data/reconstruction-contracts/v1/manifest.json"
 
@@ -267,7 +267,7 @@ def main(argv=None):
     summary = {"schema": "paramcad.reconstruction-contract-run", "version": 1,
                "manifest_sha256": sha256(args.manifest), "executable": str(engine),
                "executable_sha256": sha256(engine),
-               "fixture_generator_sha256": sha256(ROOT / "tools/reconstruction_contract_fixtures.py"),
+               "fixture_generator_sha256": sha256(ROOT / "tools/contracts/reconstruction_contract_fixtures.py"),
                "results": results, "executions": run.executions}
     write_json(output / "summary.json", summary)
     return int(any(row["status"] != "passed" for row in results))

@@ -1,4 +1,4 @@
-# pcad 命令行工具
+# ParamCAD 工具
 
 `pcad` 是仓库工具的统一入口，使用 Python 3.10 或更新版本，仅依赖标准库。
 
@@ -7,7 +7,7 @@
 双击检查包目录中的 `点云划分审核.lnk` 或 `启动点云审核.cmd`，也可执行：
 
 ```powershell
-python tools/review_component_clouds.py --dataset outputs/component-cloud-review-20261101
+python -m tools.component_review.review_component_clouds --dataset outputs/component-cloud-review-20261101
 ```
 
 依赖 Python 自带的 Tkinter 和 Pillow，离线运行。按原编号依次加载拼图，三个按钮分别记录
@@ -32,10 +32,10 @@ python -m unittest discover -s tools/tests -p test_component_review.py -v
 
 ## 批量导出独立候选点云与多视角检查图
 
-已有 `run_point_cloud_cad.py` 的四工件输出可批量拆成独立 PLY，并生成每份 12 视角拼图及整件编号定位图：
+已有点云重建的四工件输出可批量拆成独立 PLY，并生成每份 12 视角拼图及整件编号定位图：
 
 ```powershell
-python tools/export_component_clouds.py `
+python -m tools.component_review.export_component_clouds `
   --reconstruction outputs/boundary-repair-20261101/final `
   --output outputs/component-cloud-review-new --workers 4
 ```
@@ -62,7 +62,7 @@ python -m unittest discover -s tools/tests -p test_component_cloud_export.py -v
 
 ```powershell
 cmake --build "apps/ParamCAD Studio/build/msvc-debug" --config Release --target cad_reconstruction_validation
-python tools/run_step_surface_validation.py data/real-workpieces-step/cover-plate/cover-plate.step --output outputs/cover-plate-validation
+python -m tools.validation.run_step_surface_validation data/real-workpieces-step/cover-plate/cover-plate.step --output outputs/cover-plate-validation
 ```
 
 输出目录必须新建或为空。生成带法向的毫米点云、独立 STEP 参考清单、核心和客户端逐面报告、
@@ -88,7 +88,7 @@ python tools/run_step_surface_validation.py data/real-workpieces-step/cover-plat
 
 ## 仅点云的 CAD 重建
 
-边界杂线与壳闭合问题可用 `diagnose_assembly_boundaries.py --baseline <批处理输出> --output <新目录> --probe`
+边界杂线与壳闭合问题可用 `python -m tools.diagnostics.diagnose_assembly_boundaries --baseline <批处理输出> --output <新目录> --probe`
 复测。默认、alpha 半径增大、全输入点三个探针直接调用同一部件分离实现，保留输入校验和、
 参数及开放边/轮廓统计；不会读取参考 STEP 或将实验参数改成生产默认。
 此前的四工件边界分析、首轮轮廓修复及验收记录已归档。 [历史边界诊断](../docs/Outdated/Assembly_Boundary_Investigation_20261101.md) · [历史修复报告](../docs/Outdated/Assembly_Boundary_Repair_20261101.md)
@@ -98,7 +98,7 @@ python tools/run_step_surface_validation.py data/real-workpieces-step/cover-plat
 已有工程的参数重建、普通 STEP 导入／导出继续保留。
 
 ```powershell
-python tools/run_point_cloud_cad.py --input scan=path/to/scan.ply --unit mm --output outputs/cloud-cad-new
+python -m tools.reconstruction.run_point_cloud_cad --input scan=path/to/scan.ply --unit mm --output outputs/cloud-cad-new
 ```
 
 脚本只复制 PLY 和单位信息到隔离输入目录，再调用客户端同一个后台重建任务。
@@ -120,7 +120,7 @@ python tools/run_point_cloud_cad.py --input scan=path/to/scan.ply --unit mm --ou
 独立部件拟合可以直接使用审核工具选出的 PLY，需保留相邻的单位 JSON 或用 `--unit` 声明单位。
 
 ```powershell
-python tools/run_point_cloud_cad.py --mode projection `
+python -m tools.reconstruction.run_point_cloud_cad --mode projection `
   --input part=path/to/cloud.ply --output outputs/projection-fit
 ```
 
@@ -191,15 +191,22 @@ tools/
 ├── pcad.cmd              Windows 命令入口，调用 Python
 ├── pcad.py               Python 统一入口
 ├── install_pcad.ps1      注册当前用户 PATH
-└── pcad_cli/
-    ├── cli.py            参数解析和命令分发
-    ├── paths.py          仓库路径
-    ├── studio.py         Studio 启动
-    └── clean.py          输出清理
+├── clean_outputs.py      旧清理命令入口
+├── review_component_clouds.py  既有审核快捷方式入口
+├── pcad_cli/             命令分发、输出清理和 Studio 启动
+├── reconstruction/       PLY 批量重建
+├── component_review/     点云导出、审核界面和审核记录
+├── contracts/            模块契约测试驱动和参考产物生成
+├── fixtures/             标准 STEP 和合成点云生成
+├── validation/           拟合、逐面、性能和可靠性验证
+│   └── native/           C++ 验证程序和模块契约阶段入口
+├── diagnostics/          装配边界、性能和拟合稳定性诊断
+├── assets/               Studio 图标生成
+└── tests/                Python 单元与集成回归
 ```
 
-新增 CLI 功能时，将具体实现放入 `pcad_cli/`，在 `cli.py` 注册子命令并设置
-`handler`，由 `run(args)` 返回退出码。现有性能验证脚本仍可独立运行。
+从仓库根目录用 `python -m tools.<分类>.<脚本名>` 运行分类工具。新增 `pcad` 子命令时，
+将实现放入 `pcad_cli/`，在 `cli.py` 注册并设置 `handler`，由 `run(args)` 返回退出码。
 
 在仓库根目录执行相关测试：
 
@@ -214,13 +221,13 @@ v1 清单覆盖模块 01–34。每次运行中，每个数据集只准备一份
 
 ```powershell
 cmake --build "apps/ParamCAD Studio/build/msvc-debug" --config Release --target cad_reconstruction_validation
-python tools/run_reconstruction_contracts.py --output outputs/contracts-all
-python tools/run_reconstruction_contracts.py --mode cloud --case m21.two_boxes.closure --output outputs/contracts-closure
-python tools/run_reconstruction_contracts.py --mode fixture --case m24.u_channel.profile --output outputs/contracts-profile
-python tools/run_reconstruction_contracts.py --case m11.surface_box.revalidate --output outputs/contracts-repair
-python tools/run_reconstruction_contracts.py --case m13.blind_hole.reject_short_wall --output outputs/contracts-hole
-python tools/run_reconstruction_contracts.py --case m33.blind_hole.step_roundtrip --output outputs/contracts-step
-python tools/run_reconstruction_contracts.py --case m34.surface_box.production --output outputs/contracts-workflow
+python -m tools.contracts.run_reconstruction_contracts --output outputs/contracts-all
+python -m tools.contracts.run_reconstruction_contracts --mode cloud --case m21.two_boxes.closure --output outputs/contracts-closure
+python -m tools.contracts.run_reconstruction_contracts --mode fixture --case m24.u_channel.profile --output outputs/contracts-profile
+python -m tools.contracts.run_reconstruction_contracts --case m11.surface_box.revalidate --output outputs/contracts-repair
+python -m tools.contracts.run_reconstruction_contracts --case m13.blind_hole.reject_short_wall --output outputs/contracts-hole
+python -m tools.contracts.run_reconstruction_contracts --case m33.blind_hole.step_roundtrip --output outputs/contracts-step
+python -m tools.contracts.run_reconstruction_contracts --case m34.surface_box.production --output outputs/contracts-workflow
 ```
 
 默认同时运行两种模式。`fixture` 直接读取参考上游 JSON，只执行目标阶段。`cloud` 按依赖运行当前实现，同一次运行中共享上游结果。装配串联顺序为面片提取、分组、边界恢复、全量回填、闭合。回填在报告中单独记为 19 的 `backfill` 阶段，也可作为目标用例直接运行。上游未达到验收条件时，下游标记 `blocked_upstream`。

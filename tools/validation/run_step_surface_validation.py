@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENGINE = ROOT / "apps/ParamCAD Studio/build/msvc-debug/Release/cad_reconstruction_validation.exe"
 
 

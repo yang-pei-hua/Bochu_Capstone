@@ -12,7 +12,7 @@ import subprocess
 import sys
 import zlib
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data" / "performance-validation"
 EXECUTABLE = ROOT / "apps" / "ParamCAD Studio" / "build" / "msvc-debug" / "Release" / "cad_reconstruction_validation.exe"
 CASES = ("box-through-hole", "l-bracket-gusset", "sphere", "cylinder", "cone", "torus")

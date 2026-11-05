@@ -5,7 +5,7 @@ from itertools import combinations
 import math
 from pathlib import Path
 
-from run_point_cloud_cad import sha256
+from tools.reconstruction.run_point_cloud_cad import sha256
 
 
 def write_cloud(path: Path, points):

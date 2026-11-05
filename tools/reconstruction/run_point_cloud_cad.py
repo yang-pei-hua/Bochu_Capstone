@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 _ISOLATED_ENGINE = ROOT / "apps/ParamCAD Studio/build/msvc-debug/cloud-only/Release/cad_reconstruction_validation.exe"
 DEFAULT_ENGINE = _ISOLATED_ENGINE if _ISOLATED_ENGINE.is_file() else ROOT / "apps/ParamCAD Studio/build/msvc-debug/Release/cad_reconstruction_validation.exe"
 

@@ -10,10 +10,10 @@ import json
 from pathlib import Path
 import subprocess
 import numpy as np
-from generate_mixed_template_board import ROOT, definition, sample, write_ply
-from generate_compound_test_clouds import ENGINE
-from run_mixed_feature_fit_tests import parameter_errors
-from run_performance_validation import hidden_process_options
+from tools.fixtures.generate_mixed_template_board import ROOT, definition, sample, write_ply
+from tools.fixtures.generate_compound_test_clouds import ENGINE
+from tools.validation.run_mixed_feature_fit_tests import parameter_errors
+from tools.validation.run_performance_validation import hidden_process_options
 
 
 def main():

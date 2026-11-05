@@ -14,8 +14,8 @@ import subprocess
 import sys
 import time
 
-from diagnose_performance_validation import diagnose
-from run_performance_validation import OUTPUTS_ROOT, read_json, write_json, hidden_process_options, write_readme, directory_size
+from tools.diagnostics.diagnose_performance_validation import diagnose
+from tools.validation.run_performance_validation import OUTPUTS_ROOT, read_json, write_json, hidden_process_options, write_readme, directory_size
 
 
 def local_artifact(case: Path, relative: str) -> Path:

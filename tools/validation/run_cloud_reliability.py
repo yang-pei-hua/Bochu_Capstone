@@ -13,9 +13,9 @@ import subprocess
 import sys
 import time
 
-from generate_compound_test_clouds import ENGINE, ROOT, box, cases, mass_properties, sample_surface
-from generate_curved_test_clouds import definition, samples
-from run_performance_validation import hidden_process_options
+from tools.fixtures.generate_compound_test_clouds import ENGINE, ROOT, box, cases, mass_properties, sample_surface
+from tools.fixtures.generate_curved_test_clouds import definition, samples
+from tools.validation.run_performance_validation import hidden_process_options
 
 
 CONDITIONS = ("clean", "noise", "outliers", "missing-normals", "no-normals", "nonuniform", "incomplete")

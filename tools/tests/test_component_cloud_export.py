@@ -1,16 +1,15 @@
 """Original-observation and numbering contracts for component review exports."""
 import json
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from export_component_clouds import (camera, partition, principal_frame, read_ply,
-                                    render_contact_sheet, spread_labels, write_part)
+from tools.component_review.export_component_clouds import (
+    camera, partition, principal_frame, read_ply, render_contact_sheet, spread_labels, write_part,
+)
 
 
 class ComponentCloudExportTests(unittest.TestCase):

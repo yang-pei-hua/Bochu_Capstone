@@ -8,13 +8,12 @@ import os
 import random
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 
+from tools.reconstruction.run_point_cloud_cad import DEFAULT_ENGINE as EXECUTABLE
+
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
-from run_point_cloud_cad import DEFAULT_ENGINE as EXECUTABLE
 CASE = ROOT / "data/performance-validation/box-through-hole"
 
 
@@ -32,7 +31,7 @@ class CadValidationTests(unittest.TestCase):
     @unittest.skipUnless((ROOT / "outputs/performance-validation-box-through-hole/dense_cloud.ply").is_file(),
                          "Saved photo validation cloud is required")
     def test_photo_cloud_keeps_one_hole_across_sample_streams(self):
-        from check_cad_validation_stability import replay_case
+        from tools.diagnostics.check_cad_validation_stability import replay_case
         case = ROOT / "outputs/performance-validation-box-through-hole"
         with tempfile.TemporaryDirectory() as temporary:
             for seed in (2, 14):
