@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 大模型权重
+*.pth
+*.ckpt
+models/.cache/
+
+# 你手动下载的 whl 包
+*.whl
+
+# 编译产生的缓存
+build/
+*.egg-info/
