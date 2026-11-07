@@ -4,6 +4,7 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <GProp_GProps.hxx>
 #include <algorithm>
+#include <array>
 #include <random>
 #include <stdexcept>
 #include <iostream>
@@ -152,6 +153,436 @@ void nonorthogonalFaces() {
     require(closed(result)==1&&result.patches.size()==5,"nonorthogonal finite faces connect into a triangular prism");
     require(std::abs(volume(result.candidate)-120)<1e-5,"closure is not limited to six orthogonal box planes");
 }
+void drilledProfiles() {
+    using namespace reconstruction::math3;
+    constexpr double height = 4;
+    constexpr double pi = 3.14159265358979323846;
+    const std::vector<Vec3> corners{{-60,-24,0},{60,-24,0},{60,14,0},{46,24,0},{-60,24,0}};
+    const std::array<Vec3,2> holes{{{-20,-4,6},{22,5,4.5}}};
+    auto fixture = [&](bool incomplete, bool partialArc = false, bool blind = false, int endGap = 0, bool notched = false) {
+        std::vector<PointSample> points;
+        auto outline = corners;
+        if (notched) outline.insert(outline.end()-1,{{10,24,0},{10,12,0},{-10,12,0},{-10,24,0}});
+        auto emit = [&](Vec3 p, Vec3 n) {
+            auto tilt = [](Vec3 v) {
+                return rotate({v.x,std::cos(.44)*v.y-std::sin(.44)*v.z,std::sin(.44)*v.y+std::cos(.44)*v.z}, .37);
+            };
+            points.push_back({points.size()+1, add(tilt(p), {130,-217,49}), tilt(n), 1, std::nullopt, true});
+        };
+        for (int cap : {0,1}) for (int u=0; u<80; ++u) for (int v=0; v<36; ++v) {
+            const double x = -60 + (u+.5)*120/80, y = -24 + (v+.5)*48/36;
+            if ((x-46)*10+(y-24)*14 > 0 || (notched && x>-10 && x<10 && y>12) ||
+                std::any_of(holes.begin(),holes.end(),[&](Vec3 h) {
+                    return (!blind || cap == (h.x > 0)) && std::hypot(x-h.x,y-h.y) < h.z;
+                })) continue;
+            emit({x,y,cap*height}, {0,0,cap?1.0:-1.0});
+        }
+        for (std::size_t k=0; k<outline.size(); ++k) {
+            const auto start = outline[k], edge = subtract(outline[(k+1)%outline.size()],start);
+            const auto n = normalized(Vec3{edge.y,-edge.x,0});
+            for (int u=0; u<36; ++u) for (int v=0; v<12; ++v) {
+                if (k == outline.size()-1 && u < endGap) continue;
+                const auto p = add(start,scale(edge,(u+.5)/36));
+                emit({p.x,p.y,(v+.5)*height/12},n);
+            }
+        }
+        for (const auto& h : holes) for (int u=0; u<(partialArc?32:64); ++u) {
+            const double a = 2*pi*(u+.5)/64, x = std::cos(a), y = std::sin(a);
+            const auto depthToZ = [&](double d) { return h.x > 0 ? height-d : d; };
+            for (int v=0; v<(incomplete && !blind && &h==&holes.back()?5:12); ++v) {
+                const double depth = (v+.5)*(blind ? 1.8 : height)/12;
+                emit({h.x+h.z*x,h.y+h.z*y,depthToZ(depth)}, {-x,-y,0});
+            }
+            if (!blind || (incomplete && &h == &holes.back())) continue;
+            for (int v=0; v<8; ++v) {
+                const double t = std::sqrt((v+.5)/8), radius = h.z*t;
+                emit({h.x+radius*x,h.y+radius*y,depthToZ(2.9-1.1*t)},
+                     normalized(Vec3{-x,-y,(h.x > 0 ? 1 : -1)*h.z/1.1}));
+            }
+        }
+        return points;
+    };
+    const auto points = fixture(false);
+    const auto drilled = run(points,.006);
+    require(closed(drilled)==1 && drilled.candidate.profileBodies.size()==1 &&
+            drilled.candidate.profileBodies.front().cavities.size()==2,
+            "opposed cap and bore walls reconstruct two independent through holes in a chamfered outline");
+    const double expected = height*(120*48 - 14*10/2 - pi*(6*6 + 4.5*4.5));
+    require(std::abs(volume(drilled.candidate)-expected) < .03 && drilled.candidate.surfaceCoverage > .999,
+            "the reconstructed polygon and both bores agree with the analytic reference volume");
+    require(drilled.parts.front().pointIds.size()+drilled.unassignedPointIds.size()==points.size() &&
+            drilled.parts.front().workingPointIds.size()+drilled.unassignedWorkingPointIds.size()==drilled.workingPoints,
+            "fitted and unassigned observations account for both source and working sets");
+    auto assemblyPoints = points;
+    for (auto sample : points) {
+        sample.id += points.size();
+        sample.position.x += 180;
+        assemblyPoints.push_back(sample);
+    }
+    reconstruction::AssemblyOptions assemblyOptions;
+    assemblyOptions.distanceTolerance = .006;
+    assemblyOptions.maximumWorkingPoints = points.size() * 3 / 2;
+    assemblyOptions.maximumLocalProfileAttempts = 0;
+    const PointStore assemblySource(std::move(assemblyPoints));
+    reconstruction::AssemblyReconstructionResult assembly;
+    std::string assemblyError;
+    require(reconstruction::reconstructAssembly(assemblySource,assemblyOptions,assembly,assemblyError),assemblyError);
+    require(closed(assembly)<2,"the sampled assembly leaves drilled profiles open before local recovery");
+    assemblyOptions.maximumLocalProfileAttempts = 4;
+    require(reconstruction::reconstructAssembly(assemblySource,assemblyOptions,assembly,assemblyError),assemblyError);
+    require(closed(assembly)==2 && assembly.candidate.profileBodies.size()==2 &&
+            assembly.candidate.profileBodies[0].cavities.size()==2 && assembly.candidate.profileBodies[1].cavities.size()==2 &&
+            std::abs(volume(assembly.candidate)-2*expected)<.06 && assembly.candidate.surfaceCoverage>.99,
+            "local full-resolution recovery closes both drilled profiles and preserves the bores");
+    const auto incomplete = run(fixture(true),.006);
+    require(closed(incomplete)==0, "holes that do not reach both caps cannot be inferred as through cuts");
+    const auto partialArc = run(fixture(false,true),.006);
+    require(closed(partialArc)==1 && std::abs(volume(partialArc.candidate)-expected) < .03,
+            "paired cap openings complete a bore when an inward wall spans the thickness with partial angular sampling");
+    const auto endGap = run(fixture(false,false,false,7),.006);
+    require(closed(endGap)==1 && std::abs(volume(endGap.candidate)-expected) < .03,
+            "the two caps and adjoining wall corroborate the endpoint of an observed side");
+    require(closed(run(fixture(false,false,false,12),.006))==0,
+            "the corner observations cannot complete a side with a large unsampled span");
+    const auto blind = run(fixture(false,false,true),.006);
+    const double blindVolume = height*(120*48 - 14*10/2) - pi*(6*6+4.5*4.5)*(1.8+1.1/3);
+    require(closed(blind)==1 && blind.candidate.profileBodies.size()==1 &&
+            blind.candidate.profileBodies.front().cavities.size()==4 &&
+            std::abs(volume(blind.candidate)-blindVolume) < .03 && blind.candidate.surfaceCoverage > .999,
+            "inward cylindrical walls and observed conical tips close blind bores from either face");
+    require(closed(run(fixture(true,false,true),.006))==0,
+            "a second blind bore without a visible tip must not be completed by inference");
+    const auto notched = run(fixture(false,false,false,0,true),.006);
+    require(closed(notched)==1 && notched.candidate.profileBodies.front().outline.size()==9 &&
+            notched.candidate.profileBodies.front().cavities.size()==2 &&
+            std::abs(volume(notched.candidate)-(expected-height*20*12)) < .03,
+            "finite walls close a rotated reentrant outline and preserve both through holes");
+    require(closed(run(fixture(false,false,false,36,true),.006))==0,
+            "a missing outer wall cannot be recovered by extending its neighbors");
+}
+void profileCutouts() {
+    using namespace reconstruction::math3;
+    constexpr double depth = 2.5, radius = 4;
+    const double pi = std::acos(-1.0), halfChord = std::sqrt(12.0);
+    const std::vector<Vec3> perimeter{{-22,-13,0},{22,-13,0},{22,13,0},{-22,13,0}};
+    const std::vector<Vec3> window{{3,-4,0},{3,4,0},{9,4,0},{9,-4,0}};
+    std::vector<PointSample> points;
+    const auto emit = [&](Vec3 p, Vec3 n) {
+        points.push_back({points.size()+1,p,n,1,std::nullopt,true});
+    };
+    for (int i=0; i<96; ++i) for (int j=0; j<56; ++j) {
+        const double x = -22+(i+.5)*44/96, y = -13+(j+.5)*26/56;
+        if ((x>=-10 && std::hypot(x+8,y)<radius) || (x>3 && x<9 && std::abs(y)<4)) continue;
+        emit({x,y,0},{0,0,-1});
+        emit({x,y,depth},{0,0,1});
+    }
+    const auto emitWall = [&](Vec3 a, Vec3 b) {
+        const auto edge = subtract(b,a);
+        const auto n = normalized(Vec3{edge.y,-edge.x,0});
+        for (int i=0; i<64; ++i) for (int j=0; j<12; ++j) {
+            auto p = add(a,scale(edge,(i+.5)/64));
+            p.z = depth*(j+.5)/12;
+            emit(p,n);
+        }
+    };
+    for (const auto* loop : {&perimeter,&window}) {
+        for (std::size_t i=0; i<loop->size(); ++i) emitWall((*loop)[i],(*loop)[(i+1)%loop->size()]);
+    }
+    for (int i=0; i<120; ++i) for (int j=0; j<12; ++j) {
+        const double angle = ((i+.5)/120-.5)*4*pi/3;
+        const double x = std::cos(angle), y = std::sin(angle);
+        emit({-8+radius*x,radius*y,depth*(j+.5)/12},{-x,-y,0});
+    }
+    require(closed(run(points,.004))==0,"an incomplete curved opening needs its closing wall");
+    emitWall({-10,-halfChord,0},{-10,halfChord,0});
+    const auto result = run(points,.004);
+    const double openingArea = radius*radius*(pi-std::acos(.5))+2*halfChord;
+    require(closed(result)==1 && result.candidate.profileBodies.front().profileVoids.size()==2 &&
+            std::abs(volume(result.candidate)-depth*(44*26-6*8-openingArea))<.05,
+            "signed finite walls preserve a clipped circular opening and a separate rectangular opening");
+}
+
+void countersunkProfile() {
+    constexpr double inner = 6, mouth = 8, height = 8, chamfer = 2;
+    const double pi = std::acos(-1.0);
+    std::vector<PointSample> points;
+    box(points,{0,0,0},{60,36,height});
+    points.erase(std::remove_if(points.begin(),points.end(),[mouth](const auto& p) {
+        return std::abs(p.normal->z) > .99 && std::hypot(p.position.x,p.position.y) < mouth;
+    }),points.end());
+    for (int i=0; i<64; ++i) {
+        const double angle = 2*pi*(i+.5)/64, x = std::cos(angle), y = std::sin(angle);
+        for (int j=0; j<16; ++j) {
+            const double z = (height-2*chamfer)*((j+.5)/16-.5);
+            points.push_back({points.size()+1000000,{inner*x,inner*y,z},Vec3{-x,-y,0},1,std::nullopt,true});
+        }
+    }
+    require(closed(run(points,.004))==0,"an unobserved opening transition cannot complete a countersunk bore");
+    for (double sign : {-1,1}) for (int i=0; i<64; ++i) {
+        const double angle = 2*pi*(i+.5)/64, x = std::cos(angle), y = std::sin(angle);
+        for (int j=0; j<8; ++j) {
+            const double t = (j+.5)/8, r = inner+t*(mouth-inner), z = sign*(height/2-chamfer+chamfer*t);
+            const auto n = reconstruction::math3::normalized(Vec3{-x,-y,sign});
+            points.push_back({points.size()+1000000,{r*x,r*y,z},n,1,std::nullopt,true});
+        }
+    }
+    const auto result = run(points,.004);
+    const double expected = 60*36*height-pi*inner*inner*(height-2*chamfer)-
+        2*pi*chamfer*(mouth*mouth+mouth*inner+inner*inner)/3;
+    require(closed(result)==1 && result.candidate.profileBodies.size()==1 &&
+            result.candidate.profileBodies.front().cavities.size()==3 &&
+            std::abs(volume(result.candidate)-expected) < .02,
+            "observed conical mouths join the through bore without losing the chamfers");
+    points.erase(std::remove_if(points.begin(),points.end(),[](const auto& sample) {
+        if (sample.normal->z<.6 || sample.normal->z>.8) return false;
+        const auto& p = sample.position;
+        return std::abs(std::atan2(p.y,p.x))<1.25;
+    }),points.end());
+    const auto partial = run(points,.004);
+    require(closed(partial)==1 && partial.candidate.profileBodies.front().cavities.size()==3 &&
+            std::abs(volume(partial.candidate)-expected)<.02,
+            "a cap opening and cylindrical wall corroborate a partially observed countersink");
+}
+
+void steppedProfile() {
+    constexpr double inner = 5, counterbore = 8, mouth = 7, height = 8;
+    const double pi = std::acos(-1.0);
+    std::vector<PointSample> points;
+    box(points,{0,0,0},{60,36,height});
+    points.erase(std::remove_if(points.begin(),points.end(),[mouth,counterbore](const auto& p) {
+        return std::abs(p.normal->z) > .99 && std::hypot(p.position.x,p.position.y) < (p.position.z > 0 ? mouth : counterbore);
+    }),points.end());
+    auto emit = [&](Vec3 p, Vec3 n) { points.push_back({points.size()+1000000,p,n,1,std::nullopt,true}); };
+    for (int i=0; i<64; ++i) {
+        const double angle = 2*pi*(i+.5)/64, x = std::cos(angle), y = std::sin(angle);
+        for (int j=0; j<12; ++j) {
+            const double t = (j+.5)/12, r = inner+t*(mouth-inner);
+            emit({counterbore*x,counterbore*y,-4+4*t},{-x,-y,0});
+            emit({inner*x,inner*y,2*t},{-x,-y,0});
+            emit({r*x,r*y,2+2*t},reconstruction::math3::normalized(Vec3{-x,-y,1}));
+        }
+    }
+    require(closed(run(points,.004))==0,"two bore radii need an observed connecting shoulder");
+    for (int i=12; i<64; ++i) {
+        const double angle = 2*pi*(i+.5)/64, x = std::cos(angle), y = std::sin(angle);
+        for (int j=0; j<8; ++j) {
+            const double r = std::sqrt(inner*inner+(counterbore*counterbore-inner*inner)*(j+.5)/8);
+            emit({r*x,r*y,0},{0,0,-1});
+        }
+    }
+    const auto platePoints = points.size();
+    for (int i=0; i<64; ++i) {
+        const double angle = 2*pi*(i+.5)/64, x = std::cos(angle), y = std::sin(angle);
+        for (int j=0; j<8; ++j) emit({6*x,6*y,-5-(j+.5)/2},{x,y,0});
+    }
+    const auto result = run(points,.004);
+    const double expected = 60*36*height-pi*(4*counterbore*counterbore+2*inner*inner+
+        2*(mouth*mouth+mouth*inner+inner*inner)/3);
+    require(closed(result)==1 && result.candidate.profileBodies.size()==1 &&
+            result.candidate.profileBodies.front().cavities.size()==3 &&
+            std::abs(volume(result.candidate)-expected)<.02 && result.unassignedPointIds.size()==points.size()-platePoints,
+            "a supported counterbore and chamfer close the plate while exterior observations stay unassigned");
+}
+
+void annularTube() {
+    using namespace reconstruction::math3;
+    constexpr double inner = 7, outer = 9, depth = 18;
+    const double pi = std::acos(-1.0);
+    const auto axis = normalized(Vec3{.3,.4,1});
+    const auto x = normalized(cross(axis,{1,0,0})), y = cross(axis,x);
+    std::vector<PointSample> points;
+    auto emit = [&](Vec3 radial, double radius, double z, Vec3 normal) {
+        const auto position = add({171,-219,32},add(scale(radial,radius),scale(axis,z)));
+        points.push_back({points.size()+1,position,normal,1,std::nullopt,true});
+    };
+    for (int i=0; i<80; ++i) {
+        const double angle = 2*pi*(i+.5)/80;
+        const auto radial = add(scale(x,std::cos(angle)),scale(y,std::sin(angle)));
+        for (int j=0; j<20; ++j) {
+            const double z = (j+.5)*depth/20;
+            if (i>=5 || j>=12) emit(radial,inner,z,scale(radial,-1));
+            emit(radial,outer,z,radial);
+        }
+        for (int j=0; j<6; ++j) {
+            const double radius = std::sqrt(inner*inner+(outer*outer-inner*inner)*(j+.5)/6);
+            emit(radial,radius,0,scale(axis,-1));
+        }
+    }
+    require(closed(run(points,.004))==0,"a tube with an unobserved annular end remains open");
+    for (int i=0; i<80; ++i) {
+        const double angle = 2*pi*(i+.5)/80;
+        const auto radial = add(scale(x,std::cos(angle)),scale(y,std::sin(angle)));
+        for (int j=0; j<6; ++j) {
+            const double radius = std::sqrt(inner*inner+(outer*outer-inner*inner)*(j+.5)/6);
+            emit(radial,radius,depth,axis);
+        }
+    }
+    const auto tubePoints = points.size();
+    for (int i=0; i<32; ++i) for (int j=0; j<16; ++j) {
+        const auto radial = add(scale(x,12+(i+.5)/8),scale(y,(j+.5)/8));
+        emit(radial,1,depth,scale(axis,-1));
+    }
+    const auto result = run(points,.004);
+    require(closed(result)==1 && result.parts.front().status=="closed_annular_tube" &&
+            result.parts.front().pointIds.size()==tubePoints &&
+            result.unassignedPointIds.size()==points.size()-tubePoints,
+            "signed annular caps and walls isolate the tube from an unrelated coplanar surface");
+    require(std::abs(volume(result.candidate)-pi*(outer*outer-inner*inner)*depth) < 1e-4,
+            "closed annular tube preserves the bore and both fitted radii");
+    for (int i=0; i<32; ++i) {
+        const double angle = 2*pi*(i+.5)/32;
+        const auto radial = add(scale(x,std::cos(angle)),scale(y,std::sin(angle)));
+        emit(radial,(inner+outer)/2,depth/2,axis);
+    }
+    require(closed(run(points,.004))==0,"observations within the proposed annular material contradict closure");
+}
+
+void drilledCircularSlab() {
+    constexpr double outer = 18, inner = 8, bore = 1.5, offset = 13, depth = 4;
+    const double pi = std::acos(-1.0);
+    std::vector<PointSample> points;
+    const auto emit = [&](Vec3 p, Vec3 n) {
+        points.push_back({points.size()+1,p,n,1,std::nullopt,true});
+    };
+    for (int i=0; i<82; ++i) for (int j=0; j<82; ++j) {
+        const double x = outer*((i+.5)/41-1), y = outer*((j+.5)/41-1);
+        const double radius = std::hypot(x,y);
+        if (radius >= outer || radius <= inner || std::hypot(x-offset,y) <= bore) continue;
+        emit({x,y,0},{0,0,-1});
+        emit({x,y,depth},{0,0,1});
+    }
+    for (int i=0; i<96; ++i) for (int j=0; j<16; ++j) {
+        const double angle = 2*pi*(i+.5)/96, x = std::cos(angle), y = std::sin(angle);
+        const double z = depth*(j+.5)/16;
+        emit({outer*x,outer*y,z},{x,y,0});
+        emit({inner*x,inner*y,z},{-x,-y,0});
+        emit({offset+bore*x,bore*y,z},{-x,-y,0});
+    }
+    const auto result = run(points,.004);
+    const double expected = pi*depth*(outer*outer-inner*inner-bore*bore);
+    require(closed(result)==1 && result.parts.front().status=="closed_analytic_profile" &&
+            result.candidate.profileBodies.front().cavities.size()==2 &&
+            std::abs(volume(result.candidate)-expected)<.01,
+            "signed caps and three independent circular walls preserve both holes in a round slab");
+
+    constexpr double grooveInner = 9, grooveOuter = 11, floor = 2.5;
+    points.erase(std::remove_if(points.begin(),points.end(),[=](const auto& p) {
+        const auto r = std::hypot(p.position.x,p.position.y);
+        return p.position.z == depth && r > grooveInner && r < grooveOuter;
+    }),points.end());
+    auto nextId = points.back().id+1;
+    const auto groovePoint = [&](Vec3 p, Vec3 n) {
+        points.push_back({nextId++,p,n,1,std::nullopt,true});
+    };
+    for (int i=0; i<96; ++i) for (int j=0; j<12; ++j) {
+        const double angle = 2*pi*(i+.5)/96, x = std::cos(angle), y = std::sin(angle);
+        const double z = floor+(depth-floor)*(j+.5)/12;
+        groovePoint({grooveInner*x,grooveInner*y,z},{x,y,0});
+        groovePoint({grooveOuter*x,grooveOuter*y,z},{-x,-y,0});
+    }
+    require(closed(run(points,.004))==0,"opposed cylindrical walls need an observed annular floor");
+    for (int i=0; i<96; ++i) for (int j=0; j<6; ++j) {
+        const double angle = 2*pi*(i+.5)/96, r = grooveInner+(grooveOuter-grooveInner)*(j+.5)/6;
+        groovePoint({r*std::cos(angle),r*std::sin(angle),floor},{0,0,1});
+    }
+    const auto grooved = run(points,.004);
+    const double cutVolume = pi*(depth-floor)*(grooveOuter*grooveOuter-grooveInner*grooveInner);
+    require(closed(grooved)==1 && grooved.candidate.profileBodies.front().cavities.size()==3 &&
+            std::abs(volume(grooved.candidate)-(expected-cutVolume))<.01,
+            "a verified annular floor closes a groove while preserving both drilled holes");
+}
+
+void circularSlabContact() {
+    constexpr double outer = 15, limit = 12, depth = 3, tubeInner = 8, tubeOuter = 10, tubeDepth = 12;
+    const double pi = std::acos(-1.0), chord = std::sqrt(outer*outer-limit*limit);
+    std::vector<PointSample> points;
+    auto emit = [&](Vec3 p, Vec3 n) {
+        auto turn = [](Vec3 v) { return rotate({v.x,.8*v.y-.6*v.z,.6*v.y+.8*v.z},.4); };
+        const auto q = turn(p);
+        points.push_back({points.size()+1,{q.x+231,q.y-17,q.z+19},turn(n),1,std::nullopt,true});
+    };
+    for (int i=0; i<68; ++i) for (int j=0; j<68; ++j) {
+        const double x = outer*((i+.5)/34-1), y = outer*((j+.5)/34-1), r = std::hypot(x,y);
+        if (r>=outer || x>=limit || y>=limit) continue;
+        emit({x,y,depth},{0,0,1});
+        if (r>tubeOuter) emit({x,y,0},{0,0,-1});
+    }
+    for (int i=0; i<160; ++i) for (int j=0; j<10; ++j) {
+        const double angle = 2*pi*(i+.5)/160, x = std::cos(angle), y = std::sin(angle), z = depth*(j+.5)/10;
+        if (outer*x<limit && outer*y<limit) emit({outer*x,outer*y,z},{x,y,0});
+    }
+    for (int i=0; i<40; ++i) for (int j=0; j<10; ++j) {
+        const double s = chord*((i+.5)/20-1), z = depth*(j+.5)/10;
+        emit({limit,s,z},{1,0,0});
+        emit({s,limit,z},{0,1,0});
+    }
+    require(closed(run(points,.004))==0,"a large gap in the cap needs independently verified contact evidence");
+    const auto partialSize = points.size();
+    for (int i=0; i<68; ++i) for (int j=0; j<68; ++j) {
+        const double x = outer*((i+.5)/34-1), y = outer*((j+.5)/34-1);
+        if (std::hypot(x,y)<=tubeOuter) emit({x,y,0},{0,0,-1});
+    }
+    const auto complete = run(points,.004);
+    const double segment = outer*outer*std::acos(limit/outer)-limit*chord;
+    const double slabVolume = depth*(pi*outer*outer-2*segment);
+    require(closed(complete)==1 && complete.parts.front().status=="closed_circular_slab" &&
+            std::abs(volume(complete.candidate)-slabVolume)<.03,
+            "two observed caps close an independently observed circular slab with two chords");
+    points.resize(partialSize);
+    for (int i=0; i<96; ++i) {
+        const double angle = 2*pi*(i+.5)/96, x = std::cos(angle), y = std::sin(angle);
+        for (int j=0; j<20; ++j) {
+            const double z = -tubeDepth*(j+.5)/20;
+            emit({tubeInner*x,tubeInner*y,z},{-x,-y,0});
+            emit({tubeOuter*x,tubeOuter*y,z},{x,y,0});
+        }
+        for (int j=0; j<6; ++j) {
+            const double r = tubeInner+(tubeOuter-tubeInner)*(j+.5)/6;
+            emit({r*x,r*y,0},{0,0,1});
+            emit({r*x,r*y,-tubeDepth},{0,0,-1});
+        }
+    }
+    const auto result = run(points,.004);
+    const double expected = slabVolume+pi*(tubeOuter*tubeOuter-tubeInner*tubeInner)*tubeDepth;
+    require(closed(result)==2 && result.parts.back().status=="closed_circular_slab_inferred_contact" &&
+            result.unassignedPointIds.empty() && std::abs(volume(result.candidate)-expected)<.03,
+            "multiple observed chords and the independent tube recover both solids at the shared interface");
+}
+
+void roundedProfile() {
+    constexpr double w = 42, d = 25, h = 5, r = 7;
+    const double pi = std::acos(-1.0);
+    std::vector<PointSample> points;
+    auto emit = [&](Vec3 p, Vec3 n) {
+        auto q = rotate(p,.43);
+        q.x += 191; q.y -= 140; q.z += 25;
+        points.push_back({points.size()+1,q,rotate(n,.43),1,std::nullopt,true});
+    };
+    for (int cap : {0,1}) for (int i=0;i<80;++i) for (int j=0;j<48;++j) {
+        const double x = ((i+.5)/40-1)*w, y = ((j+.5)/24-1)*d;
+        if (std::hypot(std::max(0.0,std::abs(x)-w+r),std::max(0.0,std::abs(y)-d+r)) <= r)
+            emit({x,y,cap*h},{0,0,cap?1.0:-1.0});
+    }
+    for (int i=0;i<60;++i) for (int j=0;j<12;++j) {
+        const double s=(i+.5)/30-1, z=(j+.5)*h/12;
+        for (double sign : {-1,1}) {
+            emit({s*(w-r),sign*d,z},{0,sign,0});
+            emit({sign*w,s*(d-r),z},{sign,0,0});
+        }
+    }
+    for (int q=0;q<4;++q) for (int i=0;i<40;++i) for (int j=0;j<12;++j) {
+        const double a = (q+(i+.5)/40)*pi/2;
+        const double cx = (q==0 || q==3 ? 1 : -1)*(w-r), cy=(q<2 ? 1 : -1)*(d-r);
+        emit({cx+r*std::cos(a),cy+r*std::sin(a),(j+.5)*h/12},{std::cos(a),std::sin(a),0});
+    }
+    const auto result = run(points,.006);
+    require(closed(result)==1 && result.candidate.profileBodies.size()==1,"outward circular walls close a rounded outline");
+    const auto& outline=result.candidate.profileBodies.front().outline;
+    require(std::count_if(outline.begin(),outline.end(),[](const auto& c){return c.circular;})==4,
+            "all four observed corners rebuild as circular arcs");
+    require(std::abs(volume(result.candidate)-h*(4*w*d-(4-pi)*r*r)) < .03,
+            "rounded profile agrees with reference volume");
+}
 void safeBoundaryRecovery() {
     using namespace reconstruction::detail::assembly;
     const BoundaryLoop touching{{0,0},{1,0},{1,1},{0,1},{0,0},{-1,0},{-1,-1},{0,-1}};
@@ -188,5 +619,5 @@ void safeBoundaryRecovery() {
     require(sameBoundaryTopology({outer,hole},{outer,hole}),"unchanged inner holes retain their topology");
 }
 }
-int main(){try{safeBoundaryRecovery();separatedAndRotated();stagedAssembly();missingFaceAndPartial();finiteConcavityAndHole();noiseAndGaps();curvedParts();nonorthogonalFaces();invalidAndCancel();std::cout<<"Assembly reconstruction tests passed\n";return 0;}
+int main(){try{safeBoundaryRecovery();separatedAndRotated();stagedAssembly();missingFaceAndPartial();finiteConcavityAndHole();noiseAndGaps();curvedParts();nonorthogonalFaces();drilledProfiles();profileCutouts();countersunkProfile();steppedProfile();annularTube();drilledCircularSlab();circularSlabContact();roundedProfile();invalidAndCancel();std::cout<<"Assembly reconstruction tests passed\n";return 0;}
 catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

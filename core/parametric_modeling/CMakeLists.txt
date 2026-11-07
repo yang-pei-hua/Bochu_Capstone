@@ -54,6 +54,7 @@ target_link_libraries(CadModelCore PUBLIC
     TKGeomAlgo
     TKTopAlgo
     TKPrim
+    TKFillet
     TKBO
     TKShHealing
     TKBool

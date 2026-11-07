@@ -236,6 +236,52 @@ bool makeConeEvidence(
     return true;
 }
 
+namespace {
+void refineTorus(TorusEquation& torus, const InputRange& input,
+                 const std::vector<std::size_t>& support, double tolerance) {
+    using Matrix = Eigen::Matrix<double, 7, 7>;
+    using Vector = Eigen::Matrix<double, 7, 1>;
+    const auto eigen = [](const modeling::Vec3& p) { return Eigen::Vector3d(p.x, p.y, p.z); };
+    Eigen::Vector3d center = eigen(torus.center), axis = eigen(torus.axisDirection);
+    double major = torus.majorRadius, minor = torus.minorRadius;
+    const double scale = tolerance * .1;
+    const std::size_t sampleCount = std::min<std::size_t>(support.size(), 4096);
+    for (int iteration = 0; iteration < 10; ++iteration) {
+        const Eigen::Vector3d u = axis.unitOrthogonal(), v = axis.cross(u);
+        Matrix matrix = Matrix::Zero();
+        Vector rhs = Vector::Zero();
+        for (std::size_t i = 0; i < sampleCount; ++i) {
+            const Eigen::Vector3d d = eigen(toVec3(std::get<0>(input[support[i*support.size()/sampleCount]]))) - center;
+            const double z = d.dot(axis);
+            const Eigen::Vector3d radial = d - z*axis;
+            const double r = radial.norm(), tube = std::hypot(r-major, z);
+            if (r<=1e-12 || tube<=1e-12) continue;
+            const double cosV = (r-major)/tube, sinV = z/tube;
+            const Eigen::Vector3d ring = radial/r;
+            const double residual = tube-minor;
+            const double weight = 1/std::hypot(1, residual/scale);
+            Vector derivative;
+            derivative.head<3>() = -cosV*ring - sinV*axis;
+            // Scale rotation into length units to keep the solve conditioned.
+            derivative.tail<4>() << sinV*ring.dot(u), sinV*ring.dot(v), -cosV, -1;
+            matrix.noalias() += weight*derivative*derivative.transpose();
+            rhs.noalias() -= weight*derivative*residual;
+        }
+        const auto solver = matrix.fullPivLu();
+        if (!solver.isInvertible() || solver.rcond()<1e-8) return;
+        const Vector step = solver.solve(rhs);
+        if (!step.allFinite() || step.norm()>std::max(major,minor)*.1) return;
+        center += step.head<3>();
+        axis = (axis+(step[3]*u+step[4]*v)/major).normalized();
+        major += step[5];
+        minor += step[6];
+        if (minor<=0 || major<=minor) return;
+        if (step.norm()<1e-8) break;
+    }
+    torus = {{center.x(),center.y(),center.z()},{axis.x(),axis.y(),axis.z()},major,minor};
+}
+}
+
 bool makeTorusEvidence(
     const InputRange& input,
     const CgalTorus& shape,
@@ -260,11 +306,21 @@ bool makeTorusEvidence(
         return false;
     }
 
+    auto support = shape.indices_of_assigned_points();
+    std::sort(support.begin(), support.end(), [&](auto a, auto b) {
+        return std::get<2>(input[a]) < std::get<2>(input[b]);
+    });
+    auto refined = torus;
+    refineTorus(refined, input, support, options.distanceThreshold);
+    if (refined.majorRadius>=options.minimumMajorRadius && refined.majorRadius<=options.maximumMajorRadius &&
+        refined.minorRadius>=options.minimumMinorRadius && refined.minorRadius<=options.maximumMinorRadius)
+        torus = refined;
+
     evidence = {};
     evidence.torus = torus;
     double residualSum = 0.0;
     double alignmentSum = 0.0;
-    for (const std::size_t index : shape.indices_of_assigned_points()) {
+    for (const std::size_t index : support) {
         const modeling::Vec3 point = toVec3(std::get<0>(input[index]));
         const modeling::Vec3 offset = math3::subtract(point, torus.center);
         const double height = math3::dot(offset, torus.axisDirection);

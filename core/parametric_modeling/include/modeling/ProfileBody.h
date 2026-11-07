@@ -20,6 +20,25 @@ struct AxialSection {
     double centerZ=0;
     Vec3 axis{0,0,1};
 };
+struct ProfileEndBevel {
+    double depth=0, inset=0;
+};
+struct RoundedEndProfile {
+    // The semicircle is centered here and faces local +X.
+    Vec3 center;
+    double straightLength=0, radius=0;
+    ProfileEndBevel bottom, top;
+};
+struct ProfileRimRound {
+    std::size_t curveIndex=0;
+    double radius=0;
+    bool top=false;
+    std::optional<std::size_t> trimPlane;
+};
+struct ProfileTrimPlane {
+    Vec3 point;
+    Vec3 outward;
+};
 struct ProfileBodyParams {
     Pose3d pose;
     std::vector<ProfileCurve2D> outline;
@@ -34,6 +53,9 @@ struct ProfileBodyParams {
     // For bodies with intersecting/mitered/freeform faces, rebuild from fitted
     // surface coefficients and explicit parameter-space trim loops.
     std::optional<BoundaryBody> boundary;
+    std::optional<RoundedEndProfile> roundedEnd;
+    std::vector<ProfileRimRound> rimRounds;
+    std::vector<ProfileTrimPlane> trimPlanes;
 };
 bool validateProfileBody(const ProfileBodyParams& params,std::string& error);
 bool buildProfileBody(const ProfileBodyParams& params,TopoDS_Shape& output,std::string& error);

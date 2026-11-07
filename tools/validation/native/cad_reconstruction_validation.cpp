@@ -1001,12 +1001,21 @@ int main(int argc, char **argv) {
             sampleStepCloud(args, report);
         } else if(args.value(1) == "inspect-step") {
             inspectStepTopology(args,report);
+        } else if(args.value(1) == "compare-observed-splines") {
+            compareObservedSplines(args,report);
+            if(!report["reference_matched"].toBool())exitCode=1;
+        } else if(args.value(1) == "compare-observed-surfaces") {
+            compareObservedSurfaces(args,report);
+            if(!report["reference_matched"].toBool())exitCode=1;
         } else if(args.value(1) == "reconstruct-cloud") {
             validatePointCloudCad(args,report);
             if(!report["cad_constructed"].toBool())exitCode=1;
         } else if(args.value(1) == "fit-projection") {
             validateProjectionCad(args,report);
             if(!report["cad_constructed"].toBool())exitCode=1;
+        } else if (args.value(1) == "fit-observed-surface") {
+            fitObservedSurface(args, report);
+            if (!report["surface_fitted"].toBool()) exitCode = 1;
         } else if(args.value(1) == "contract-stage") {
             runReconstructionContractStage(args, report);
         } else if(args.value(1) == "probe-assembly") {

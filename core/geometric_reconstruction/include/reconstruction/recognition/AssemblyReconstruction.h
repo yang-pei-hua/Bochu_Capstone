@@ -13,8 +13,10 @@ struct AssemblyOptions {
     double normalAngleRadians=.174532925199433;
     double connectivityFactor=2.5,alphaFactor=2.5;
     bool buildSolids=true;
-    // Zero leaves the finite-shell workflow as the only assembly path.
+    // Zero disables projection-based recovery.
     std::size_t maximumProjectionParts=0;
+    // Refit open groups from their full observations after global sampling.
+    std::size_t maximumLocalProfileAttempts=48;
 };
 // Counters only: diagnostics do not repair, filter or change recovered geometry.
 struct BoundaryRecoveryDiagnostics {

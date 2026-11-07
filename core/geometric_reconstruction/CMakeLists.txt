@@ -55,6 +55,10 @@ add_library(GeometricReconstruction
     src/recognition/ProjectionSearch.cpp
     src/recognition/assembly/AssemblyReconstruction.cpp
     src/recognition/assembly/BoundaryGeometry.cpp
+    src/recognition/assembly/AnalyticProfileClosure.cpp
+    src/recognition/assembly/LocalProfileRecovery.cpp
+    src/recognition/assembly/AnnularTubeClosure.cpp
+    src/recognition/assembly/CircularSlabClosure.cpp
     src/recognition/assembly/FiniteBoundaries.cpp
     src/recognition/assembly/PartClosure.cpp
     src/recognition/ThroughHoleRecognizer.cpp

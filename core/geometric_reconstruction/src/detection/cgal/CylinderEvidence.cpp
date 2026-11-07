@@ -22,6 +22,56 @@ double cylinderResidual(
     return std::abs(radialLength - cylinder.radius);
 }
 
+namespace {
+void refineCylinderRadiusAndAxis(CylinderEquation& cylinder, const InputRange& input,
+                                 const std::vector<std::size_t>& support, double tolerance) {
+    using Matrix = Eigen::Matrix<double, 5, 5>;
+    using Vector = Eigen::Matrix<double, 5, 1>;
+    const auto eigen = [](const modeling::Vec3& p) { return Eigen::Vector3d(p.x,p.y,p.z); };
+    Eigen::Vector3d axis = eigen(cylinder.axisDirection), origin = eigen(cylinder.axisPoint);
+    const auto centroid = eigen(centroidOf(input, support));
+    origin += (centroid-origin).dot(axis)*axis;
+    double radius = cylinder.radius;
+    const double scale = tolerance*.1;
+    const std::size_t sampleCount = std::min<std::size_t>(support.size(),4096);
+    double lengthScale = radius;
+    for (std::size_t i = 0; i < sampleCount; ++i) {
+        const auto p = eigen(toVec3(std::get<0>(input[support[i*support.size()/sampleCount]])));
+        lengthScale = std::max(lengthScale,std::abs((p-origin).dot(axis)));
+    }
+    for (int iteration = 0; iteration < 10; ++iteration) {
+        const Eigen::Vector3d u = axis.unitOrthogonal(), v = axis.cross(u);
+        Matrix matrix = Matrix::Zero();
+        Vector rhs = Vector::Zero();
+        for (std::size_t i = 0; i < sampleCount; ++i) {
+            const Eigen::Vector3d d = eigen(toVec3(std::get<0>(input[support[i*support.size()/sampleCount]]))) - origin;
+            const double z = d.dot(axis);
+            const Eigen::Vector3d radial = d-z*axis;
+            const double r = radial.norm();
+            if (r<=1e-12) continue;
+            const double residual = r-radius;
+            const double weight = 1/std::hypot(1,residual/scale);
+            const double du = -radial.dot(u)/r, dv = -radial.dot(v)/r;
+            Vector derivative;
+            derivative << du, dv, du*z/lengthScale, dv*z/lengthScale, -1;
+            matrix.noalias() += weight*derivative*derivative.transpose();
+            rhs.noalias() -= weight*derivative*residual;
+        }
+        const auto solver = matrix.fullPivLu();
+        if (!solver.isInvertible() || solver.rcond()<1e-8) return;
+        const Vector step = solver.solve(rhs);
+        if (!step.allFinite() || step.norm()>std::max(radius,tolerance)*.25) return;
+        origin += step[0]*u+step[1]*v;
+        axis = (axis+(step[2]*u+step[3]*v)/lengthScale).normalized();
+        radius += step[4];
+        if (radius<=0) return;
+        if (step.norm()<1e-8) break;
+    }
+    origin -= origin.dot(axis)*axis;
+    cylinder = {{origin.x(),origin.y(),origin.z()},{axis.x(),axis.y(),axis.z()},radius};
+}
+}
+
 bool makeCylinderEvidence(
     const InputRange& input,
     const CgalCylinder& shape,
@@ -142,6 +192,20 @@ bool makeCylinderEvidence(
             math3::length(math3::subtract(offset, math3::scale(cylinder.axisDirection, axial)));
     }
     cylinder.radius = radiusSum / static_cast<double>(support.size());
+    auto refined = cylinder;
+    refineCylinderRadiusAndAxis(refined,input,support,options.distanceThreshold);
+    if (refined.radius>=options.minimumRadius && refined.radius<=options.maximumRadius) {
+        auto inliers = support;
+        inliers.erase(std::remove_if(inliers.begin(),inliers.end(),[&](auto index) {
+            modeling::Vec3 radial{};
+            return cylinderResidual(refined,toVec3(std::get<0>(input[index])),nullptr,&radial)>options.distanceThreshold ||
+                std::abs(math3::dot(toVec3(std::get<1>(input[index])),radial))<options.minimumNormalAlignment;
+        }),inliers.end());
+        if (inliers.size()>=options.minimumSupportPoints && inliers.size()>=support.size()*.95) {
+            cylinder = refined;
+            support = std::move(inliers);
+        }
+    }
     if (cylinder.radius < options.minimumRadius || cylinder.radius > options.maximumRadius) {
         return false;
     }

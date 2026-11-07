@@ -137,6 +137,12 @@ void scopedExtrusionProject(QTemporaryDir& temp) {
             "scoped extrusion target survives project round trip");
     require(std::abs(volume(loaded->model.bodyShape())-88)<1e-6,
             "scoped extrusion replay preserves the neighboring solid");
+    auto displaced = state.features;
+    std::get<BoxPrimitiveParams>(displaced.front().params).pose.origin.x += 20;
+    require(core.restoreFeatures(displaced),"build same-volume assembly with a displaced body");
+    state.currentBody = core.bodyShape();
+    require(!ProjectStore::save(temp.filePath("displaced.pcad"),state,error),
+            "matching solid count and volume cannot validate a displaced body");
 }
 void primitiveProjects(QTemporaryDir& temp)
 {

@@ -3,6 +3,8 @@
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepClass_FaceClassifier.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
@@ -11,6 +13,7 @@
 #include <STEPControl_Reader.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <gp_Torus.hxx>
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -19,6 +22,7 @@
 #include <fstream>
 #include <filesystem>
 #include <iomanip>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <vector>
@@ -49,7 +53,14 @@ void inspectStepTopologyImpl(const QStringList& args,QJsonObject& report) {
             f["occt_surface_type"] = int(surface.GetType());
             if(surface.GetType()==GeomAbs_Plane){const auto p=surface.Plane();f["normal"]=vector(p.Axis().Direction());}
             if(surface.GetType()==GeomAbs_Cylinder){const auto c=surface.Cylinder();f["axis"]=vector(c.Axis().Direction());f["axis_point"]=vector(c.Location());f["radius_mm"]=c.Radius();}
-            if(surface.GetType()==GeomAbs_Cone){const auto c=surface.Cone();f["axis"]=vector(c.Axis().Direction());f["angle_rad"]=c.SemiAngle();}
+            if(surface.GetType()==GeomAbs_Cone){const auto c=surface.Cone();f["axis"]=vector(c.Axis().Direction());f["angle_rad"]=c.SemiAngle();f["apex_mm"]=vector(c.Apex());}
+            if (surface.GetType()==GeomAbs_Torus) {
+                const auto torus=surface.Torus();
+                f["axis"]=vector(torus.Axis().Direction());
+                f["torus_center_mm"]=vector(torus.Location());
+                f["major_radius_mm"]=torus.MajorRadius();
+                f["minor_radius_mm"]=torus.MinorRadius();
+            }
             faces.append(f);
         }
         Bnd_Box bounds;BRepBndLib::AddOptimal(si.Current(),bounds,false,false);double x0,y0,z0,x1,y1,z1;bounds.Get(x0,y0,z0,x1,y1,z1);
@@ -65,6 +76,117 @@ const char* kind(GeomAbs_SurfaceType t) {
 }
 
 void inspectStepTopology(const QStringList& args,QJsonObject& report) {inspectStepTopologyImpl(args,report);}
+
+namespace {
+void compareObservedFaces(const QStringList& args, QJsonObject& report, bool splineOnly) {
+    check(args.size()==6,"Expected fitted STEP, report path, reference STEP and tolerance in millimetres");
+    bool parsed=false;
+    const double tolerance=args[5].toDouble(&parsed);
+    check(parsed && std::isfinite(tolerance) && tolerance>0,"Expected a positive tolerance in millimetres");
+    const auto load=[](const QString& path) {
+        STEPControl_Reader reader;
+        std::ifstream input(std::filesystem::path(path.toStdWString()),std::ios::binary);
+        check(input.good() && reader.ReadStream("observed.step",input)==IFSelect_RetDone && reader.TransferRoots()>0,
+              "Cannot read spline comparison STEP");
+        return reader.OneShape();
+    };
+    const auto isSpline=[](const TopoDS_Face& face) {
+        const auto kind=BRepAdaptor_Surface(face).GetType();
+        return kind==GeomAbs_BSplineSurface || kind==GeomAbs_BezierSurface;
+    };
+    const auto fitted=load(args[2]), reference=load(args[4]);
+    struct ReferenceFace { TopoDS_Face face; Bnd_Box bounds; bool spline; };
+    std::vector<ReferenceFace> references;
+    for (TopExp_Explorer it(reference,TopAbs_FACE); it.More(); it.Next()) {
+        const auto face=TopoDS::Face(it.Current());
+        Bnd_Box bounds;
+        BRepBndLib::AddOptimal(face,bounds,false,false);
+        bounds.Enlarge(4*tolerance);
+        references.push_back({face,bounds,isSpline(face)});
+    }
+    QJsonArray faces;
+    bool matched=true;
+    for (TopExp_Explorer it(fitted,TopAbs_FACE); it.More(); it.Next()) {
+        const auto face=TopoDS::Face(it.Current());
+        if (splineOnly && !isSpline(face)) continue;
+        const BRepAdaptor_Surface surface(face);
+        int samples=0, within=0, outsideBounds=0, otherSurfaceMatches=0;
+        int consistentNormals=0;
+        double maximum=0;
+        gp_Pnt worstPoint;
+        const auto sampleGrid=[&](int grid) {
+            for (int i=0; i<grid; ++i) for (int j=0; j<grid; ++j) {
+                const double u=surface.FirstUParameter()+(i+.5)*(surface.LastUParameter()-surface.FirstUParameter())/grid;
+                const double v=surface.FirstVParameter()+(j+.5)*(surface.LastVParameter()-surface.FirstVParameter())/grid;
+                const BRepClass_FaceClassifier classifier(face,gp_Pnt2d(u,v),1e-7);
+                if (classifier.State()!=TopAbs_IN) continue;
+                ++samples;
+                gp_Pnt point;
+                gp_Vec tangentU,tangentV;
+                surface.D1(u,v,point,tangentU,tangentV);
+                auto fittedNormal=tangentU.Crossed(tangentV);
+                if (face.Orientation()==TopAbs_REVERSED) fittedNormal.Reverse();
+                const auto vertex=BRepBuilderAPI_MakeVertex(point).Vertex();
+                double closest=std::numeric_limits<double>::infinity();
+                bool normalMatched=false;
+                for (const auto& candidate : references) {
+                    if ((splineOnly && !candidate.spline) || candidate.bounds.IsOut(point)) continue;
+                    const BRepExtrema_DistShapeShape distance(vertex,candidate.face);
+                    if (!distance.IsDone()) continue;
+                    closest=std::min(closest,distance.Value());
+                    if (splineOnly || normalMatched || distance.Value()>tolerance) continue;
+                    for (int k=1; k<=distance.NbSolution(); ++k) {
+                        if (distance.SupportTypeShape2(k)!=BRepExtrema_IsInFace) continue;
+                        double refU=0, refV=0;
+                        distance.ParOnFaceS2(k,refU,refV);
+                        gp_Pnt referencePoint;
+                        gp_Vec referenceU,referenceV;
+                        BRepAdaptor_Surface(candidate.face).D1(refU,refV,referencePoint,referenceU,referenceV);
+                        auto referenceNormal=referenceU.Crossed(referenceV);
+                        if (candidate.face.Orientation()==TopAbs_REVERSED) referenceNormal.Reverse();
+                        const double magnitudes=fittedNormal.Magnitude()*referenceNormal.Magnitude();
+                        normalMatched=magnitudes>0 && fittedNormal.Dot(referenceNormal)>=.999*magnitudes;
+                        if (normalMatched) break;
+                    }
+                }
+                if (std::isfinite(closest) && closest>maximum) {
+                    maximum=closest;
+                    worstPoint=point;
+                }
+                if (!std::isfinite(closest)) ++outsideBounds;
+                within += closest<=tolerance;
+                consistentNormals += normalMatched;
+                if (splineOnly && closest>tolerance) {
+                    for (const auto& candidate : references) {
+                        if (candidate.spline || candidate.bounds.IsOut(point)) continue;
+                        const BRepExtrema_DistShapeShape distance(vertex,candidate.face);
+                        if (!distance.IsDone() || distance.Value()>tolerance) continue;
+                        ++otherSurfaceMatches;
+                        break;
+                    }
+                }
+            }
+        };
+        sampleGrid(15);
+        if (!splineOnly && samples<32) sampleGrid(31);
+        const bool faceMatched=samples>=16 && within==samples && (splineOnly || consistentNormals>=samples*.98);
+        matched &= faceMatched;
+        faces.append(QJsonObject{{"samples",samples},{"within_tolerance",within},{"without_reference_candidate",outsideBounds},
+            {"maximum_measured_distance_mm",maximum},{"other_surface_matches",otherSurfaceMatches},
+            {"maximum_distance_point_mm",QJsonArray{worstPoint.X(),worstPoint.Y(),worstPoint.Z()}},
+            {"consistent_normals",consistentNormals},{"kind",kind(surface.GetType())},
+            {"reference_matched",faceMatched}});
+    }
+    report["reference_matched"]=matched && !faces.isEmpty();
+    const bool success=report["reference_matched"].toBool();
+    report["status"]=splineOnly ? (success ? "spline_reference_matched" : "spline_reference_mismatch")
+                                : (success ? "surface_reference_matched" : "surface_reference_mismatch");
+    report["faces"]=faces;
+}
+}
+
+void compareObservedSplines(const QStringList& args, QJsonObject& report) { compareObservedFaces(args,report,true); }
+void compareObservedSurfaces(const QStringList& args, QJsonObject& report) { compareObservedFaces(args,report,false); }
 
 void sampleStepCloud(const QStringList& args,QJsonObject& report) {
     check(args.size()==6,"Usage: sample source.step report.json cloud.ply spacing_mm");

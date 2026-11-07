@@ -88,6 +88,15 @@ python -m tools.validation.run_step_surface_validation data/real-workpieces-step
 
 ## 仅点云的 CAD 重建
 
+如果部件只观测到一张平面、圆柱面或圆锥面，可以单独拟合有限曲面并导出 STEP：
+
+```powershell
+& "apps/ParamCAD Studio/build/msvc-debug/cloud-only/Release/cad_reconstruction_validation.exe" `
+  fit-observed-surface cloud.ply surface.json surface.step 0.05
+```
+
+点云须有毫米或米单位信息，末尾参数为毫米距离容差。曲面 STEP 使用新的输出路径。平面保留观测到的内边界，圆柱和圆锥按观测范围裁切。多面样本可将各自有观测支持的平面、圆柱和圆锥导出为开放曲面组，报告的 `faces` 列出各面的拟合参数。`surface_fitted` 记录曲面拟合，`cad_constructed` 区分闭合实体。
+
 边界杂线与壳闭合问题可用 `python -m tools.diagnostics.diagnose_assembly_boundaries --baseline <批处理输出> --output <新目录> --probe`
 复测。默认、alpha 半径增大、全输入点三个探针直接调用同一部件分离实现，保留输入校验和、
 参数及开放边/轮廓统计；不会读取参考 STEP 或将实验参数改成生产默认。

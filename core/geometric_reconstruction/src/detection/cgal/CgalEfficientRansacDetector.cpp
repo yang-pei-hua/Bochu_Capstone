@@ -105,6 +105,15 @@ bool detectWithCgalEfficientRansac(
         error = "CGAL Efficient RANSAC requires more points with valid normals";
         return false;
     }
+    const auto& firstPosition = std::get<0>(input.front());
+    if (std::all_of(input.begin() + 1, input.end(), [&](const auto& observation) {
+            return std::get<0>(observation) == firstPosition;
+        })) {
+        // A zero-extent input cannot support a surface. CGAL's octree depth
+        // calculation also requires a positive spatial extent.
+        error = "Primitive detection requires distinct positions with valid normals";
+        return false;
+    }
 
     const double diagonal = boundingBoxDiagonal(points);
     Ransac::Parameters parameters;

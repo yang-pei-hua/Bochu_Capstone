@@ -401,8 +401,21 @@ void smallConeBands() {
     require(!detectMultiScalePrimitiveEvidence(points,options,result,report,error,[]{return true;}) &&
         result.evidence.empty() && error=="Cancelled","multiscale cancellation publishes no partial evidence");
 }
+
+void coincidentPrimitiveObservations() {
+    std::vector<PointSample> points;
+    for (PointId id = 1; id <= 64; ++id)
+        points.push_back({id, {2, 3, 4}, modeling::Vec3{0, 0, 1}});
+    points.push_back({65, {10, 11, 12}}); // Excluded from the oriented detector input.
+    PrimitiveDetectionOptions options;
+    PrimitiveDetectionResult result;
+    std::string error;
+    require(!detectPrimitiveEvidence(PointStore(std::move(points)), options, result, error)
+                && error == "Primitive detection requires distinct positions with valid normals"
+                && result.evidence.empty(), "coincident observations cannot enter CGAL octree refinement");
+}
 }
 int main() {
-    try {snapshotsAndPatches();sharedBox();attachedBossAndHole();adaptiveRegions();localRecoveryAndConstraints();extendedRelations();tiltedCavityWalls();smallConeBands();std::cout<<"Shared surface analysis tests passed\n";return 0;}
+    try {snapshotsAndPatches();sharedBox();attachedBossAndHole();adaptiveRegions();localRecoveryAndConstraints();extendedRelations();tiltedCavityWalls();smallConeBands();coincidentPrimitiveObservations();std::cout<<"Shared surface analysis tests passed\n";return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

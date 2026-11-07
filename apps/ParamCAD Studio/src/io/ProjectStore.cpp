@@ -5,9 +5,12 @@
 #include <BRep_Builder.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
+#include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
+#include <TopExp_Explorer.hxx>
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QDir>
@@ -31,17 +34,51 @@ double volume(const TopoDS_Shape& shape)
     GProp_GProps properties; BRepGProp::VolumeProperties(shape,properties);
     return std::abs(properties.Mass());
 }
-bool sameMaterial(const TopoDS_Shape& a, const TopoDS_Shape& b)
+bool sameMaterialByCut(const TopoDS_Shape& a, const TopoDS_Shape& b, double tolerance)
 {
-    if (a.IsNull() || b.IsNull()) return false;
-    const double tolerance=std::max(1.0,volume(a))*1e-8;
-    if (std::abs(volume(a)-volume(b))>tolerance) return false;
-    // Equal bounds/volume alone cannot distinguish relocated holes. Test the
-    // material difference in both directions for legacy/source validation.
     BRepAlgoAPI_Cut first(a,b); first.SetRunParallel(false); first.Build();
     if (!first.IsDone() || volume(first.Shape())>tolerance) return false;
     BRepAlgoAPI_Cut second(b,a); second.SetRunParallel(false); second.Build();
     return second.IsDone() && volume(second.Shape())<=tolerance;
+}
+
+bool sameMaterial(const TopoDS_Shape& a, const TopoDS_Shape& b)
+{
+    if (a.IsNull() || b.IsNull()) return false;
+    const double volumeA = volume(a);
+    const double tolerance = std::max(1.0,volumeA)*1e-8;
+    if (std::abs(volumeA-volume(b))>tolerance) return false;
+    if (sameMaterialByCut(a,b,tolerance)) return true;
+
+    // A Boolean on an entire compound can fail at contacts between solids.
+    // For matching assemblies, verify each body's material independently.
+    struct Solid {
+        TopoDS_Shape shape;
+        Bnd_Box bounds;
+        double volume;
+    };
+    const auto solids = [](const TopoDS_Shape& shape) {
+        std::vector<Solid> result;
+        for (TopExp_Explorer body(shape,TopAbs_SOLID); body.More(); body.Next()) {
+            Solid item{body.Current(),{},volume(body.Current())};
+            BRepBndLib::AddOptimal(item.shape,item.bounds,false,false);
+            result.push_back(std::move(item));
+        }
+        return result;
+    };
+    const auto first = solids(a);
+    auto second = solids(b);
+    if (first.size()<2 || first.size()!=second.size()) return false;
+    for (const auto& solid : first) {
+        const double bodyTolerance = std::max(1.0,solid.volume)*1e-8;
+        const auto match = std::find_if(second.begin(),second.end(),[&](const auto& candidate) {
+            return !solid.bounds.IsOut(candidate.bounds) && std::abs(solid.volume-candidate.volume)<=bodyTolerance &&
+                   sameMaterialByCut(solid.shape,candidate.shape,bodyTolerance);
+        });
+        if (match==second.end()) return false;
+        second.erase(match);
+    }
+    return true;
 }
 void check(bool ok, const QString& message = QStringLiteral("Invalid or incomplete project data"))
 {

@@ -224,6 +224,26 @@ QJsonObject paramsJson(const FeatureParams& params)
                     p.pose.zDirection.x,p.pose.zDirection.y,p.pose.zDirection.z,p.depth,p.referenceSizeX,p.referenceSizeY,p.sizeX,p.sizeY,p.sizeZ})},
                     {"outline",curves(p.outline)},{"profileVoids",voids},{"envelope",envelope},{"cavities",cavities}};
                 if(p.boundary)result["boundary"]=boundaryJson(*p.boundary);
+                if (p.roundedEnd) {
+                    const auto& r = *p.roundedEnd;
+                    result["roundedEnd"] = values({r.center.x,r.center.y,r.center.z,r.straightLength,r.radius,
+                                                   r.bottom.depth,r.bottom.inset,r.top.depth,r.top.inset});
+                }
+                if (!p.rimRounds.empty()) {
+                    QJsonArray rounds;
+                    for (const auto& r : p.rimRounds) {
+                        QJsonArray record{double(r.curveIndex),r.radius,r.top};
+                        if (r.trimPlane) record.append(double(*r.trimPlane));
+                        rounds.append(record);
+                    }
+                    result["rimRounds"] = rounds;
+                }
+                if (!p.trimPlanes.empty()) {
+                    QJsonArray planes;
+                    for (const auto& t : p.trimPlanes)
+                        planes.append(values({t.point.x,t.point.y,t.point.z,t.outward.x,t.outward.y,t.outward.z}));
+                    result["trimPlanes"] = planes;
+                }
                 return result;
             }
         },
@@ -304,6 +324,27 @@ FeatureParams paramsFromJson(const QJsonObject& p)
             if(n==12){section.centerZ=s[8];section.axis=vec(s,9);}output.push_back(section);}};
         sections("envelope",body.envelope);sections("cavities",body.cavities);
         if(p.contains("boundary"))body.boundary=boundaryFromJson(p["boundary"]);
+        if (p.contains("roundedEnd")) {
+            const auto r = numbers(p["roundedEnd"],9);
+            body.roundedEnd = RoundedEndProfile{vec(r,0),r[3],r[4],{r[5],r[6]},{r[7],r[8]}};
+        }
+        if (p.contains("rimRounds")) {
+            check(p["rimRounds"].isArray());
+            for (const auto& item : p["rimRounds"].toArray()) {
+                const auto r = item.toArray();
+                check((r.size()==3 || r.size()==4) && r[1].isDouble());
+                ProfileRimRound round{std::size_t(integer(r[0],1000000)),r[1].toDouble(),boolean(r[2])};
+                if (r.size()==4) round.trimPlane=std::size_t(integer(r[3],1000000));
+                body.rimRounds.push_back(round);
+            }
+        }
+        if (p.contains("trimPlanes")) {
+            check(p["trimPlanes"].isArray());
+            for (const auto& item : p["trimPlanes"].toArray()) {
+                const auto t = numbers(item,6);
+                body.trimPlanes.push_back({vec(t,0),vec(t,3)});
+            }
+        }
         std::string error;check(validateProfileBody(body,error));return body;
     }
     }

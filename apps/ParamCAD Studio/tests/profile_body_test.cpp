@@ -1,9 +1,12 @@
 #include <modeling/ModelingCore.h>
 #include <modeling/PrimitiveEditing.h>
 #include "io/FeatureCodec.h"
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <GProp_GProps.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
 #include <QCoreApplication>
 #include <iostream>
 #include <stdexcept>
@@ -70,5 +73,81 @@ void noncircularCutout() {
     require(FeatureCodec::decode(FeatureCodec::encode({{1,"side drilled plate",FeatureType::ProfileBody,p}}),decoded,failure),failure.toStdString());
     require(restored.restoreFeatures(decoded) && std::abs(volume(restored.bodyShape())-volume(shape))<1e-7,"oriented section axis survives feature serialization");
 }
+
+void roundedEndBevels() {
+    ProfileBodyParams p;
+    p.depth = p.sizeZ = 12;
+    p.referenceSizeX = p.sizeX = 31;
+    p.referenceSizeY = p.sizeY = 36;
+    p.roundedEnd = RoundedEndProfile{{4,-2,3},13,18,{1,2},{2,1}};
+    p.cavities = {{4,-2,-1,16,3,3}};
+    TopoDS_Shape shape;
+    std::string error;
+    require(buildProfileBody(p,shape,error),error);
+    const double pi = std::acos(-1.);
+    const auto band = [&](double start, double end, double depth) {
+        return depth*(13*(start+end)+pi*(start*start+start*end+end*end)/6);
+    };
+    const auto expected = band(16,18,1)+band(18,18,9)+band(18,17,2)-pi*9*12;
+    require(std::abs(volume(shape)-expected)<1e-6,"rounded profile retains the straight and conical bevels");
+    std::vector<Feature> decoded;
+    QString failure;
+    require(FeatureCodec::decode(FeatureCodec::encode({{1,"rounded plate",FeatureType::ProfileBody,p}}),decoded,failure),
+            failure.toStdString());
+    ModelingCore restored;
+    require(restored.restoreFeatures(decoded),restored.lastError());
+    require(std::abs(volume(restored.bodyShape())-expected)<1e-6,"round end parameters survive serialization");
+    require(refreshProfileBodyDimensions(p,error) && buildProfileBody(p,shape,error),error);
+    require(std::abs(volume(shape)-expected)<1e-6,"rebasing dimensions preserves the beveled body");
 }
-int main(int argc,char** argv){QCoreApplication app(argc,argv);try{editableAnnularBody();analyticOutlineAndResize();noncircularCutout();std::cout<<"Profile body tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+
+void selectiveRimRounding() {
+    ProfileBodyParams p;
+    p.depth = p.sizeZ = 11;
+    p.referenceSizeX = p.sizeX = 30;
+    p.referenceSizeY = p.sizeY = 24;
+    const auto pi = std::acos(-1.);
+    p.outline = {{false,0,0,30,0},{false,30,0,30,16},{true,30,16,22,24,22,16,8,0,pi/2},
+                 {false,22,24,0,24},{false,0,24,0,0}};
+    TopoDS_Shape plain, rounded;
+    std::string error;
+    require(buildProfileBody(p,plain,error),error);
+    p.rimRounds = {{2,1.5,false},{2,2,true}};
+    require(buildProfileBody(p,rounded,error),error);
+    int tori = 0;
+    for (TopExp_Explorer it(rounded,TopAbs_FACE); it.More(); it.Next())
+        tori += BRepAdaptor_Surface(TopoDS::Face(it.Current())).GetType()==GeomAbs_Torus;
+    require(tori==2 && volume(rounded)<volume(plain),"selective rounding builds both toroidal transitions");
+    std::vector<Feature> decoded;
+    QString failure;
+    require(FeatureCodec::decode(FeatureCodec::encode({{1,"rounded rims",FeatureType::ProfileBody,p}}),decoded,failure),
+            failure.toStdString());
+    ModelingCore restored;
+    require(restored.restoreFeatures(decoded),restored.lastError());
+    require(std::abs(volume(restored.bodyShape())-volume(rounded))<1e-6,"rim rounds survive feature serialization");
+}
+
+void obliqueProfileTrim() {
+    ProfileBodyParams p;
+    p.depth = p.sizeZ = 10;
+    p.referenceSizeX = p.sizeX = 20;
+    p.referenceSizeY = p.sizeY = 10;
+    p.outline = {{false,0,0,20,0},{false,20,0,20,10},{false,20,10,0,10},{false,0,10,0,0}};
+    const auto normalLength = std::hypot(.2,1.);
+    p.trimPlanes = {{{0,0,9},{.2/normalLength,0,1/normalLength}}};
+    TopoDS_Shape shape;
+    std::string error;
+    require(buildProfileBody(p,shape,error),error);
+    require(std::abs(volume(shape)-1400)<1e-6,"oblique end trim preserves the measured half-space");
+    std::vector<Feature> decoded;
+    QString failure;
+    require(FeatureCodec::decode(FeatureCodec::encode({{1,"trimmed profile",FeatureType::ProfileBody,p}}),decoded,failure),
+            failure.toStdString());
+    ModelingCore restored;
+    require(restored.restoreFeatures(decoded),restored.lastError());
+    require(std::abs(volume(restored.bodyShape())-1400)<1e-6,"the trim plane survives feature serialization");
+    require(refreshProfileBodyDimensions(p,error) && buildProfileBody(p,shape,error),error);
+    require(std::abs(volume(shape)-1400)<1e-6,"the trim plane survives reference dimension refresh");
+}
+}
+int main(int argc,char** argv){QCoreApplication app(argc,argv);try{editableAnnularBody();analyticOutlineAndResize();noncircularCutout();roundedEndBevels();selectiveRimRounding();obliqueProfileTrim();std::cout<<"Profile body tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

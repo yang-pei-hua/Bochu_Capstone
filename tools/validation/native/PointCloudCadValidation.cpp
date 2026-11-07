@@ -97,7 +97,8 @@ void exportCad(const modeling::ModelingCore& core, const QString& path, QJsonObj
     for(int i=0;i<3;++i)snapshot.view.camera.target[i]=(i==0?x0+x1:i==1?y0+y1:z0+z1)*.5;
     snapshot.view.camera.position[0]=snapshot.view.camera.target[0]+span;snapshot.view.camera.position[1]=snapshot.view.camera.target[1]-span;
     snapshot.view.camera.position[2]=snapshot.view.camera.target[2]+span;
-    require(ProjectStore::save(projectPath,snapshot,error),error.toStdString());
+    const auto saved=ProjectStore::save(projectPath,snapshot,error);
+    require(saved,error.toStdString());
     const auto restored=ProjectStore::load(projectPath,error);require(restored && restored->model.features().size()==core.features().size(),error.toStdString());
     report["project_round_trip_verified"]=true;report["project"]=projectPath;report["features_file"]=featuresPath;
     report["step"]=QFileInfo(path).absoluteFilePath();report["cad_constructed"]=true;report["status"]="cad_exported";

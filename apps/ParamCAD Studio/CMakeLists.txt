@@ -266,10 +266,12 @@ vtk_module_autoinit(
 )
 
 if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
+    find_package(Eigen3 CONFIG REQUIRED)
     add_executable(cad_reconstruction_validation
         ../../tools/validation/native/cad_reconstruction_validation.cpp
         ../../tools/validation/native/StepCloudSampler.cpp
         ../../tools/validation/native/SurfaceCoverageValidation.cpp
+        ../../tools/validation/native/ObservedSurfaceFitting.cpp
         ../../tools/validation/native/PointCloudCadValidation.cpp
         ../../tools/validation/native/AssemblyDiagnostics.cpp
         ../../tools/validation/native/ReconstructionContractStages.cpp
@@ -291,7 +293,7 @@ if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
         ../../core/geometric_reconstruction/src ../../core/parametric_modeling/src)
     target_link_directories(cad_reconstruction_validation PRIVATE ${OpenCASCADE_LIBRARY_DIR})
     target_link_libraries(cad_reconstruction_validation PRIVATE
-        Qt6::Core Qt6::Gui VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction TKDE TKXSBase TKDESTEP)
+        Qt6::Core Qt6::Gui VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction Eigen3::Eigen TKDE TKXSBase TKDESTEP)
     if(MSVC)
         target_compile_options(cad_reconstruction_validation PRIVATE /W4 /permissive- /utf-8)
         # Native failures get a bounded symbolized JSON stack beside the report.

@@ -60,21 +60,41 @@ void runCadWork(const CadWork& input, CadReconstructionResult& result,
     // Decompose failed/multiple-body observations before attempting
     // finite-shell closure. Explicit user constraints stay authoritative.
     const size_t bodies=guided.candidate.boxes.size()+guided.candidate.prisms.size()+guided.candidate.curvedSolids.size();
-    if(hints.empty() && relations.empty() && (!recognized || bodies>1)) {
+    const bool refineBox = recognized && bodies == 1 && guided.candidate.boxes.size() == 1 &&
+        guided.candidate.surfaceCoverage < .99;
+    if(hints.empty() && relations.empty() && (!recognized || bodies>1 || refineBox)) {
         stageChanged(Stage::SeparatingParts);
         reconstruction::AssemblyOptions options;
-        if (projectionFallback) options.maximumProjectionParts = 6;
+        if (projectionFallback && !refineBox) options.maximumProjectionParts = 6;
         // The decomposition estimates local noise independently of the
         // coarse, whole-cloud detection tolerance.
         result.assembly.emplace();std::string decompositionError;
-        if(reconstruction::reconstructAssembly(recoverySource,options,*result.assembly,decompositionError,cancelled)) {
+        const bool separatedOk = reconstruction::reconstructAssembly(recoverySource,options,*result.assembly,decompositionError,cancelled);
+        if (cancelled()) return;
+        bool profileRefined = false;
+        if (refineBox && separatedOk && result.assembly->parts.size() == 1 &&
+            result.assembly->parts.front().status == "closed_analytic_profile" &&
+            result.assembly->candidate.profileBodies.size() == 1) {
+            const auto& profile = result.assembly->candidate.profileBodies.front();
+            const auto throughCuts = std::count_if(profile.cavities.begin(), profile.cavities.end(),
+                [&](const auto& entry) {
+                    return entry.start == 0 && std::any_of(profile.cavities.begin(),profile.cavities.end(),[&](const auto& exit) {
+                        return exit.end == profile.depth && exit.centerX == entry.centerX && exit.centerY == entry.centerY;
+                    });
+                });
+            profileRefined = std::size_t(throughCuts) >= guided.candidate.throughHoles.size();
+        }
+        if (refineBox && !profileRefined) {
+            result.assembly.reset();
+        } else if (separatedOk) {
             result.branch = CadReconstructionResult::Branch::Assembly;
             const auto& separated = result.assembly->candidate;
             if(!separated.profileBodies.empty() || !separated.curvedSolids.empty() ||
                !separated.projectionPrograms.empty()) {
                 result.partialAssembly = !result.assembly->unassignedPointIds.empty() ||
                     std::any_of(result.assembly->parts.begin(), result.assembly->parts.end(), [](const auto& part) {
-                        return !part.closed && (!part.projection || part.projection->operations.empty());
+                        return part.status == "closed_circular_slab_inferred_contact" ||
+                            (!part.closed && (!part.projection || part.projection->operations.empty()));
                     });
                 result.candidate=separated;result.analysis=std::move(guided.analysis);
                 result.outcome=CadReconstructionResult::Outcome::Success;return;
@@ -82,6 +102,7 @@ void runCadWork(const CadWork& input, CadReconstructionResult& result,
             result.analysis=std::move(guided.analysis);
             result.outcome=CadReconstructionResult::Outcome::Unsupported;
             result.error=QStringLiteral("Separated %1 candidates; no verified closed solid").arg(result.assembly->parts.size());
+            if (!recognized && !failure.empty()) result.error += "; conventional: " + QString::fromStdString(failure);
             return;
         } else if(!recognized)failure += "; decomposition: "+decompositionError;
     }

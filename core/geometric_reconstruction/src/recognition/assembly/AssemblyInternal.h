@@ -1,6 +1,7 @@
 #pragma once
 #include "reconstruction/recognition/AssemblyReconstruction.h"
 #include "common/Math3.h"
+#include <unordered_set>
 #include <vector>
 namespace reconstruction::detail::assembly {
 using namespace math3;
@@ -32,4 +33,13 @@ void recoverBoundaries(const WorkingData&, const AssemblyOptions&, const std::ve
     std::vector<FiniteSurfacePatch>&, const std::function<bool()>&);
 CompoundCandidate closeParts(const WorkingData&, const AssemblyOptions&, std::vector<FiniteSurfacePatch>&,
     std::vector<AssemblyPart>&, std::size_t inputPoints, const std::function<bool()>&);
+void closeAnalyticProfile(const PointStore&, const WorkingData&, AssemblyReconstructionResult&, const std::function<bool()>&);
+void closeAnnularTube(const PointStore&, const WorkingData&, AssemblyReconstructionResult&, const std::function<bool()>&);
+std::vector<CylinderEquation> fitCylinderWallsAlongAxis(const WorkingData&, const std::vector<FiniteSurfacePatch>&,
+    Vec3 axis, double tolerance);
+void closeCircularSlab(const PointStore&, const WorkingData&, AssemblyReconstructionResult&, const std::function<bool()>&);
+void recoverLocalProfiles(const PointStore&, const WorkingData&, const AssemblyOptions&,
+                          AssemblyReconstructionResult&, const std::function<bool()>&);
+void publishAnalyticProfile(const PointStore&, const WorkingData&, AssemblyReconstructionResult&,
+    modeling::ProfileBodyParams, const std::unordered_set<PointId>&, const char* status, const char* reason);
 }

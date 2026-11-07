@@ -234,6 +234,51 @@ std::vector<PointId> assignSourceObservations(const PointStore& source, const Wo
     }
     return unassigned;
 }
+
+void publishAnalyticProfile(const PointStore& source, const WorkingData& work, AssemblyReconstructionResult& result,
+    modeling::ProfileBodyParams body, const std::unordered_set<PointId>& support, const char* status, const char* reason) {
+    const bool appending = !result.candidate.profileBodies.empty();
+    AssemblyPart part;
+    part.id = appending ? result.parts.size()+1 : 1;
+    part.closed = part.orientationKnown = true;
+    part.status = status;
+    part.reason = reason;
+    part.confidence = double(support.size()) / source.size();
+    if (!appending) {
+        result.unassignedPointIds.clear();
+        result.unassignedWorkingPointIds.clear();
+        result.parts.clear();
+    } else {
+        const auto assigned = [&](PointId id) { return support.count(id) != 0; };
+        auto& remaining = result.unassignedPointIds;
+        remaining.erase(std::remove_if(remaining.begin(),remaining.end(),assigned),remaining.end());
+        auto& working = result.unassignedWorkingPointIds;
+        working.erase(std::remove_if(working.begin(),working.end(),assigned),working.end());
+    }
+    for (const auto& sample : source.points()) {
+        if (!support.count(sample.id)) {
+            if (!appending) result.unassignedPointIds.push_back(sample.id);
+            continue;
+        }
+        const auto p = sample.position;
+        if (part.pointIds.empty()) part.lower = part.upper = p;
+        part.pointIds.push_back(sample.id);
+        part.lower = {std::min(part.lower.x,p.x),std::min(part.lower.y,p.y),std::min(part.lower.z,p.z)};
+        part.upper = {std::max(part.upper.x,p.x),std::max(part.upper.y,p.y),std::max(part.upper.z,p.z)};
+    }
+    for (const auto& point : work.points) {
+        if (support.count(point.id)) part.workingPointIds.push_back(point.id);
+        else if (!appending) result.unassignedWorkingPointIds.push_back(point.id);
+    }
+    for (const auto& patch : result.patches) {
+        if (std::any_of(patch.pointIds.begin(), patch.pointIds.end(), [&](auto id) {return support.count(id) != 0;}))
+            part.patchIds.push_back(patch.id);
+    }
+    result.candidate.surfaceCoverage = result.candidate.confidence =
+        double(source.size()-result.unassignedPointIds.size())/source.size();
+    result.candidate.profileBodies.push_back(std::move(body));
+    result.parts.push_back(std::move(part));
+}
 } // namespace detail::assembly
 
 bool reconstructAssembly(const PointStore& source, const AssemblyOptions& options,
@@ -256,6 +301,13 @@ bool reconstructAssembly(const PointStore& source, const AssemblyOptions& option
         output.patches = std::move(patches);
         output.connections = std::move(grouping.connections);
         output.parts = std::move(grouping.parts);
+        if (options.buildSolids && output.candidate.profileBodies.empty() && output.candidate.curvedSolids.empty()) {
+            closeAnalyticProfile(source, work, output, cancelled);
+            if (output.candidate.profileBodies.empty()) closeAnnularTube(source, work, output, cancelled);
+            if (output.candidate.profileBodies.empty() || output.parts.front().status == "closed_annular_tube")
+                closeCircularSlab(source, work, output, cancelled);
+        }
+        recoverLocalProfiles(source, work, options, output, cancelled);
         fitOpenParts(source, options, output, cancelled);
         if (output.patches.empty()) {
             error = "No finite surface patches with sufficient neighborhood support";
