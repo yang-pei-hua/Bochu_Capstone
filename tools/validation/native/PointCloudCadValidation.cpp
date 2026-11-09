@@ -6,6 +6,7 @@
 #include "io/FeatureCodec.h"
 #include <reconstruction/modeling/ModelingAdapter.h>
 #include <reconstruction/recognition/ProjectionExtrusion.h>
+#include <reconstruction/recognition/ProjectionSettings.h>
 #include <modeling/StepExporter.h>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepBndLib.hxx>
@@ -30,13 +31,94 @@ void save(const QString& path,const QJsonObject& report){QSaveFile file(path);re
     const auto data=QJsonDocument(report).toJson();require(file.write(data)==data.size() && file.commit(),"Cannot commit cloud-only report");}
 int solids(const TopoDS_Shape& shape){int count=0;for(TopExp_Explorer i(shape,TopAbs_SOLID);i.More();i.Next())++count;return count;}
 void exportCad(const modeling::ModelingCore& core, const QString& path, QJsonObject& report);
+
+struct ProjectionArguments {
+    reconstruction::ProjectionExtrusionOptions options;
+    std::filesystem::path file;
+    bool projectionFallback = true;
+    bool specializedRecovery = true;
+    QString path = QStringLiteral("auto");
+};
+
+ProjectionArguments projectionArguments(const QStringList& args, bool assembly)
+{
+    ProjectionArguments result;
+    QStringList overrides;
+    bool projectionSpecified = false, pathSpecified = false;
+    bool areaSpecified = false, toleranceSpecified = false;
+    for (qsizetype i = 5; i < args.size(); ++i) {
+        const auto argument = args[i];
+        const auto readValue = [&]() {
+            require(i+1 < args.size() && !args[i+1].startsWith("--"),
+                    "Missing value for " + argument.toStdString());
+            return args[++i];
+        };
+        if (argument == "--config") {
+            require(result.file.empty(),"Duplicate --config");
+            result.file = std::filesystem::path(readValue().toStdU16String());
+        } else if (argument == "--set") {
+            overrides.append(readValue());
+        } else if (argument == "--path") {
+            require(!pathSpecified,"Duplicate --path");
+            result.path = readValue();
+            pathSpecified = true;
+        } else if (assembly && argument == "--no-specialized-recovery" && result.specializedRecovery) {
+            result.specializedRecovery = false;
+        } else if (assembly && !projectionSpecified &&
+                   (argument == "--projection-fallback" || argument == "--no-projection-fallback")) {
+            result.projectionFallback = argument == "--projection-fallback";
+            projectionSpecified = true;
+        } else if (!assembly && argument == "--area-directions" && !areaSpecified) {
+            areaSpecified = true;
+            overrides.append(QStringLiteral("include_area_directions=true"));
+        } else if (!assembly && !toleranceSpecified && !argument.startsWith("--")) {
+            bool parsed = false;
+            const double tolerance = argument.toDouble(&parsed);
+            require(parsed && std::isfinite(tolerance) && tolerance > 0,"Expected a positive tolerance in millimetres");
+            toleranceSpecified = true;
+            overrides.append(QStringLiteral("distance_tolerance_mm=") + argument);
+        } else {
+            throw std::invalid_argument("Unknown or repeated option: " + argument.toStdString());
+        }
+    }
+    if (result.file.empty()) result.file = reconstruction::projectionConfigPath();
+    result.options = reconstruction::loadProjectionOptions(result.file);
+    for (const auto& assignment : overrides)
+        reconstruction::setProjectionOption(result.options,assignment.toStdString());
+    using Path = reconstruction::ProjectionPath;
+    if (result.path == "single-axis") result.options.path = Path::SingleAxis;
+    else if (result.path == "two-axis-intersection") result.options.path = Path::TwoAxisIntersection;
+    else if (result.path == "segmented") result.options.path = Path::Segmented;
+    else require(result.path == "auto","Unknown projection path. Use auto, single-axis, two-axis-intersection or segmented");
+    reconstruction::validateProjectionOptions(result.options);
+    return result;
+}
+
+void reportProjectionSettings(QJsonObject& report, const ProjectionArguments& arguments)
+{
+    report["projection_config"] = QString::fromStdU16String(arguments.file.u16string());
+    report["projection_path"] = arguments.path;
+    QJsonObject settings;
+    for (const auto& setting : reconstruction::projectionSettings()) {
+        const auto value = setting.value(arguments.options);
+        settings[QString::fromLatin1(setting.key)] = setting.type == reconstruction::ProjectionSetting::Type::Boolean
+            ? QJsonValue(value != 0) : QJsonValue(value);
+    }
+    report["projection_settings"] = settings;
+}
 }
 void validatePointCloudCad(const QStringList& args,QJsonObject& report) {
-    require(args.size()==5 || (args.size()==6 && args[5]=="--projection-fallback"),
-            "Usage: reconstruct-cloud cloud.ply report.json output.step [--projection-fallback]");
+    require(args.size()>=5,
+            "Usage: reconstruct-cloud cloud.ply report.json output.step [--no-projection-fallback] [--no-specialized-recovery] [--config file] [--set key=value] [--path mode]");
+    const auto arguments = projectionArguments(args,true);
+    const auto projectionFallback = arguments.projectionFallback;
+    const auto specializedRecovery = arguments.specializedRecovery;
+    reportProjectionSettings(report,arguments);
     const auto unit=PointCloudAdapter::lengthUnitFor(args[2]);
     require(unit!=reconstruction::LengthUnit::Arbitrary,"Point cloud needs mm/m unit metadata; declare its unit explicitly");
     report["input_kind"]="point_cloud_only";report["source_model_read"]=false;report["topology_correspondence_used"]=false;
+    report["specialized_recovery_enabled"]=specializedRecovery;
+    report["projection_fallback_enabled"]=projectionFallback;
     report["reference_labels_used"]=false;report["source_completeness_verified"]=false;report["cad_constructed"]=false;
     report["cloud"]=QFileInfo(args[2]).absoluteFilePath();report["unit"]=unit==reconstruction::LengthUnit::Millimeter?"mm":"m";
     auto stage=[&](const QString& name){report["stage"]=name;report["status"]="running";save(args[3],report);};
@@ -46,7 +128,7 @@ void validatePointCloudCad(const QStringList& args,QJsonObject& report) {
     QObject::connect(&task,&CadReconstructionTask::stageChanged,&loop,[&](auto value){
         stage(value==CadReconstructionTask::Stage::Preprocessing?"preprocessing":value==CadReconstructionTask::Stage::SeparatingParts?"separating_and_closing_parts":"recognizing_from_points");});
     QObject::connect(&task,&CadReconstructionTask::finished,&loop,[&](const auto& value){result=value;loop.quit();});
-    require(task.start(cloud,unit,{},0,{},{},args.size()==6),"Cannot start point-cloud worker");
+    require(task.start(cloud,unit,{},0,{},{},projectionFallback,specializedRecovery,arguments.options),"Cannot start point-cloud worker");
     if(!result)loop.exec();require(result.has_value(),"Point-cloud worker returned no result");
     if(result->preprocessingComplete)report["preprocessing"]=QJsonObject{{"input_points",double(result->preprocessing.inputPointCount)},
         {"output_points",double(result->preprocessing.outputPointCount)},{"removed_voxel_duplicates",double(result->preprocessing.removedByVoxel)},
@@ -112,21 +194,11 @@ QJsonArray pointIds(const std::vector<reconstruction::PointId>& ids) {
 }
 
 void validateProjectionCad(const QStringList& args, QJsonObject& report) {
-    require(args.size()>=5 && args.size()<=7,
-        "Usage: fit-projection cloud.ply report.json output.step [tolerance-mm] [--area-directions]");
-    reconstruction::ProjectionExtrusionOptions options;
-    for (int index=5; index<args.size(); ++index) {
-        if (args[index]=="--area-directions") {
-            require(!options.includeAreaDirections, "Duplicate area-directions option");
-            options.includeAreaDirections=true;
-        } else {
-            bool parsed=false;
-            const double tolerance=args[index].toDouble(&parsed);
-            require(parsed && std::isfinite(tolerance) && tolerance>0 && options.distanceTolerance==0,
-                    "Expected a positive tolerance in millimetres");
-            options.distanceTolerance=tolerance;
-        }
-    }
+    require(args.size()>=5,
+        "Usage: fit-projection cloud.ply report.json output.step [--config file] [--set key=value] [--path mode] [tolerance-mm] [--area-directions]");
+    const auto arguments = projectionArguments(args,false);
+    const auto& options = arguments.options;
+    reportProjectionSettings(report,arguments);
     const auto unit=PointCloudAdapter::lengthUnitFor(args[2]);
     const auto scale=reconstruction::millimetersPerUnit(unit);
     require(scale.has_value(),"Point cloud needs mm/m unit metadata; declare its unit explicitly");
@@ -146,18 +218,15 @@ void validateProjectionCad(const QStringList& args, QJsonObject& report) {
     reconstruction::ProjectionExtrusionResult fit;
     const bool accepted=reconstruction::fitProjectionExtrusion(
         points,options,fit);
-    QJsonArray axes,operations;
-    for (const auto& axis : fit.axes) {
-        axes.append(QJsonObject{{"direction",QJsonArray{axis.axis.x,axis.axis.y,axis.axis.z}},
-            {"source",QString::fromStdString(axis.source)},{"convex_projection_area_mm2",axis.convexProjectionArea},
-            {"convex_envelope_volume_mm3",axis.convexEnvelopeVolume},{"status",QString::fromStdString(axis.status)}});
-    }
+    const auto axisDiagnostics = projectionAxisDiagnostics(fit);
+    for (auto field = axisDiagnostics.begin(); field != axisDiagnostics.end(); ++field)
+        report[field.key()] = field.value();
+    QJsonArray operations;
     for (const auto& operation : fit.operations) {
         operations.append(QJsonObject{{"operation",int(operation.operation)},
             {"depth_mm",operation.depth},{"reverse",operation.reverse},
             {"curve_count",qint64(operation.sketch.entities.size())},{"support_point_ids",pointIds(operation.supportPointIds)}});
     }
-    report["axes"]=axes;
     report["operations"]=operations;
     report["distance_tolerance_mm"]=fit.distanceTolerance;
     report["quality"]=QJsonObject{{"scored_points",qint64(fit.quality.scoredPoints)},

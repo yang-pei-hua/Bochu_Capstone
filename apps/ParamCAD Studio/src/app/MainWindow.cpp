@@ -10,6 +10,7 @@
 #include "app/FeatureEditingController.h"
 #include "core/CameraController.h"
 #include "core/PointCloudDocument.h"
+#include "ui/HyperparameterSettings.h"
 #include "ui/panels/CameraPanel.h"
 #include "ui/panels/CapturePanel.h"
 #include "ui/panels/ModelingPanel.h"
@@ -238,7 +239,8 @@ void MainWindow::createWorkspaceControllers()
     m_propertyPanel->reconstructPanel()->setCaptureBaseDirectory(capture->baseDirectory());
     m_pointCloudWorkspace = new PointCloudWorkspaceController(m_pointCloudDocument, modeling, reconstruction,
         {m_viewer, m_modelingPanel, m_relationsPanel, m_scenePanel,
-         m_propertyPanel, m_reconstructCadAction, m_cancelCadAction, m_reconstructToolAction}, this, this);
+          m_propertyPanel, m_reconstructCadAction, m_cancelCadAction, m_reconstructToolAction,
+          m_projectionDebugAction}, this, this);
     m_modelViewController = new ModelViewController(capture,
         {m_viewer, m_propertyPanel, m_scenePanel, m_exportStepAction}, this, this);
     m_featureEditing = new FeatureEditingController(modeling,
@@ -315,12 +317,16 @@ void MainWindow::createActions()
     m_reconstructCadAction->setToolTip(
         tr("Recognize geometry in the loaded point cloud and reconstruct a parametric CAD model"));
     m_reconstructCadAction->setEnabled(false);
-    m_projectionCadAction = new QAction(tr("Reconstruct CAD with Projection Fallback"), this);
-    m_projectionCadAction->setObjectName(QStringLiteral("projectionCadAction"));
-    m_projectionCadAction->setEnabled(false);
+    m_cadWithoutProjectionAction = new QAction(tr("Reconstruct CAD without Projection Fallback"), this);
+    m_cadWithoutProjectionAction->setObjectName(QStringLiteral("cadWithoutProjectionAction"));
+    m_cadWithoutProjectionAction->setEnabled(false);
     connect(m_reconstructCadAction,&QAction::changed,this,[this] {
-        m_projectionCadAction->setEnabled(m_reconstructCadAction->isEnabled());
+        m_cadWithoutProjectionAction->setEnabled(m_reconstructCadAction->isEnabled());
     });
+    m_projectionDebugAction = new QAction(tr("Fit Projection on Imported Point Cloud…"), this);
+    m_projectionDebugAction->setObjectName(QStringLiteral("projectionDebugAction"));
+    m_projectionDebugAction->setToolTip(tr("Fit the original imported point cloud as one component"));
+    m_projectionDebugAction->setEnabled(false);
     m_cancelCadAction = new QAction(tr("Cancel CAD Reconstruction"), this);
     m_cancelCadAction->setObjectName(QStringLiteral("cancelCadReconstructionAction"));
     m_cancelCadAction->setEnabled(false);
@@ -401,6 +407,16 @@ void MainWindow::createMenus()
     editMenu->addAction(m_undoCadAction); editMenu->addAction(m_redoCadAction);
     editMenu->addSeparator(); editMenu->addAction(m_textEditAction);
 
+    auto* settingsMenu = menuBar()->addMenu(tr("&Settings"));
+    settingsMenu->setObjectName(QStringLiteral("settingsMenu"));
+    auto* hyperparameters = settingsMenu->addAction(tr("超参数"));
+    hyperparameters->setObjectName(QStringLiteral("hyperparametersAction"));
+    connect(hyperparameters,&QAction::triggered,this,[this] { showHyperparameterSettings(this); });
+
+    auto* debugMenu = menuBar()->addMenu(tr("&Debug"));
+    debugMenu->setObjectName(QStringLiteral("debugMenu"));
+    debugMenu->addAction(m_projectionDebugAction);
+
     QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(m_resetCameraAction);
     viewMenu->addSeparator();
@@ -415,7 +431,7 @@ void MainWindow::createMenus()
     toolsMenu->addAction(m_captureToolAction);
     toolsMenu->addAction(m_reconstructToolAction);
     toolsMenu->addAction(m_reconstructCadAction);
-    toolsMenu->addAction(m_projectionCadAction);
+    toolsMenu->addAction(m_cadWithoutProjectionAction);
     toolsMenu->addAction(m_cancelCadAction);
 
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
@@ -494,6 +510,7 @@ void MainWindow::createDockPanels()
     propertyDock->setWidget(m_propertyPanel);
     propertyDock->setMinimumWidth(400);
     addDockWidget(Qt::RightDockWidgetArea, propertyDock);
+    connect(m_projectionDebugAction, &QAction::triggered, propertyDock, &QWidget::show);
 
     m_console = new QPlainTextEdit(this);
     m_console->setReadOnly(true);
@@ -552,8 +569,10 @@ void MainWindow::connectUi()
     connect(m_openAction, &QAction::triggered, m_modelViewController, &ModelViewController::openModel);
     connect(m_openPointCloudAction, &QAction::triggered, m_pointCloudWorkspace, &PointCloudWorkspaceController::openPointCloud);
     connect(m_reconstructCadAction, &QAction::triggered, m_pointCloudWorkspace, &PointCloudWorkspaceController::reconstructCad);
-    connect(m_projectionCadAction,&QAction::triggered,m_pointCloudWorkspace,
-            &PointCloudWorkspaceController::reconstructCadWithProjection);
+    connect(m_cadWithoutProjectionAction,&QAction::triggered,m_pointCloudWorkspace,
+            &PointCloudWorkspaceController::reconstructCadWithoutProjection);
+    connect(m_projectionDebugAction, &QAction::triggered, m_pointCloudWorkspace,
+            &PointCloudWorkspaceController::runProjectionDebug);
     connect(m_cancelCadAction, &QAction::triggered,
             m_pointCloudWorkspace, &PointCloudWorkspaceController::cancelCadReconstruction);
     connect(m_textureAction, &QAction::triggered, m_modelViewController, &ModelViewController::chooseTexture);

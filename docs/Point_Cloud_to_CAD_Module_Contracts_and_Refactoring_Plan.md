@@ -37,7 +37,7 @@ flowchart TD
 | 投影拟合与实体试建 | `fitProjectionExtrusion` 同时管理证据、局部坐标、候选、OCCT 试建、分数和搜索。 | 按选轴、区间、轮廓、提案、评分、搜索分层。试建使用临时模型。评分固定接收指定的评分点视图。 |
 | 识别候选与正式提交 | `commitCompoundCandidate` 翻译候选，分配临时 ID，检查替换策略并应用补丁。不同候选类型的操作依赖由翻译逻辑决定。 | 建模计划明确操作顺序、草图依赖和目标体。计划与应用分别验证，提交继续由修订检查和事务保护。 |
 
-源码依据见 [分析快照](../core/geometric_reconstruction/include/reconstruction/analysis/SurfaceAnalysis.h#L73)、[面片索引](../core/geometric_reconstruction/src/analysis/SurfacePatches.cpp#L50)、[修复事务](../core/geometric_reconstruction/src/recognition/RepairTransaction.cpp#L33)、[装配内部工作数据](../core/geometric_reconstruction/src/recognition/assembly/AssemblyInternal.h#L9)、[装配回填顺序](../core/geometric_reconstruction/src/recognition/assembly/AssemblyReconstruction.cpp#L195)、[闭合时的轮廓调整](../core/geometric_reconstruction/src/recognition/assembly/PartClosure.cpp#L68)、[投影拟合](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L536)和[候选提交](../core/geometric_reconstruction/src/modeling/ModelingAdapter.cpp#L5)。
+源码依据见 [分析快照](../core/geometric_reconstruction/include/reconstruction/analysis/SurfaceAnalysis.h#L73)、[面片索引](../core/geometric_reconstruction/src/analysis/SurfacePatches.cpp#L50)、[修复事务](../core/geometric_reconstruction/src/recognition/RepairTransaction.cpp#L33)、[装配内部工作数据](../core/geometric_reconstruction/src/recognition/assembly/AssemblyInternal.h#L9)、[装配回填顺序](../core/geometric_reconstruction/src/recognition/assembly/AssemblyReconstruction.cpp#L195)、[闭合时的轮廓调整](../core/geometric_reconstruction/src/recognition/assembly/PartClosure.cpp#L68)、[投影拟合](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L319)和[候选提交](../core/geometric_reconstruction/src/modeling/ModelingAdapter.cpp#L5)。
 
 ## 2. 模块功能、目标输入输出与实际源码
 
@@ -92,12 +92,12 @@ flowchart TD
 
 | 编号与功能 | 目标输入 | 目标输出 | 当前实现 | 优先级 |
 | --- | --- | --- | --- | --- |
-| 22 候选轴生成 | 部件观测、可选基元证据、方向策略和预算 | 候选方向、来源、支持信息和可选投影指标 | [基元、PCA 与侧壁选轴](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L584)、[可选面积搜索](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L628) | P0 |
-| 23 拉伸区间与截面观测 | 部件观测、给定轴、尺度和容差 | 局部坐标系、端点或区间假设、各截面支持点和缺证据状态 | [capAt](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L181)、[轴向范围计算](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L652) | P0 |
-| 24 二维截面恢复 | 给定坐标系、截面点、可选侧壁和孔壁证据 | 带外环、内环、曲线参数及证据的草图候选 | [profile](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L212)、[共用的二维边界提取](../core/geometric_reconstruction/src/recognition/assembly/FiniteBoundaries.cpp#L19) | P0 |
-| 25 基体、加材与切除提案 | 草图、轴向区间、孔槽或台阶证据、可选宿主 | 有草图平面、深度、方向、操作类型和目标引用的提案集 | [盲孔与槽](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L406)、[基体与台阶提案](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L671) | P1 |
-| 26 候选实体评分 | 已试建的实体、固定评分点、容差、可选特征数量 | 距离与法向统计、缺少支持的面积、残差点 ID、总分及指标口径 | [evaluate](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L312) | P0 |
-| 27 操作序列搜索与选择 | 提案、试建和评分接口、搜索预算和接受策略 | 选中序列、质量、停止原因和搜索诊断 | [试建和评分包装](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L389)、[搜索与验收](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L719) | P1 |
+| 22 候选轴生成 | 部件观测、可选基元证据、方向策略和预算 | 候选方向、来源、支持信息和可选投影指标 | [基元、PCA 与侧壁选轴](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L209)、[可选面积搜索](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L261) | P0 |
+| 23 拉伸区间与截面观测 | 部件观测、给定轴、尺度和容差 | 局部坐标系、端点或区间假设、各截面支持点和缺证据状态 | [capAt](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L176)、[轴向范围计算](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L194) | P0 |
+| 24 二维截面恢复 | 给定坐标系、截面点、可选侧壁和孔壁证据 | 带外环、内环、曲线参数及证据的草图候选 | [profile](../core/geometric_reconstruction/src/recognition/projection/ProjectionProfile.cpp#L81)、[共用的二维边界提取](../core/geometric_reconstruction/src/recognition/assembly/FiniteBoundaries.cpp#L19) | P0 |
+| 25 基体、加材与切除提案 | 草图、轴向区间、孔槽或台阶证据、可选宿主 | 有草图平面、深度、方向、操作类型和目标引用的提案集 | [盲孔与槽](../core/geometric_reconstruction/src/recognition/projection/ProjectionProposals.cpp#L59)、[基体与台阶提案](../core/geometric_reconstruction/src/recognition/projection/ProjectionProposals.cpp#L108) | P1 |
+| 26 候选实体评分 | 已试建的实体、固定评分点、容差、可选特征数量 | 距离与法向统计、缺少支持的面积、残差点 ID、总分及指标口径 | [evaluate](../core/geometric_reconstruction/src/recognition/projection/ProjectionScoring.cpp#L24) | P0 |
+| 27 操作序列搜索与选择 | 提案、试建和评分接口、搜索预算和接受策略 | 选中序列、质量、停止原因和搜索诊断 | [试建和评分包装](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L101)、[搜索与验收](../core/geometric_reconstruction/src/recognition/projection/ProjectionSearch.cpp#L7) | P1 |
 
 先拆 22–24 与 26，可用真轴、已知端面和正误实体分别测试。25、27 的测试使用这些稳定边界。投影拟合可继续通过现有 `fitProjectionExtrusion` 对外调用，试建可继续走 `buildProjectionProgram` 和建模核心。 [投影公开契约](../core/geometric_reconstruction/include/reconstruction/recognition/ProjectionExtrusion.h#L49)
 
@@ -105,7 +105,7 @@ flowchart TD
 
 | 编号与功能 | 目标输入 | 目标输出 | 当前实现 | 优先级 |
 | --- | --- | --- | --- | --- |
-| 28 识别结果转建模计划 | 识别候选、当前特征快照、替换策略和预期修订 | 有序命令或 `ModelPatch`，显式草图依赖、目标体与拒绝原因 | [commitCompoundCandidate](../core/geometric_reconstruction/src/modeling/ModelingAdapter.cpp#L5) 同时负责计划和应用。投影另有 [buildProjectionProgram](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L503)。 | P1 |
+| 28 识别结果转建模计划 | 识别候选、当前特征快照、替换策略和预期修订 | 有序命令或 `ModelPatch`，显式草图依赖、目标体与拒绝原因 | [commitCompoundCandidate](../core/geometric_reconstruction/src/modeling/ModelingAdapter.cpp#L5) 同时负责计划和应用。投影另有 [buildProjectionProgram](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L286)。 | P1 |
 | 29 草图校验与构面 | 草图实体、解析后的草图平面和容差 | 可用面域，或开放、相交、退化及孔归属诊断 | [validateSketch](../core/parametric_modeling/src/SketchValidation.cpp#L9)、[buildSketchFace](../core/parametric_modeling/src/occt/SketchBuilder.cpp#L296) | P2 |
 | 30 特征重建和 B-rep 运算 | 特征历史、参数、依赖、目标体及参考平面 | 重放后的 B-rep、各特征状态和语义面解析结果 | [RebuildEngine::rebuild](../core/parametric_modeling/src/RebuildEngine.cpp#L212)、[resolveSketchPlane](../core/parametric_modeling/src/SemanticFaces.cpp#L115)、[OCCT 构造器入口](../core/parametric_modeling/src/occt/Builders.h) | P2 |
 | 31 编辑和原子提交 | 当前模型、命令或补丁、预期修订 | 新模型修订和变更项，或失败及回滚结果 | [ModelingCore::apply](../core/parametric_modeling/src/ModelingCore.cpp#L65)、[PartDocument](../core/parametric_modeling/src/PartDocument.cpp) | P2 |

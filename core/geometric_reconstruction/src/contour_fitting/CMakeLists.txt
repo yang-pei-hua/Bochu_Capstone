@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.24)
+project(ContourFitting LANGUAGES CXX)
+
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+if(NOT TARGET CGAL::CGAL)
+    find_package(CGAL CONFIG REQUIRED)
+endif()
+
+add_library(contour_fitting src/ContourFitting.cpp)
+add_library(ContourFitting::ContourFitting ALIAS contour_fitting)
+target_compile_features(contour_fitting PUBLIC cxx_std_17)
+target_include_directories(contour_fitting PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(contour_fitting PRIVATE CGAL::CGAL)
+
+if(PROJECT_IS_TOP_LEVEL)
+    add_executable(fit_contour src/main.cpp)
+    target_link_libraries(fit_contour PRIVATE ContourFitting::ContourFitting)
+
+    include(CTest)
+    if(BUILD_TESTING)
+        add_executable(contour_fitting_test tests/ContourFittingTest.cpp)
+        target_link_libraries(contour_fitting_test PRIVATE ContourFitting::ContourFitting)
+        add_test(NAME contour_fitting_test COMMAND contour_fitting_test)
+    endif()
+endif()

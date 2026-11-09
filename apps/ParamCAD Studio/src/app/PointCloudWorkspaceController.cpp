@@ -3,6 +3,7 @@
 #include "app/CadReconstructionTask.h"
 #include "app/ModelingController.h"
 #include "app/ProjectPaths.h"
+#include "app/ProjectionDebugReport.h"
 #include "app/ReconstructionController.h"
 #include "io/PointCloudAdapter.h"
 #include "io/PointCloudAnalysis.h"
@@ -11,22 +12,31 @@
 #include "ui/panels/PropertyPanel.h"
 #include "ui/panels/PointCloudPanel.h"
 #include "ui/panels/PointCloudRelationsPanel.h"
+#include "ui/panels/ProjectionSketchPanel.h"
 #include "ui/panels/ReconstructPanel.h"
 #include "ui/panels/ScenePanel.h"
 #include "ui/viewport/VTKViewer.h"
 
 #include <QAction>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QLabel>
 #include <QMessageBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QSaveFile>
 #include <QScopeGuard>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
+#include <QVBoxLayout>
 #include <map>
 #include <algorithm>
 #include <exception>
@@ -44,6 +54,18 @@ reconstruction::LengthUnit cloudUnit(const PointCloudDocument& document)
     const auto& unit = document.sourceUnit();
     return unit == "mm" ? reconstruction::LengthUnit::Millimeter
         : unit == "m" ? reconstruction::LengthUnit::Meter : reconstruction::LengthUnit::Arbitrary;
+}
+
+QString projectionOperationLabel(modeling::ExtrudeOperation operation)
+{
+    using Operation = modeling::ExtrudeOperation;
+    switch (operation) {
+    case Operation::NewBody: return workspaceTr("新建拉伸体");
+    case Operation::Join: return workspaceTr("加材");
+    case Operation::Cut: return workspaceTr("切除");
+    case Operation::Intersect: return workspaceTr("取交集");
+    }
+    return {};
 }
 }
 
@@ -77,6 +99,8 @@ PointCloudWorkspaceController::PointCloudWorkspaceController(
                 message = workspaceTr("正在后台识别 CAD 实体…"); break;
             case CadReconstructionTask::Stage::SeparatingParts:
                 message = workspaceTr("正在分离部件、恢复有限边界并检查曲面连接与闭合…");break;
+            case CadReconstructionTask::Stage::Projecting:
+                message = workspaceTr("正在后台执行单件投影拟合…"); break;
             case CadReconstructionTask::Stage::Cancelling:
                 message = workspaceTr("已请求取消 CAD 重建，等待当前计算步骤结束…"); break;
             }
@@ -124,6 +148,8 @@ void PointCloudWorkspaceController::connectUi()
     });
     connect(m_document, &PointCloudDocument::cloudChanged, this, [this] {
         m_guidedQueued = false;
+        clearProjectionDebugResult();
+        updateCadActions();
     });
     PointCloudPanel* cloudPanel = m_ui.propertyPanel->pointCloudPanel();
     const auto refreshCloudPanel = [this, cloudPanel] {
@@ -404,12 +430,129 @@ void PointCloudWorkspaceController::loadPointCloudFromFile(const QString& filePa
 
 void PointCloudWorkspaceController::reconstructCad()
 {
+    startCadReconstruction(true);
+}
+
+void PointCloudWorkspaceController::reconstructCadWithoutProjection()
+{
     startCadReconstruction(false);
 }
 
-void PointCloudWorkspaceController::reconstructCadWithProjection()
+std::optional<reconstruction::LengthUnit> PointCloudWorkspaceController::confirmCloudUnit()
 {
-    startCadReconstruction(true);
+    const auto sourceUnit = cloudUnit(*m_document);
+    if (sourceUnit != reconstruction::LengthUnit::Arbitrary) return sourceUnit;
+    const auto choice = QMessageBox::warning(m_dialogParent, workspaceTr("Unknown point-cloud scale"),
+        workspaceTr("This point cloud has no metric scale metadata. Continuing will interpret one "
+                    "source unit as one millimetre in the CAD model. Continue with that explicit assumption?"),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (choice != QMessageBox::Yes) return std::nullopt;
+    emit logWarning(workspaceTr("Point-cloud scale is unknown; using the user-approved "
+                                "assumption 1 source unit = 1 mm"));
+    return reconstruction::LengthUnit::Millimeter;
+}
+
+void PointCloudWorkspaceController::runProjectionDebug()
+{
+    if (!m_ui.projectionDebugAction->isEnabled()) return;
+    if (!m_projectionPage) {
+        auto* page = new QWidget(m_ui.propertyPanel);
+        page->setObjectName(QStringLiteral("projectionDebugPage"));
+        m_projectionPage = page;
+        auto* layout = new QVBoxLayout(page);
+        auto* mode = new QComboBox(page);
+        mode->setObjectName(QStringLiteral("projectionDebugMode"));
+        using Path = reconstruction::ProjectionPath;
+        mode->addItem(workspaceTr("单轴拉伸"), int(Path::SingleAxis));
+        mode->addItem(workspaceTr("两轴拉伸求交"), int(Path::TwoAxisIntersection));
+        mode->addItem(workspaceTr("分段拉伸与加材 / 切除"), int(Path::Segmented));
+        m_projectionMode = mode;
+        layout->addWidget(new QLabel(workspaceTr("投影重建方式"), page));
+        layout->addWidget(mode);
+
+        auto* buttons = new QDialogButtonBox(page);
+        auto* run = buttons->addButton(workspaceTr("运行投影"), QDialogButtonBox::ActionRole);
+        run->setObjectName(QStringLiteral("runProjectionDebugButton"));
+        m_runProjection = run;
+        auto* inspect = buttons->addButton(workspaceTr("查看二维点"), QDialogButtonBox::ActionRole);
+        inspect->setObjectName(QStringLiteral("inspectProjectionSketchButton"));
+        m_inspectProjection = inspect;
+        auto* cancel = new QToolButton(page);
+        cancel->setDefaultAction(m_ui.cancelCadAction);
+        cancel->setText(workspaceTr("取消"));
+        cancel->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        buttons->addButton(workspaceTr("关闭"), QDialogButtonBox::RejectRole)
+            ->setObjectName(QStringLiteral("closeProjectionDebugButton"));
+        auto* controls = new QHBoxLayout;
+        controls->addWidget(cancel);
+        controls->addWidget(buttons);
+        layout->addLayout(controls);
+
+        m_projectionStatus = new QLabel(page);
+        m_projectionStatus->setWordWrap(true);
+        m_projectionStatus->setTextFormat(Qt::PlainText);
+        layout->addWidget(m_projectionStatus);
+        layout->addStretch();
+        connect(run, &QPushButton::clicked, this, [this, mode] {
+            startProjectionDebug(static_cast<Path>(mode->currentData().toInt()), false);
+        });
+        connect(inspect, &QPushButton::clicked, this, [this, mode] {
+            startProjectionDebug(static_cast<Path>(mode->currentData().toInt()), true);
+        });
+        connect(mode, &QComboBox::currentIndexChanged, this, [this] {
+            clearProjectionDebugResult();
+            updateCadActions();
+        });
+        connect(buttons, &QDialogButtonBox::rejected, this, [this, page] {
+            clearProjectionDebugResult();
+            m_ui.propertyPanel->removeProjectionDebug(page);
+            m_projectionPage.clear();
+            m_projectionStatus.clear();
+            m_runProjection.clear();
+            m_inspectProjection.clear();
+            m_projectionMode.clear();
+            page->deleteLater();
+        });
+        clearProjectionDebugResult();
+    }
+    m_ui.propertyPanel->showProjectionDebug(m_projectionPage);
+    updateCadActions();
+}
+
+void PointCloudWorkspaceController::clearProjectionDebugResult()
+{
+    if (m_projectionReport) {
+        m_projectionPage->layout()->removeWidget(m_projectionReport);
+        m_projectionReport->hide();
+        m_projectionReport->deleteLater();
+        m_projectionReport.clear();
+    }
+    m_ui.viewer->clearProjectionPreview();
+    if (m_projectionStatus)
+        m_projectionStatus->setText(workspaceTr("选择一种方式，然后运行投影。"));
+}
+
+void PointCloudWorkspaceController::startProjectionDebug(reconstruction::ProjectionPath path, bool inspectOnly)
+{
+    if (!m_projectionPage || !m_ui.projectionDebugAction->isEnabled()) return;
+    clearProjectionDebugResult();
+    m_startingCad = true;
+    const auto resetStarting = qScopeGuard([this] {
+        m_startingCad = false;
+        updateCadActions();
+    });
+    updateCadActions();
+    m_cadCloudRevision = m_document->revision();
+    m_cadModelRevision = m_modelingController->revision();
+    m_cadBodyRevision = m_ui.viewer->bodyRevision();
+    m_cadSourcePath = m_document->sourcePath();
+    const auto unit = confirmCloudUnit();
+    if (!unit || !m_projectionPage || m_document->revision() != m_cadCloudRevision
+        || m_document->sourcePath() != m_cadSourcePath)
+        return;
+    m_projectionStatus->setText(inspectOnly ? workspaceTr("正在准备二维投影点…")
+                                           : workspaceTr("正在后台拟合所选方式…"));
+    m_cadTask->startProjection(m_document->sourceCloud(), *unit, path, inspectOnly);
 }
 
 void PointCloudWorkspaceController::startCadReconstruction(bool projectionFallback)
@@ -465,22 +608,8 @@ void PointCloudWorkspaceController::startCadReconstruction(bool projectionFallba
         return;
     }
 
-    auto sourceUnit = cloudUnit(*m_document);
-    if (sourceUnit == reconstruction::LengthUnit::Arbitrary) {
-        const QMessageBox::StandardButton choice = QMessageBox::warning(m_dialogParent,
-            workspaceTr("Unknown point-cloud scale"),
-            workspaceTr("This point cloud has no metric scale metadata. Continuing will "
-               "interpret one source unit as one millimetre in the CAD model. "
-               "Continue with that explicit assumption?"),
-            QMessageBox::Yes | QMessageBox::No,
-            QMessageBox::No);
-        if (choice != QMessageBox::Yes) {
-            return;
-        }
-        emit logWarning(workspaceTr("Point-cloud scale is unknown; using the user-approved "
-                      "assumption 1 source unit = 1 mm"));
-        sourceUnit = reconstruction::LengthUnit::Millimeter;
-    }
+    const auto sourceUnit = confirmCloudUnit();
+    if (!sourceUnit) return;
 
     // A scale confirmation runs a nested event loop; verify the snapshot again
     // before launching in case an import/edit occurred while it was open.
@@ -505,7 +634,7 @@ void PointCloudWorkspaceController::startCadReconstruction(bool projectionFallba
         for(auto id:m_document->selection().regionPoints(relation.second)) if(pointIds.count(id)) hint.secondPoints.push_back(pointIds.at(id));
         relations.push_back(std::move(hint));
     }
-    m_cadTask->start(std::move(cloud), sourceUnit, std::move(hints),
+    m_cadTask->start(std::move(cloud), *sourceUnit, std::move(hints),
                      m_ui.relationsPanel->surfaceTolerance(), m_surfaceAnalysis,std::move(relations),projectionFallback);
     emit logInfo(workspaceTr("仅点云重建：使用观测坐标、法向、单位和用户模板，不读取源模型或面对应表。"));
 }
@@ -558,13 +687,159 @@ void PointCloudWorkspaceController::updateCadActions()
     m_ui.reconstructCadAction->setToolTip(workspaceTr("仅使用点云的位置、法向和用户模板拟合 CAD，不读取源模型或拓扑对应表。"));
     m_ui.reconstructCadAction->setEnabled(!busy && m_document->hasCloud()
                                          && m_document->pointCount() > 0);
+    m_ui.projectionDebugAction->setEnabled(!busy && m_document->hasCloud()
+                                          && !m_document->sourcePath().isEmpty());
+    if (m_runProjection) m_runProjection->setEnabled(m_ui.projectionDebugAction->isEnabled());
+    if (m_inspectProjection) {
+        const auto path = static_cast<reconstruction::ProjectionPath>(m_projectionMode->currentData().toInt());
+        m_inspectProjection->setVisible(path == reconstruction::ProjectionPath::SingleAxis ||
+                                        path == reconstruction::ProjectionPath::TwoAxisIntersection);
+        m_inspectProjection->setEnabled(m_ui.projectionDebugAction->isEnabled());
+    }
+    if (m_projectionMode) m_projectionMode->setEnabled(!busy);
     m_ui.cancelCadAction->setEnabled(running && !m_cadTask->isCancellationRequested());
     m_ui.relationsPanel->setBusy(busy);
     m_ui.relationsPanel->setCadReconstructionBusy(running, m_ui.cancelCadAction->isEnabled());
 }
 
+void PointCloudWorkspaceController::showProjectionDebugResult(const CadReconstructionResult& result)
+{
+    if (!m_projectionPage || m_document->revision() != m_cadCloudRevision
+        || m_document->sourcePath() != m_cadSourcePath) {
+        clearProjectionDebugResult();
+        return;
+    }
+    using Outcome = CadReconstructionResult::Outcome;
+    if (result.outcome == Outcome::Cancelled) {
+        const auto message = workspaceTr("单件投影已取消。");
+        m_projectionStatus->setText(message);
+        m_ui.relationsPanel->setStatus(message);
+        m_ui.modelingPanel->setStatusText(message);
+        emit statusMessage(message, 5000);
+        return;
+    }
+    const auto& debug = result.projectionDebug.value();
+    const bool accepted = result.outcome == Outcome::Success;
+    const auto message = debug.inspectOnly
+        ? accepted ? workspaceTr("二维投影点已就绪 · %1 组").arg(qulonglong(debug.fit.sketchInputs.size()))
+                   : workspaceTr("无法生成二维投影点 · %1").arg(result.error)
+        : accepted
+        ? workspaceTr("投影拟合通过 · %1 条候选轴 · 内点率 %2%")
+            .arg(debug.fit.axes.size()).arg(100*debug.fit.quality.surfaceInlierFraction, 0, 'f', 1)
+        : workspaceTr("投影拟合未通过 · %1").arg(result.error);
+    m_ui.relationsPanel->setStatus(message);
+    m_ui.modelingPanel->setStatusText(message);
+    m_projectionStatus->setText(message);
+    emit statusMessage(message, 5000);
+    emit logInfo(message);
+
+    auto* report = new QWidget(m_projectionPage);
+    m_projectionReport = report;
+    auto* pageLayout = static_cast<QVBoxLayout*>(m_projectionPage->layout());
+    pageLayout->insertWidget(pageLayout->count()-1, report, 1);
+    auto* layout = new QVBoxLayout(report);
+    layout->setContentsMargins(0, 0, 0, 0);
+
+    const auto& program = accepted ? debug.fit.operations : debug.fit.rejectedOperations;
+    if (!debug.fit.sketchInputs.empty()) {
+        layout->addWidget(new ProjectionSketchPanel(debug.fit.sketchInputs,
+            program.empty() ? nullptr : &program.front(), report),1);
+    }
+    if (debug.inspectOnly) return;
+    if (!program.empty() && m_ui.viewer->bodyRevision() == m_cadBodyRevision) {
+        const double scale = debug.sourceUnit == reconstruction::LengthUnit::Meter ? .001 : 1.;
+        if (program.size() > 1) {
+            auto* step = new QComboBox(report);
+            step->setObjectName(QStringLiteral("projectionDebugStep"));
+            step->addItem(workspaceTr("显示全部步骤"));
+            for (const auto& operation : program) {
+                step->addItem(workspaceTr("%1. %2 · %3 mm")
+                    .arg(step->count()).arg(projectionOperationLabel(operation.operation))
+                    .arg(operation.depth, 0, 'g', 6));
+            }
+            layout->addWidget(step);
+            connect(step, &QComboBox::currentIndexChanged, this,
+                [this, program, scale, cloudRevision = m_cadCloudRevision, bodyRevision = m_cadBodyRevision](int index) {
+                    if (index < 0 || m_document->revision() != cloudRevision
+                        || m_ui.viewer->bodyRevision() != bodyRevision) return;
+                    m_ui.viewer->setProjectionPreviewOperations(program, scale, index-1);
+                });
+        }
+        auto* solid = new QCheckBox(accepted ? workspaceTr("显示结果实体") : workspaceTr("显示未通过的最佳候选"), report);
+        solid->setChecked(!debug.previewShape.IsNull());
+        solid->setEnabled(solid->isChecked());
+        const auto& first = program.front();
+        const auto description = program.size() == 1
+            ? workspaceTr("橙色为起始草图与拉伸方向。浅色轮廓标出拉伸终点。深度 %1 mm。")
+                .arg(first.depth, 0, 'g', 6)
+            : program.back().operation == modeling::ExtrudeOperation::Intersect
+                ? workspaceTr("橙色和紫色分别标出两轴的草图与拉伸方向。半透明实体是交集。")
+                : workspaceTr("橙色为基体，绿色为加材，红色为切除。可选中某一步查看其草图和方向。");
+        auto* legend = new QLabel(description, report);
+        legend->setWordWrap(true);
+        layout->addWidget(solid);
+        layout->addWidget(legend);
+        if (!debug.previewShape.IsNull()) m_ui.viewer->setProjectionPreviewBody(debug.previewShape, scale);
+        m_ui.viewer->setProjectionPreviewOperations(program, scale);
+        connect(solid, &QCheckBox::toggled, m_ui.viewer, &VTKViewer::setProjectionPreviewBodyVisible);
+    }
+
+    const auto bytes = QJsonDocument(projectionDebugReport(m_cadSourcePath, result)).toJson();
+    auto* details = new QCheckBox(workspaceTr("显示诊断报告"), report);
+    auto* text = new QPlainTextEdit(QString::fromUtf8(bytes), report);
+    text->setObjectName(QStringLiteral("projectionDebugReportText"));
+    text->setReadOnly(true);
+    text->setLineWrapMode(QPlainTextEdit::NoWrap);
+    text->hide();
+    connect(details, &QCheckBox::toggled, text, &QWidget::setVisible);
+    layout->addWidget(details);
+    layout->addWidget(text, 1);
+    auto* buttons = new QDialogButtonBox(report);
+    layout->addWidget(buttons);
+    auto* save = buttons->addButton(workspaceTr("Save Report…"), QDialogButtonBox::ActionRole);
+    const auto filename = QFileInfo(m_cadSourcePath).completeBaseName() + QStringLiteral(".projection.json");
+    connect(save, &QPushButton::clicked, report, [report, bytes, filename] {
+        const auto path = QFileDialog::getSaveFileName(report, workspaceTr("Save Projection Debug Report"),
+            filename, workspaceTr("JSON Files (*.json)"));
+        if (path.isEmpty()) return;
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+            QMessageBox::warning(report, workspaceTr("Save Projection Debug Report"), file.errorString());
+    });
+
+    if (accepted) {
+        auto* apply = buttons->addButton(workspaceTr("Apply to CAD"), QDialogButtonBox::ActionRole);
+        apply->setObjectName(QStringLiteral("applyProjectionDebugCadButton"));
+        apply->setToolTip(workspaceTr("Replace previous reconstructed CAD with this projection result"));
+        reconstruction::CompoundCandidate candidate;
+        candidate.projectionPrograms.push_back(debug.fit.operations);
+        connect(apply, &QPushButton::clicked, this,
+            [this, report, apply, candidate = std::move(candidate), cloudRevision = m_cadCloudRevision,
+             modelRevision = m_cadModelRevision, bodyRevision = m_cadBodyRevision, sourcePath = m_cadSourcePath] {
+                if (m_cadTask->isRunning() || m_startingCad || m_analysisThread
+                    || m_document->revision() != cloudRevision || m_document->sourcePath() != sourcePath
+                    || m_modelingController->revision() != modelRevision || m_ui.viewer->bodyRevision() != bodyRevision) {
+                    QMessageBox::warning(report, workspaceTr("Apply to CAD"),
+                        workspaceTr("The point cloud or CAD workspace has changed or is busy. Run projection again."));
+                    return;
+                }
+                if (!m_modelingController->commitReconstructedCompound(candidate)) {
+                    QMessageBox::warning(report, workspaceTr("Apply to CAD"), m_modelingController->lastError());
+                    return;
+                }
+                apply->setEnabled(false);
+                emit statusMessage(workspaceTr("投影结果已应用到 CAD。"), 5000);
+            });
+    }
+    layout->addStretch();
+}
+
 void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconstructionResult& result)
 {
+    if (result.projectionDebug) {
+        showProjectionDebugResult(result);
+        return;
+    }
     // Consumers validate fingerprint, units and settings before reusing this.
     if (result.analysis.pointFingerprint) m_surfaceAnalysis = result.analysis;
     const auto reportStatus = [this](const QString& message) {
@@ -632,7 +907,7 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
         emit logInfo(workspaceTr("仅点云分离：%1 个候选，%2 个验证闭合，%3 个保留开放边界；候选不等同于原装配实例。")
             .arg(result.assembly->parts.size()).arg(closed).arg(result.assembly->parts.size()-closed));
         if (!result.assembly->candidate.projectionPrograms.empty())
-            emit logInfo(workspaceTr("投影拟合通过 %1 个开放候选。")
+            emit logInfo(workspaceTr("投影重建闭合了 %1 个候选。")
                 .arg(result.assembly->candidate.projectionPrograms.size()));
     }
     if (result.outcome == CadReconstructionResult::Outcome::Unsupported) {

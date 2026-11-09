@@ -43,6 +43,8 @@ def reconstruct(engine: Path, cloud: Path, directory: Path, timeout: float, mode
     command = [str(engine), action, str(cloud), str(report), str(directory / "model.step")]
     if mode == "projection-fallback":
         command.append("--projection-fallback")
+    elif mode == "assembly-no-projection":
+        command.append("--no-projection-fallback")
     if area_directions:
         command.append("--area-directions")
     started = time.monotonic()
@@ -104,8 +106,9 @@ def main() -> int:
     parser.add_argument("--unit", choices=("mm", "m"), help="Declare scan units when no unit sidecar is available")
     parser.add_argument("--executable", type=Path, default=DEFAULT_ENGINE)
     parser.add_argument("--timeout", type=float, default=300, help="Time limit for each scan in seconds")
-    parser.add_argument("--mode", choices=("assembly", "projection", "projection-fallback"), default="assembly",
-                        help="Fit one isolated component or enable projection after assembly closure")
+    parser.add_argument("--mode", choices=("assembly", "projection", "assembly-no-projection",
+                                          "projection-fallback"), default="assembly",
+                        help="Reconstruct an assembly with projection fallback, fit one component, or disable projection")
     parser.add_argument("--area-directions", action="store_true", help="Include projection area directions in single-part fitting")
     args = parser.parse_args()
     try:

@@ -150,7 +150,8 @@ python -m tools.reconstruction.run_point_cloud_cad --mode projection `
   fit-projection path/to/cloud.ply report.json model.step 0.05
 ```
 
-整件装配使用 `--mode projection-fallback`，或在客户端 **Tools → Reconstruct CAD with Projection Fallback** 启动。
+整件装配的 `--mode assembly` 和客户端 **Tools → Reconstruct CAD** 默认对未闭合候选尝试投影重建。
+关闭投影可使用 `--mode assembly-no-projection` 或客户端 **Tools → Reconstruct CAD without Projection Fallback**。
 该路径在有限壳闭合后尝试至多 6 个有多面片的开放候选，优先处理点数较多的候选。
 原壳闭合与投影拟合分别报告。包含目标体布尔操作的 PCAD 使用项目格式 3。
 

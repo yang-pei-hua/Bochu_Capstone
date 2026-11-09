@@ -59,11 +59,37 @@ PlyCloud cappedCloud(bool cone)
     return cloud;
 }
 
+PlyCloud intersectingExtrusionsCloud()
+{
+    PlyCloud cloud;
+    // The outline in XY and XZ tapers with X. Neither extrusion alone
+    // accounts for both pairs of sloped faces.
+    for (float xSign : {-1.F, 1.F}) for (float side : {-1.F, 1.F}) {
+        const float yNormal = std::hypot(1.2F, 1.F);
+        const float zNormal = std::hypot(1.7F, 1.F);
+        for (int xIndex = 0; xIndex <= 40; ++xIndex) {
+            const float fraction = xIndex / 40.F;
+            const float x = xSign * 10 * fraction;
+            const float y = 12 * (1 - fraction);
+            const float z = 17 * (1 - fraction);
+            for (int slice = 0; slice <= 48; ++slice) {
+                const float across = slice / 24.F - 1;
+                cloud.positions.push_back({x, side*y, across*z});
+                cloud.normals.push_back({xSign*1.2F/yNormal, side/yNormal, 0});
+                cloud.positions.push_back({x, across*y, side*z});
+                cloud.normals.push_back({xSign*1.7F/zNormal, 0, side/zNormal});
+            }
+        }
+    }
+    return cloud;
+}
+
 CadReconstructionResult run(PlyCloud cloud, int cancellation = 0,
     const std::vector<reconstruction::TemplateHint>& hints = {},
     reconstruction::LengthUnit unit = reconstruction::LengthUnit::Millimeter,
     std::optional<reconstruction::SurfaceAnalysisResult> analysis = {},
-    std::vector<reconstruction::SurfaceRelationHint> relations = {})
+    std::vector<reconstruction::SurfaceRelationHint> relations = {}, bool projectionOnly = false,
+    reconstruction::ProjectionPath path = reconstruction::ProjectionPath::Automatic)
 {
     CadReconstructionTask task;
     std::optional<CadReconstructionResult> result;
@@ -85,7 +111,9 @@ CadReconstructionResult run(PlyCloud cloud, int cancellation = 0,
             stages.push_back(stage);
             if(cancellation==3 && stage==CadReconstructionTask::Stage::FittingTemplates) task.cancel();
         });
-    require(task.start(cloud, unit,hints,0,std::move(analysis),std::move(relations)), "start worker");
+    const bool started = projectionOnly ? task.startProjection(cloud, unit, path)
+        : task.start(cloud, unit,hints,0,std::move(analysis),std::move(relations));
+    require(started, "start worker");
     cloud.positions.clear();
     cloud.normals.clear();
     require(task.isRunning() && !result, "start returns before queued result delivery");
@@ -111,7 +139,8 @@ CadReconstructionResult run(PlyCloud cloud, int cancellation = 0,
     require(callbacksOnOwner && busyDuringDelivery, "results delivered on owner thread before busy clears");
     require(heartbeats > 0, "event loop remains responsive while computation runs");
     if (!cancellation && result->outcome == CadReconstructionResult::Outcome::Success) {
-        const auto expected=hints.empty() ? CadReconstructionTask::Stage::Recognizing : CadReconstructionTask::Stage::FittingTemplates;
+        const auto expected = projectionOnly ? CadReconstructionTask::Stage::Projecting :
+            hints.empty() ? CadReconstructionTask::Stage::Recognizing : CadReconstructionTask::Stage::FittingTemplates;
         require(std::find(stages.begin(), stages.end(), expected) != stages.end(),
                 "recognition stage reported");
     }
@@ -126,6 +155,30 @@ int main(int argc, char** argv)
     QCoreApplication application(argc, argv);
     try {
         const auto success = run(boxCloud());
+        using Path = reconstruction::ProjectionPath;
+        const auto single = run(intersectingExtrusionsCloud(), 0, {}, reconstruction::LengthUnit::Millimeter,
+                                {}, {}, true, Path::SingleAxis);
+        require(single.outcome == CadReconstructionResult::Outcome::Unsupported && single.projectionDebug &&
+                single.projectionDebug->path == Path::SingleAxis,
+                "explicit single-axis fitting never accepts an intersection");
+        const auto debug = run(intersectingExtrusionsCloud(), 0, {}, reconstruction::LengthUnit::Millimeter,
+                               {}, {}, true, Path::TwoAxisIntersection);
+        require(debug.outcome == CadReconstructionResult::Outcome::Success && debug.projectionDebug &&
+                debug.projectionDebug->path == Path::TwoAxisIntersection &&
+                !debug.assembly && !debug.preprocessingComplete && debug.projectionDebug->fit.bestAxisIndex &&
+                !debug.projectionDebug->previewShape.IsNull() &&
+                debug.projectionDebug->fit.operations.size() == 2 &&
+                debug.projectionDebug->fit.operations.back().operation == modeling::ExtrudeOperation::Intersect,
+                "debug worker fits the original observations directly and returns axis and operation diagnostics");
+        const auto projected = run(intersectingExtrusionsCloud());
+        require(projected.outcome == CadReconstructionResult::Outcome::Success &&
+                projected.assembly && projected.candidate.projectionPrograms.size() == 1,
+                "default worker reconstructs an open group by projection");
+        const auto& program = projected.candidate.projectionPrograms.front();
+        require(program.size() == 2 && program.back().operation == modeling::ExtrudeOperation::Intersect &&
+                std::any_of(projected.assembly->parts.begin(), projected.assembly->parts.end(), [](const auto& part) {
+                    return part.closed && part.status == "closed_projection";
+                }), "accepted intersection is published as a closed assembly candidate");
         require(success.outcome == CadReconstructionResult::Outcome::Success
                 && success.branch == CadReconstructionResult::Branch::Conventional
                 && success.preprocessingComplete && success.preprocessing.inputPointCount == 600

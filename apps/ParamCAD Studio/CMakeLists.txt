@@ -90,6 +90,9 @@ qt_add_executable(CadPointCloudClient WIN32
     src/app/SketchWorkspaceController.cpp
     src/app/PointCloudWorkspaceController.h
     src/app/PointCloudWorkspaceController.cpp
+    src/app/ProjectionDebugReport.cpp
+    src/ui/HyperparameterSettings.cpp
+    src/ui/panels/ProjectionSketchPanel.cpp
     src/app/CaptureWorkspaceController.h
     src/app/CaptureWorkspaceController.cpp
     src/app/ModelViewController.h
@@ -142,6 +145,7 @@ qt_add_executable(CadPointCloudClient WIN32
     src/io/CameraInfoBuilder.cpp
     src/rendering/BodyActor.h
     src/rendering/BodyActor.cpp
+    src/rendering/ProjectionPreviewActor.cpp
     src/rendering/BoxReferenceActor.h
     src/rendering/BoxReferenceActor.cpp
     src/rendering/DatumPlaneActor.h
@@ -265,6 +269,16 @@ vtk_module_autoinit(
     MODULES ${VTK_LIBRARIES}
 )
 
+function(stage_projection_config target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            "-DPROJECTION_CONFIG_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/config/projection.conf"
+            "-DPROJECTION_CONFIG_DIRECTORY=$<TARGET_FILE_DIR:${target}>/config"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/config/StageProjectionConfig.cmake"
+        VERBATIM)
+endfunction()
+stage_projection_config(CadPointCloudClient)
+
 if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
     find_package(Eigen3 CONFIG REQUIRED)
     add_executable(cad_reconstruction_validation
@@ -294,6 +308,7 @@ if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
     target_link_directories(cad_reconstruction_validation PRIVATE ${OpenCASCADE_LIBRARY_DIR})
     target_link_libraries(cad_reconstruction_validation PRIVATE
         Qt6::Core Qt6::Gui VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction Eigen3::Eigen TKDE TKXSBase TKDESTEP)
+    stage_projection_config(cad_reconstruction_validation)
     if(MSVC)
         target_compile_options(cad_reconstruction_validation PRIVATE /W4 /permissive- /utf-8)
         # Native failures get a bounded symbolized JSON stack beside the report.

@@ -1,6 +1,9 @@
 #include "app/CadReconstructionTask.h"
 #include "io/PointCloudAdapter.h"
+#include <modeling/ModelingCore.h>
+#include <reconstruction/recognition/ProjectionSettings.h>
 
+#include <QElapsedTimer>
 #include <QPointer>
 #include <QThread>
 
@@ -19,11 +22,14 @@ struct CadWork {
     std::optional<reconstruction::SurfaceAnalysisResult> analysis;
     std::vector<reconstruction::SurfaceRelationHint> relations;
     bool projectionFallback;
+    bool specializedRecovery;
+    std::optional<reconstruction::ProjectionExtrusionOptions> projectionOptions;
 };
 
 void runCadWork(const CadWork& input, CadReconstructionResult& result,
     const std::function<bool()>& cancelled, const std::function<void(Stage)>& stageChanged) {
-    const auto& [cloud, unit, hints, sourceTolerance, analysis, relations, projectionFallback] = input;
+    const auto& [cloud, unit, hints, sourceTolerance, analysis, relations, projectionFallback, specializedRecovery,
+                 projectionOptions] = input;
     if (cancelled()) return;
     const reconstruction::ObservationSnapshot source(PointCloudAdapter::toPointStore(cloud, unit));
     result.skippedInvalidObservations = cloud.positions.size() - source.observations().size();
@@ -65,7 +71,9 @@ void runCadWork(const CadWork& input, CadReconstructionResult& result,
     if(hints.empty() && relations.empty() && (!recognized || bodies>1 || refineBox)) {
         stageChanged(Stage::SeparatingParts);
         reconstruction::AssemblyOptions options;
-        if (projectionFallback && !refineBox) options.maximumProjectionParts = 6;
+        options.enableSpecializedRecovery = specializedRecovery;
+        options.projectionOptions = projectionOptions;
+        if (!projectionFallback || refineBox) options.maximumProjectionParts = 0;
         // The decomposition estimates local noise independently of the
         // coarse, whole-cloud detection tolerance.
         result.assembly.emplace();std::string decompositionError;
@@ -94,7 +102,7 @@ void runCadWork(const CadWork& input, CadReconstructionResult& result,
                 result.partialAssembly = !result.assembly->unassignedPointIds.empty() ||
                     std::any_of(result.assembly->parts.begin(), result.assembly->parts.end(), [](const auto& part) {
                         return part.status == "closed_circular_slab_inferred_contact" ||
-                            (!part.closed && (!part.projection || part.projection->operations.empty()));
+                            !part.closed;
                     });
                 result.candidate=separated;result.analysis=std::move(guided.analysis);
                 result.outcome=CadReconstructionResult::Outcome::Success;return;
@@ -155,16 +163,60 @@ void CadReconstructionTask::cancel()
 bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit unit,
     std::vector<reconstruction::TemplateHint> hints, double sourceTolerance,
     std::optional<reconstruction::SurfaceAnalysisResult> analysis,
-    std::vector<reconstruction::SurfaceRelationHint> relations, bool projectionFallback)
+    std::vector<reconstruction::SurfaceRelationHint> relations, bool projectionFallback, bool specializedRecovery,
+    std::optional<reconstruction::ProjectionExtrusionOptions> projectionOptions)
+{
+    return startWork([input = CadWork{std::move(cloud), unit, std::move(hints), sourceTolerance,
+            std::move(analysis), std::move(relations), projectionFallback, specializedRecovery, std::move(projectionOptions)}]
+            (auto& result, const auto& cancelled, const auto& reportStage) {
+        runCadWork(input, result, cancelled, reportStage);
+    }, Stage::Preprocessing);
+}
+
+bool CadReconstructionTask::startProjection(PlyCloud cloud, reconstruction::LengthUnit unit,
+                                            reconstruction::ProjectionPath path, bool inspectOnly,
+                                            std::optional<reconstruction::ProjectionExtrusionOptions> projectionOptions)
+{
+    return startWork([cloud = std::move(cloud), unit, path, inspectOnly, injected = std::move(projectionOptions)]
+                     (auto& result, const auto& cancelled, const auto&) {
+        QElapsedTimer timer;
+        timer.start();
+        auto& debug = result.projectionDebug.emplace();
+        debug.path = path;
+        debug.inspectOnly = inspectOnly;
+        debug.sourceUnit = unit;
+        debug.inputPoints = cloud.positions.size();
+        const reconstruction::ObservationSnapshot source(PointCloudAdapter::toPointStore(cloud, unit));
+        debug.validPoints = source.observations().size();
+        auto options = injected ? *injected : reconstruction::loadProjectionOptions();
+        options.retainRejectedProgram = true;
+        options.path = path;
+        options.collectSketchInputs = true;
+        const bool accepted = inspectOnly
+            ? reconstruction::inspectProjectionSketches(source.observations(), options, debug.fit, cancelled)
+            : reconstruction::fitProjectionExtrusion(source.observations(), options, debug.fit, {}, cancelled);
+        const auto& preview = accepted ? debug.fit.operations : debug.fit.rejectedOperations;
+        if (!preview.empty() && !cancelled()) {
+            modeling::ModelingCore model;
+            std::string error;
+            if (reconstruction::buildProjectionProgram(preview, model, error))
+                debug.previewShape = model.bodyShape();
+        }
+        debug.elapsedMilliseconds = timer.elapsed();
+        result.outcome = accepted ? CadReconstructionResult::Outcome::Success
+                                  : CadReconstructionResult::Outcome::Unsupported;
+        if (!accepted) result.error = QString::fromStdString(debug.fit.reason);
+    }, Stage::Projecting);
+}
+
+bool CadReconstructionTask::startWork(Work work, Stage initialStage)
 {
     if (m_running) return false;
     auto result = std::make_shared<CadReconstructionResult>();
     auto cancelled = std::make_shared<std::atomic_bool>(false);
     m_cancelled = cancelled;
     m_running = true;
-    m_thread = QThread::create([this, result, cancelled, input = CadWork{
-            std::move(cloud), unit, std::move(hints), sourceTolerance, std::move(analysis),
-            std::move(relations), projectionFallback}] {
+    m_thread = QThread::create([this, result, cancelled, work = std::move(work)] {
         try {
             auto reportStage = [this, cancelled](Stage stage) {
                 QMetaObject::invokeMethod(this, [this, cancelled, stage] {
@@ -172,7 +224,7 @@ bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit uni
                         emit stageChanged(stage);
                 }, Qt::QueuedConnection);
             };
-            runCadWork(input, *result, [cancelled] { return cancelled->load(); }, reportStage);
+            work(*result, [cancelled] { return cancelled->load(); }, reportStage);
         } catch (const std::exception& error) {
             result->outcome = CadReconstructionResult::Outcome::Failed;
             result->error = QString::fromUtf8(error.what());
@@ -196,7 +248,7 @@ bool CadReconstructionTask::start(PlyCloud cloud, reconstruction::LengthUnit uni
     });
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     emit runningChanged(true);
-    if (!cancelled->load()) emit stageChanged(Stage::Preprocessing);
+    if (!cancelled->load()) emit stageChanged(initialStage);
     thread->start();
     return true;
 }

@@ -156,6 +156,7 @@ VTKViewer::VTKViewer(QWidget* parent, PointCloudDocument* document)
     m_referenceRenderer->SetActiveCamera(m_renderer->GetActiveCamera());
     m_renderWindow->AddRenderer(m_referenceRenderer);
     m_boxReferenceActor.attach(m_referenceRenderer);
+    m_projectionPreview.attach(m_renderer, m_referenceRenderer);
 
     CameraParameters initialCamera;
     CameraController::apply(m_renderer->GetActiveCamera(), initialCamera);
@@ -195,6 +196,7 @@ CameraParameters VTKViewer::cameraParameters() const
 
 void VTKViewer::setBodyShape(const TopoDS_Shape& shape)
 {
+    clearProjectionPreview();
     endBoxReferenceSelection();
     m_bodyActor.setShape(shape);
     m_displayedBody = shape;
@@ -204,8 +206,40 @@ void VTKViewer::setBodyShape(const TopoDS_Shape& shape)
     emit bodyShapeChanged(shape);
 }
 
+void VTKViewer::setProjectionPreviewBody(const TopoDS_Shape& shape, double scaleToCloud)
+{
+    m_projectionPreview.setBody(shape, scaleToCloud);
+    m_hasProjectionPreview = true;
+    m_renderer->ResetCameraClippingRange();
+    requestRender();
+}
+
+void VTKViewer::setProjectionPreviewOperations(const std::vector<reconstruction::ProjectionOperation>& operations,
+                                               double scaleToCloud, int selectedStep)
+{
+    m_projectionPreview.setOperations(operations, m_pointCloudDocument->sourceCloud(), scaleToCloud, selectedStep);
+    m_hasProjectionPreview = true;
+    requestRender();
+}
+
+void VTKViewer::setProjectionPreviewBodyVisible(bool visible)
+{
+    m_projectionPreview.setBodyVisible(visible);
+    m_renderer->ResetCameraClippingRange();
+    requestRender();
+}
+
+void VTKViewer::clearProjectionPreview()
+{
+    if (!m_hasProjectionPreview) return;
+    m_projectionPreview.clear();
+    m_hasProjectionPreview = false;
+    requestRender();
+}
+
 void VTKViewer::clearBody()
 {
+    clearProjectionPreview();
     endBoxReferenceSelection();
     m_bodyActor.clear();
     m_displayedBody.Nullify();
@@ -868,6 +902,7 @@ QSize VTKViewer::captureSourceSize() const
 
 void VTKViewer::syncPointCloud()
 {
+    clearProjectionPreview();
     setAssemblyBoundaries({},{});
     if (m_pointCloudDocument->hasCloud()) {
         m_pointCloudActor.setCloud(m_pointCloudDocument->sourceCloud());

@@ -94,6 +94,18 @@ void PropertyPanel::showPointCloudProperties() { m_tabs->setCurrentWidget(m_poin
 FeatureDetailsPanel* PropertyPanel::featureDetailsPanel() const { return m_featureDetailsPanel; }
 void PropertyPanel::showFeatureDetails() { m_tabs->setCurrentWidget(m_featureDetailsPanel); }
 
+void PropertyPanel::showProjectionDebug(QWidget* page)
+{
+    if (m_tabs->indexOf(page) < 0) m_tabs->addTab(page, tr("Projection Debug"));
+    m_tabs->setCurrentWidget(page);
+}
+
+void PropertyPanel::removeProjectionDebug(QWidget* page)
+{
+    const int index = m_tabs->indexOf(page);
+    if (index >= 0) m_tabs->removeTab(index);
+}
+
 RenderPanel* PropertyPanel::renderPanel() const
 {
     return m_renderPanel;

@@ -47,7 +47,7 @@ flowchart TD
 | `ObservationSnapshot`、`PointStore` | 快照保存仅做统一尺度转换的全量观测，提供源单位、比例和观测指纹。客户端 `PointId` 是原文档行号加一，活动点删减和跳过非有限坐标都不会给剩余点重新编号。`PointStore` 要求 ID 非零且唯一。[快照类型](../core/geometric_reconstruction/include/reconstruction/data/PointStore.h#L60) · [导入映射](<../apps/ParamCAD Studio/src/io/PointCloudAdapter.cpp#L95>) |
 | `PrimitiveEvidence`、`SurfaceAnalysisResult` | 基元记录方程和支持点，`SurfacePatch` 记录一个基元的有限连通支持，关系端点引用分析面片。基元 ID 和面片 ID 由索引重建，适用范围是本分析快照。合并修复另记基线及源指纹、补点、局部到全局映射。[证据类型](../core/geometric_reconstruction/include/reconstruction/data/PrimitiveEvidence.h#L10) · [分析快照](../core/geometric_reconstruction/include/reconstruction/analysis/SurfaceAnalysis.h#L73) |
 | `AssemblyReconstructionResult` | 装配面片和部件 ID 属于本次分解。`workingPointIds` 指装配采样归属，`pointIds` 指全量回填归属，两者独立。若闭合替换轮廓，`boundaryBeforeClosure` 保留观测轮廓，`loops` 为闭合处理后的版本。装配覆盖率统计闭合候选所属观测比例。[装配数据类型](../core/geometric_reconstruction/include/reconstruction/recognition/AssemblyReconstruction.h#L36) · [装配结果](../core/geometric_reconstruction/include/reconstruction/recognition/AssemblyReconstruction.h#L73) |
-| 投影拟合点与评分点 | 对单件观测做有界拟合采样，再生成固定评分视图。候选共享评分视图，残差 ID 来自该视图。可用 `ProjectionExtrusionResult` 查轴来源、试拟合状态、操作序列和质量。[评分视图](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L157) · [投影结果](../core/geometric_reconstruction/include/reconstruction/recognition/ProjectionExtrusion.h#L49) |
+| 投影拟合点与评分点 | 对单件观测做有界拟合采样，再生成固定评分视图。候选共享评分视图，残差 ID 来自该视图。可用 `ProjectionExtrusionResult` 查轴来源、试拟合状态、操作序列和质量。[评分视图](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L162) · [投影结果](../core/geometric_reconstruction/include/reconstruction/recognition/ProjectionExtrusion.h#L49) |
 | `CompoundCandidate`、`ModelPatch` | 识别输出仍是建模提案。计划生成时分配草图和依赖 ID，把有序命令绑定到当前模型修订。应用后由建模核心返回受影响的特征 ID。[CAD 候选](../core/geometric_reconstruction/include/reconstruction/recognition/CompoundRecognizer.h#L27) · [建模补丁](../core/parametric_modeling/include/modeling/ModelPatch.h#L18) |
 
 ## 3. 模块输入、输出与源码
@@ -97,16 +97,16 @@ flowchart TD
 
 ### E. 投影拉伸拟合
 
-生产由开放装配部件进入，验证命令也可以直接给单件。阶段接口集中在 `ProjectionInternal.h`，对外由 `fitProjectionExtrusion` 组合调用。[投影阶段接口](../core/geometric_reconstruction/src/recognition/ProjectionInternal.h#L21) · [投影组合入口](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L309)
+普通 CAD 重建默认在常规闭合和局部恢复之后尝试投影。装配流程逐个试拟合仍未闭合且有足够观测的候选，验证命令也可以直接输入单件。阶段接口集中在 `ProjectionInternal.h`，对外由 `fitProjectionExtrusion` 组合调用。[投影阶段接口](../core/geometric_reconstruction/src/recognition/projection/ProjectionInternal.h#L21) · [投影组合入口](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L351)
 
 | 编号与模块 | 输入 | 输出 | 源码入口 |
 | --- | --- | --- | --- |
-| 22 候选轴生成（内部） | 拟合点、用于法向方向估计的观测、基元证据、中心、方向策略及预算 | `ProjectionAxisReport` 列表，记录候选轴和来源。投影面积及包络体积由区间计算补齐。 | [generateAxes](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L206) |
-| 23 拉伸区间和截面观测（内部） | 拟合点、给定轴的局部坐标系、距离容差 | `Interval`，含轴向起止、凸投影面积和可选两端 `Cap`。`Cap` 包含截面深度与支持样本，缺支持时为空。 | [inspectInterval](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L191) · [capAt](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L173) |
-| 24 二维截面恢复（内部） | 指定截面和坐标系、端面范围、部件点、可用侧壁和孔壁证据 | 线段或圆等草图实体，表达外轮廓和有证据的孔。候选操作另行保留截面支持点 ID。 | [recoverProfile](../core/geometric_reconstruction/src/recognition/ProjectionProfile.cpp#L81) |
-| 25 基体、加材与切除提案（内部） | 已知截面、区间及中间面证据，或盲孔壁和开口观测 | `AxisProposal` 或 `ProjectionOperation`，含草图、深度、方向、操作类型及支持点。通过单体试建的台阶提案可进入加材搜索。 | [基体和台阶](../core/geometric_reconstruction/src/recognition/ProjectionProposals.cpp#L108) · [直槽切除](../core/geometric_reconstruction/src/recognition/ProjectionProposals.cpp#L11) · [盲孔切除](../core/geometric_reconstruction/src/recognition/ProjectionProposals.cpp#L59) |
-| 26 候选实体评分（内部） | 已试建 B-rep、固定评分样本、距离容差、操作和曲线数量、可选取消回调 | `Fit`，含体积、距离分位数、内点率、法向误差、无支持面面积比例、残差 ID 与总分。 | [scoreShape](../core/geometric_reconstruction/src/recognition/ProjectionScoring.cpp#L24) |
-| 27 操作序列搜索和选择（内部） | 已试建的基体方案、增删操作提案、试建评分回调、预算与容差 | `SearchResult` 和最佳试建方案，区分通过、无有效基体、支持不足和取消。对外结果只在通过时发布操作序列，拒绝时保留可用质量诊断。 | [序列搜索](../core/geometric_reconstruction/src/recognition/ProjectionSearch.cpp#L7) · [临时试建评分](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L98) · [试建执行](../core/geometric_reconstruction/src/recognition/ProjectionExtrusion.cpp#L276) |
+| 22 候选轴生成（内部） | 拟合点、用于法向方向估计的观测、基元证据、中心、方向策略及预算 | `ProjectionAxisReport` 列表，记录候选轴和来源。投影面积及包络体积由区间计算补齐。 | [generateAxes](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L209) |
+| 23 拉伸区间和截面观测（内部） | 拟合点、给定轴的局部坐标系、距离容差 | `Interval`，含轴向起止、凸投影面积和可选两端 `Cap`。`Cap` 包含截面深度与支持样本，缺支持时为空。 | [inspectInterval](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L194) · [capAt](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L176) |
+| 24 二维截面恢复（内部） | 指定截面和坐标系、端面范围、部件点、可用侧壁和孔壁证据 | 线段或圆等草图实体，表达外轮廓和有证据的孔。候选操作另行保留截面支持点 ID。 | [recoverProfile](../core/geometric_reconstruction/src/recognition/projection/ProjectionProfile.cpp#L81) |
+| 25 基体、加材与切除提案（内部） | 已知截面、区间及中间面证据，或盲孔壁和开口观测 | `AxisProposal` 或 `ProjectionOperation`，含草图、深度、方向、操作类型及支持点。通过单体试建的台阶提案可进入加材搜索。 | [基体和台阶](../core/geometric_reconstruction/src/recognition/projection/ProjectionProposals.cpp#L108) · [直槽切除](../core/geometric_reconstruction/src/recognition/projection/ProjectionProposals.cpp#L11) · [盲孔切除](../core/geometric_reconstruction/src/recognition/projection/ProjectionProposals.cpp#L59) |
+| 26 候选实体评分（内部） | 已试建 B-rep、固定评分样本、距离容差、操作和曲线数量、可选取消回调 | `Fit`，含体积、距离分位数、内点率、法向误差、无支持面面积比例、残差 ID 与总分。 | [scoreShape](../core/geometric_reconstruction/src/recognition/projection/ProjectionScoring.cpp#L24) |
+| 27 操作序列搜索和选择（内部） | 已试建的基体方案、增删操作提案、试建评分回调、预算与容差 | `SearchResult` 和最佳试建方案，区分通过、无有效基体、支持不足和取消。对外结果只在通过时发布操作序列，拒绝时保留可用质量诊断。 | [序列搜索](../core/geometric_reconstruction/src/recognition/projection/ProjectionSearch.cpp#L7) · [临时试建评分](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L101) · [试建执行](../core/geometric_reconstruction/src/recognition/projection/ProjectionExtrusion.cpp#L286) |
 
 ### F. 建模、持久化与生产编排
 

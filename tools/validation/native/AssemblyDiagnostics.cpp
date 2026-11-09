@@ -23,6 +23,29 @@ QJsonArray boundaryLoops(const std::vector<std::vector<modeling::Vec3>>& loops) 
 void save(const QString& path,const QJsonObject& value){QSaveFile file(path);if(!file.open(QIODevice::WriteOnly))throw std::runtime_error("Cannot save component diagnostics");
     const auto bytes=QJsonDocument(value).toJson();if(file.write(bytes)!=bytes.size()||!file.commit())throw std::runtime_error("Cannot commit component diagnostics");}
 }
+QJsonObject projectionAxisDiagnostics(const reconstruction::ProjectionExtrusionResult& fit) {
+    QJsonArray axes;
+    for (const auto& axis : fit.axes) {
+        QJsonObject entry{{"direction",vector(axis.axis)},{"source",QString::fromStdString(axis.source)},
+            {"convex_projection_area_mm2",axis.convexProjectionArea},
+            {"convex_envelope_volume_mm3",axis.convexEnvelopeVolume},
+            {"status",QString::fromStdString(axis.status)}};
+        if (const auto& quality = axis.bestBaseQuality) {
+            entry["best_base_quality"] = QJsonObject{{"score",quality->score},
+                {"surface_inlier_fraction",quality->surfaceInlierFraction},{"p95_distance_mm",quality->p95Distance},
+                {"unsupported_face_area_fraction",quality->unsupportedFaceAreaFraction}};
+        }
+        axes.append(entry);
+    }
+    QJsonObject diagnostics{{"axes",axes}};
+    if (fit.bestAxisIndex) {
+        const auto index = qsizetype(*fit.bestAxisIndex);
+        diagnostics["best_axis_index"] = qint64(index);
+        if (!fit.operations.empty()) diagnostics["selected_axis"] = axes.at(index);
+    }
+    return diagnostics;
+}
+
 QJsonObject writeAssemblyDiagnostics(const QString& reportPath,const PlyCloud& cloud,
     const reconstruction::AssemblyReconstructionResult& result,const QString& unit) {
     const auto directory=QFileInfo(reportPath).dir();const auto jsonPath=directory.filePath("parts.json"),plyPath=directory.filePath("segmented.ply");
@@ -66,10 +89,14 @@ QJsonObject writeAssemblyDiagnostics(const QString& reportPath,const PlyCloud& c
             const auto& fit = *part.projection;
             const bool accepted = !fit.operations.empty();
             if (accepted) ++projected;
-            item["projection_fit"] = QJsonObject{{"accepted",accepted},
-                {"reason",QString::fromStdString(fit.reason)},{"operations",qint64(fit.operations.size())},
-                {"p95_distance_mm",fit.quality.p95Distance},{"inlier_fraction",fit.quality.surfaceInlierFraction},
-                {"unsupported_face_area_fraction",fit.quality.unsupportedFaceAreaFraction}};
+            auto diagnostic = projectionAxisDiagnostics(fit);
+            diagnostic["accepted"] = accepted;
+            diagnostic["reason"] = QString::fromStdString(fit.reason);
+            diagnostic["operations"] = qint64(fit.operations.size());
+            diagnostic["p95_distance_mm"] = fit.quality.p95Distance;
+            diagnostic["inlier_fraction"] = fit.quality.surfaceInlierFraction;
+            diagnostic["unsupported_face_area_fraction"] = fit.quality.unsupportedFaceAreaFraction;
+            item["projection_fit"] = diagnostic;
         }
         parts.append(item);
     }
@@ -77,7 +104,7 @@ QJsonObject writeAssemblyDiagnostics(const QString& reportPath,const PlyCloud& c
         {"convex",connection.convex},{"connected",connection.accepted},{"orientation_known",connection.orientationKnown},{"observation_pairs",double(connection.observations)},{"distance_mm",connection.distance}});
     QJsonObject summary{{"candidate_parts",double(result.parts.size())},{"closed_parts",double(closed)},{"open_parts",double(result.parts.size()-closed)},
         {"projection_attempted_parts",qint64(attempted)},{"projection_reconstructed_parts",qint64(projected)},
-        {"unreconstructed_parts",qint64(result.parts.size()-closed-projected)},
+        {"unreconstructed_parts",qint64(result.parts.size()-closed)},
         {"finite_patches",double(result.patches.size())},{"boundary_loops",double(loops)},{"connections",double(result.connections.size())},{"open_edges",double(openEdges)},
         {"unassigned_points",double(result.unassignedPointIds.size())},
         {"unassigned_working_points",qint64(result.unassignedWorkingPointIds.size())},{"working_points",double(result.workingPoints)},{"distance_tolerance_mm",result.distanceTolerance},
@@ -105,6 +132,7 @@ void probeAssemblyBoundaries(const QStringList& args,QJsonObject& report) {
     const auto document=QJsonDocument::fromJson(configuration.readAll(),&parseError);
     if(parseError.error!=QJsonParseError::NoError || !document.isObject())throw std::runtime_error("Expected probe options object");
     const auto values=document.object();reconstruction::AssemblyOptions options;
+    options.maximumProjectionParts = 0;
     for(auto it=values.begin();it!=values.end();++it) {
         if(!it.value().isDouble() || !std::isfinite(it.value().toDouble()))throw std::runtime_error("Probe options must be finite numbers");
         const auto value=it.value().toDouble();

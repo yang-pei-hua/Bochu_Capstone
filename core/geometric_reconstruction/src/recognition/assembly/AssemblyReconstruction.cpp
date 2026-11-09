@@ -1,4 +1,5 @@
 #include "AssemblyInternal.h"
+#include "reconstruction/recognition/ProjectionSettings.h"
 #include "preprocessing/detail/KdTree.h"
 #include <Eigen/Eigenvalues>
 #include <algorithm>
@@ -24,10 +25,13 @@ void fitOpenParts(const PointStore& source, const AssemblyOptions& options,
     for (auto& part : output.parts)
         if (!part.closed && part.patchIds.size() >= 2 && part.pointIds.size() >= 60)
             pending.push_back(&part);
+    if (pending.empty()) return;
     std::stable_sort(pending.begin(),pending.end(),[](const auto* a,const auto* b) {
         return a->pointIds.size() > b->pointIds.size();
     });
     if (pending.size() > options.maximumProjectionParts) pending.resize(options.maximumProjectionParts);
+    auto fitOptions = options.projectionOptions ? *options.projectionOptions : loadProjectionOptions();
+    if (fitOptions.distanceTolerance == 0) fitOptions.distanceTolerance = options.distanceTolerance;
     std::unordered_map<PointId,const PointSample*> observations;
     for (const auto& p : source.points()) observations.emplace(p.id,&p);
     for (auto* part : pending) {
@@ -44,12 +48,17 @@ void fitOpenParts(const PointStore& source, const AssemblyOptions& options,
             plane.supportPointIds = patch.pointIds;
             evidence.emplace_back(std::move(plane));
         }
-        ProjectionExtrusionOptions fitOptions;
-        fitOptions.distanceTolerance = options.distanceTolerance;
         part->projection.emplace();
         if (fitProjectionExtrusion(PointStore(std::move(points)),fitOptions,
-                                   *part->projection,evidence,cancelled))
+                                   *part->projection,evidence,cancelled)) {
             output.candidate.projectionPrograms.push_back(part->projection->operations);
+            part->closed = true;
+            part->status = "closed_projection";
+            part->reason.clear();
+            part->confidence = part->projection->quality.surfaceInlierFraction;
+            output.candidate.surfaceCoverage += double(part->pointIds.size()) / source.size();
+            output.candidate.confidence = output.candidate.surfaceCoverage;
+        }
         checkCancel(cancelled);
     }
 }
@@ -301,13 +310,15 @@ bool reconstructAssembly(const PointStore& source, const AssemblyOptions& option
         output.patches = std::move(patches);
         output.connections = std::move(grouping.connections);
         output.parts = std::move(grouping.parts);
-        if (options.buildSolids && output.candidate.profileBodies.empty() && output.candidate.curvedSolids.empty()) {
-            closeAnalyticProfile(source, work, output, cancelled);
-            if (output.candidate.profileBodies.empty()) closeAnnularTube(source, work, output, cancelled);
-            if (output.candidate.profileBodies.empty() || output.parts.front().status == "closed_annular_tube")
-                closeCircularSlab(source, work, output, cancelled);
+        if (options.enableSpecializedRecovery) {
+            if (options.buildSolids && output.candidate.profileBodies.empty() && output.candidate.curvedSolids.empty()) {
+                closeAnalyticProfile(source, work, output, cancelled);
+                if (output.candidate.profileBodies.empty()) closeAnnularTube(source, work, output, cancelled);
+                if (output.candidate.profileBodies.empty() || output.parts.front().status == "closed_annular_tube")
+                    closeCircularSlab(source, work, output, cancelled);
+            }
+            recoverLocalProfiles(source, work, options, output, cancelled);
         }
-        recoverLocalProfiles(source, work, options, output, cancelled);
         fitOpenParts(source, options, output, cancelled);
         if (output.patches.empty()) {
             error = "No finite surface patches with sufficient neighborhood support";

@@ -1,5 +1,6 @@
 #pragma once
 #include "reconstruction/recognition/AssemblyReconstruction.h"
+#include "SpecializedRecovery.h"
 #include "common/Math3.h"
 #include <unordered_set>
 #include <vector>

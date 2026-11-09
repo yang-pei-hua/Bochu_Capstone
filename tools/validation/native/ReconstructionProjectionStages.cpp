@@ -1,7 +1,8 @@
 #include "ReconstructionContractData.h"
 
 #include "io/FeatureCodec.h"
-#include "recognition/ProjectionInternal.h"
+#include "recognition/projection/ProjectionInternal.h"
+#include <reconstruction/recognition/ProjectionSettings.h>
 
 #include <algorithm>
 
@@ -131,11 +132,11 @@ QJsonObject writeCap(const Cap& cap) {
     return {{"depth", cap.depth}, {"ids", ids(support)}};
 }
 
-Cap readCap(const QJsonValue& value, const PointIndex& index) {
+Cap readCap(const QJsonValue& value, const PointIndex& index, const ProjectionExtrusionOptions& options) {
     const auto item = value.toObject();
     require(item["depth"].isDouble(), "Invalid cap depth");
     auto points = observations(item["ids"], index);
-    require(points.size() >= minimumCapPoints, "Cap lacks support");
+    require(points.size() >= options.minimumCapPoints, "Cap lacks support");
     return {item["depth"].toDouble(), std::move(points)};
 }
 
@@ -156,11 +157,16 @@ std::vector<ProjectionOperation> readProjectionProgram(const QJsonValue& value) 
 
 QJsonObject projectionStage(int module, const PointStore& source, const QJsonObject& settings,
     QJsonObject input, QJsonObject& metrics) {
-    ProjectionExtrusionOptions options;
-    options.distanceTolerance = settings["tolerance"].toDouble(.05);
-    const auto maxOperations = settings["maximum_operations"].toInt(3);
-    require(maxOperations > 0 && maxOperations <= 12, "Invalid projection operation budget");
-    options.maximumOperations = static_cast<std::size_t>(maxOperations);
+    auto options = loadProjectionOptions();
+    for (const auto& setting : projectionSettings()) {
+        const auto value = settings.value(QString::fromLatin1(setting.key));
+        if (value.isUndefined()) continue;
+        require(value.isDouble() || value.isBool(), "Projection parameter must be numeric or boolean");
+        setProjectionOption(options, std::string(setting.key) + "=" +
+            QString::number(value.isBool() ? double(value.toBool()) : value.toDouble(),'g',17).toStdString());
+    }
+    options.distanceTolerance = settings["tolerance"].toDouble(options.distanceTolerance > 0 ? options.distanceTolerance : .05);
+    validateProjectionOptions(options);
     if (module == 22) {
         ProjectionWork work;
         std::string error;
@@ -191,7 +197,7 @@ QJsonObject projectionStage(int module, const PointStore& source, const QJsonObj
     if (module == 26 || module == 27) {
         const auto scoring = readSamples(input["scoring_points"], sourceIndex);
         const ProgramEvaluator evaluate = [&](const std::vector<ProjectionOperation>& operations) {
-            return trialProgram(operations, scoring, tolerance);
+            return trialProgram(operations, scoring, tolerance, {}, options);
         };
         if (module == 26) {
             QJsonArray programs, operations = input["secondary_operations"].toArray();
@@ -225,7 +231,7 @@ QJsonObject projectionStage(int module, const PointStore& source, const QJsonObj
                 programs.push_back({std::move(operations), readFit(item.toObject()["fit"].toObject())});
             }
             const auto result = searchPrograms(std::move(programs), readOperations(input["secondary_operations"]),
-                options.maximumOperations, tolerance, evaluate);
+                options.maximumOperations, tolerance, evaluate, {}, true, 1, options);
             metrics = writeFit(result.best.fit);
             metrics["accepted"] = result.status == SearchStatus::Accepted;
             metrics["operation_count"] = qint64(result.best.operations.size());
@@ -245,8 +251,8 @@ QJsonObject projectionStage(int module, const PointStore& source, const QJsonObj
     require(std::abs(math3::length(axis) - 1) < 1e-5, "Expected a unit projection axis");
     const auto frame = makeFrame(vector(selected["origin"]), axis);
     if (module == 23) {
-        const auto interval = inspectInterval(points, frame, tolerance);
-        require(interval.first && interval.last && interval.last->depth - interval.first->depth >= 3 * tolerance,
+        const auto interval = inspectInterval(points, frame, tolerance, options);
+        require(interval.first && interval.last && interval.last->depth - interval.first->depth >= options.minimumDepthMultiplier * tolerance,
             "Projection interval lacks supported ends");
         metrics = {{"depth_mm", interval.last->depth - interval.first->depth}, {"abs_z", std::abs(axis.z)},
             {"first_support", qint64(interval.first->points.size())}, {"last_support", qint64(interval.last->points.size())}};
@@ -256,14 +262,14 @@ QJsonObject projectionStage(int module, const PointStore& source, const QJsonObj
         return input;
     }
     const auto index = pointIndex(points);
-    const auto first = readCap(input["first"], index);
-    const auto last = readCap(input["last"], index);
+    const auto first = readCap(input["first"], index, options);
+    const auto last = readCap(input["last"], index, options);
     require(last.depth > first.depth, "Reversed projection interval");
     const auto evidence = readEvidence(input["evidence"]);
     if (module == 24) {
         QJsonArray profiles;
         for (const auto* cap : {&first, &last}) {
-            auto entities = recoverProfile(*cap, frame, tolerance, evidence, first, last, points);
+            auto entities = recoverProfile(*cap, frame, tolerance, evidence, first, last, points, options);
             require(!entities.empty(), "Empty recovered profile");
             profiles.append(writeSketch({frame.plane(first.depth), std::move(entities)}));
         }
@@ -276,11 +282,11 @@ QJsonObject projectionStage(int module, const PointStore& source, const QJsonObj
         const EndProfiles ends{readSketch(profiles[0]).entities, readSketch(profiles[1]).entities};
         std::vector<AxisProposal> proposals;
         require(proposeAxisOperations(points, evidence, frame, first, last, tolerance,
-            options.maximumOperations > 1, proposals, {}, &ends), "Proposal generation failed");
+            options.maximumOperations > 1, proposals, {}, &ends, nullptr, options), "Proposal generation failed");
         QJsonArray ordered, secondary;
         qsizetype baseCount = 0, cutCount = 0;
         if (options.maximumOperations > 1)
-            for (const auto& operation : blindHoles(points, evidence, tolerance))
+            for (const auto& operation : blindHoles(points, evidence, tolerance, options))
                 secondary.append(writeOperation(operation));
         for (const auto& p : proposals) {
             ordered.append(QJsonObject{{"operation", writeOperation(p.operation)}, {"allow_join", p.allowJoin}});

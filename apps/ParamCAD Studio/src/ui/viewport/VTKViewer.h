@@ -6,6 +6,7 @@
 #include "rendering/BoxReferenceActor.h"
 #include "rendering/DatumPlaneActor.h"
 #include "rendering/PointCloudActor.h"
+#include "rendering/ProjectionPreviewActor.h"
 #include "rendering/SketchActor.h"
 #include "ui/viewport/SketchInteractorStyle.h"
 #include "ui/viewport/ViewportTool.h"
@@ -61,6 +62,11 @@ public:
     // Replaces the displayed body with the triangulation of the given core
     // shape. The viewer only consumes a shape; it never interprets features.
     void setBodyShape(const TopoDS_Shape& shape);
+    void setProjectionPreviewBody(const TopoDS_Shape& shape, double scaleToCloud);
+    void setProjectionPreviewOperations(const std::vector<reconstruction::ProjectionOperation>& operations,
+                                        double scaleToCloud, int selectedStep = -1);
+    void setProjectionPreviewBodyVisible(bool visible);
+    void clearProjectionPreview();
     void clearBody();
     bool hasBody() const noexcept;
     const TopoDS_Shape& displayedBody() const { return m_displayedBody; }
@@ -254,6 +260,8 @@ private:
     bool m_referenceSelection = false;
     vtkSmartPointer<SketchInteractorStyle> m_interactorStyle;
     BodyActor m_bodyActor;
+    ProjectionPreviewActor m_projectionPreview;
+    bool m_hasProjectionPreview = false;
     TopoDS_Shape m_displayedBody;
     int m_pickedFaceId = -1;
     modeling::Vec3 m_pickedModelPoint;

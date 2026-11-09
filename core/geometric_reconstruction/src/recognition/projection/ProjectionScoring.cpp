@@ -23,7 +23,7 @@ double volume(const TopoDS_Shape& shape) {
 
 std::optional<Fit> scoreShape(const TopoDS_Shape& body, const std::vector<PointSample>& observations,
                             double tolerance, std::size_t operations, std::size_t curves,
-                            const std::function<bool()>& cancelled) {
+                            const std::function<bool()>& cancelled, const ProjectionExtrusionOptions& options) {
     if (body.IsNull() || observations.empty() || !std::isfinite(tolerance) || tolerance <= 0) return {};
     TopoDS_Compound faces;
     BRep_Builder builder;
@@ -46,7 +46,7 @@ std::optional<Fit> scoreShape(const TopoDS_Shape& body, const std::vector<PointS
         if (!distance.IsDone() || !distance.NbSolution()) return {};
         const double error = distance.Value();
         distances.push_back(error);
-        loss += std::min(error/tolerance, 8.0);
+        loss += std::min(error/tolerance, options.scoreMaximumDistanceLoss);
         if (error > tolerance) fit.residuals.push_back(p.id);
         if (distance.SupportTypeShape2(1) != BRepExtrema_IsInFace) continue;
         const auto face = TopoDS::Face(distance.SupportOnShape2(1));
@@ -67,9 +67,9 @@ std::optional<Fit> scoreShape(const TopoDS_Shape& body, const std::vector<PointS
         if (face.Orientation() == TopAbs_REVERSED) alignment = -alignment;
         if (!p.normalOrientationKnown) alignment = std::abs(alignment);
         alignment = std::clamp(alignment, -1.0, 1.0);
-        if (error <= tolerance && alignment >= .8) ++support[faceId];
+        if (error <= tolerance && alignment >= options.scoreFaceSupportNormalCosine) ++support[faceId];
         normalError += std::acos(alignment)*180/pi;
-        loss += .5*(1-alignment);
+        loss += options.scoreNormalWeight*(1-alignment);
         ++fit.quality.normalComparisons;
     }
     std::sort(distances.begin(), distances.end());
@@ -85,11 +85,11 @@ std::optional<Fit> scoreShape(const TopoDS_Shape& body, const std::vector<PointS
         GProp_GProps properties;
         BRepGProp::SurfaceProperties(faceIndex(i),properties);
         area += properties.Mass();
-        if (support[i] < 3) unsupported += properties.Mass();
+        if (support[i] < options.scoreMinimumFacePoints) unsupported += properties.Mass();
     }
     fit.quality.unsupportedFaceAreaFraction = area > 0 ? unsupported/area : 1;
     fit.quality.score = loss/count + fit.quality.unsupportedFaceAreaFraction +
-        .015*operations + .001*curves;
+        options.scoreOperationPenalty*operations + options.scoreCurvePenalty*curves;
     return fit;
 }
 

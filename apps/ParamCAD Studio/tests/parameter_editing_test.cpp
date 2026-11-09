@@ -12,8 +12,10 @@
 #include "ui/panels/ModelingPanel.h"
 #include "ui/panels/PropertyPanel.h"
 #include "ui/panels/PointCloudRelationsPanel.h"
+#include "ui/panels/ProjectionSketchPanel.h"
 #include "ui/viewport/VTKViewer.h"
 #include <modeling/PrimitiveEditing.h>
+#include <reconstruction/recognition/ProjectionSettings.h>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <BRepBndLib.hxx>
@@ -23,13 +25,22 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
+#include <QImage>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QLabel>
 #include <QMessageBox>
+#include <QMenu>
+#include <QMenuBar>
+#include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScopeGuard>
+#include <QSpinBox>
 #include <QSurfaceFormat>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -39,6 +50,8 @@
 #include <vtkActor.h>
 #include <vtkActorCollection.h>
 #include <vtkGenericOpenGLRenderWindow.h>
+#include <vtkPolyData.h>
+#include <vtkPolyDataMapper.h>
 #include <vtkRenderer.h>
 #include <vtkRendererCollection.h>
 #include <vtkRenderWindowInteractor.h>
@@ -64,6 +77,81 @@ Vec3 boxPoint(const BoxPrimitiveParams& box,double x,double y,double z) {
 }
 void samePoint(Vec3 a,Vec3 b,const char* message) { require(near(a.x,b.x)&&near(a.y,b.y)&&near(a.z,b.z),message); }
 
+void hyperparameterSettingsWorkflow()
+{
+    QTemporaryDir directory;
+    require(directory.isValid(),"temporary projection settings directory");
+    const auto filename = directory.filePath("projection.conf");
+    QFile file(filename);
+    require(file.open(QIODevice::WriteOnly) && file.write("maximum_axes = 17\n") > 0,
+            "write a partial projection config");
+    file.close();
+    constexpr auto variable = "PARAMCAD_PROJECTION_CONFIG";
+    const auto previous = qgetenv(variable);
+    const auto restore = qScopeGuard([&] {
+        if (previous.isNull()) qunsetenv(variable);
+        else qputenv(variable,previous);
+    });
+    qputenv(variable,filename.toLocal8Bit());
+    const auto path = std::filesystem::path(filename.toStdU16String());
+    require(reconstruction::projectionConfigPath() == path,"the configuration override uses the fixture path");
+
+    MainWindow window;
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    auto* menu = window.findChild<QMenu*>("settingsMenu");
+    auto* action = window.findChild<QAction*>("hyperparametersAction");
+    require(menu && action && window.menuBar()->actions().contains(menu->menuAction())
+            && menu->actions().contains(action),"hyperparameters open from a top-level Settings menu");
+    action->trigger();
+    auto* dialog = window.findChild<QDialog*>("hyperparameterSettingsDialog");
+    auto* axes = dialog ? dialog->findChild<QSpinBox*>("maximum_axes") : nullptr;
+    auto* buttons = dialog ? dialog->findChild<QDialogButtonBox*>() : nullptr;
+    require(axes && axes->value() == 17 && buttons,"the editor loads the current projection config");
+    axes->setValue(5);
+    buttons->button(QDialogButtonBox::Save)->click();
+    require(reconstruction::loadProjectionOptions().maximumAxes == 5,
+            "settings save is read by the default C++ loader");
+}
+
+void projectionSketchDrawing()
+{
+    reconstruction::ProjectionSketchInput input;
+    input.alphaRadius = 1.5;
+    input.simplificationTolerance = .4;
+    for (int x = 0; x <= 30; ++x) for (int y = 0; y <= 30; ++y) {
+        if (!(x > 6 && x < 24 && y > 6 && y < 24)) input.points.push_back({double(x),double(y)});
+        if (x <= 5 && y <= 5) input.points.push_back({double(x+45),double(y)});
+    }
+    ProjectionSketchPanel panel({std::move(input)},nullptr);
+    panel.setAttribute(Qt::WA_DontShowOnScreen);
+    panel.resize(480,350);
+    panel.show();
+    QApplication::processEvents();
+    auto* fit = panel.findChild<QPushButton*>("fitProjectionBoundaryButton");
+    auto* showPoints = panel.findChild<QCheckBox*>("showProjectionSketchPoints");
+    auto* canvas = panel.findChild<QWidget*>("projectionSketchCanvas");
+    require(fit && showPoints && canvas, "the projection plot provides fitting and a scatter visibility control");
+    fit->click();
+    QElapsedTimer timer;
+    timer.start();
+    while (!fit->isEnabled() && timer.elapsed() < 10000) { QApplication::processEvents(); QThread::msleep(5); }
+    require(fit->isEnabled(), "the projection plot finishes fitting the hole and separated region");
+    showPoints->setChecked(false);
+    const auto image = canvas->grab().toImage();
+    bool mainOutline = false, separateOutline = false, hole = false;
+    for (int y = 2; y < image.height()-2; ++y) for (int x = 2; x < image.width()-2; ++x) {
+        const auto pixel = image.pixelColor(x,y);
+        if (pixel == QColor(255,173,72)) {
+            if (x < 2*image.width()/3) mainOutline = true;
+            else separateOutline = true;
+        }
+        hole |= pixel == QColor(240,128,224);
+    }
+    require(mainOutline && separateOutline && hole, "the plot draws both outer rings and the hole with scatter hidden");
+    require(image.pixelColor(0,image.height()/2) != image.pixelColor(5,image.height()/2),
+            "the plot perimeter is distinct from the interior fill");
+}
+
 void cloudOnlyButtonWorkflow() {
     QTemporaryDir directory;require(directory.isValid(),"cloud-only fixture directory");
     const auto path=directory.filePath("input.ply");QFile file(path);require(file.open(QIODevice::WriteOnly),"write cloud-only fixture");
@@ -81,10 +169,108 @@ void cloudOnlyButtonWorkflow() {
     write("reference.json","invalid metadata: this file must never be read by reconstruction");
     MainWindow window;window.setAttribute(Qt::WA_DontShowOnScreen);window.show();
     auto* workspace=window.findChild<PointCloudWorkspaceController*>();auto* task=window.findChild<CadReconstructionTask*>();
+    auto* debugMenu = window.findChild<QMenu*>("debugMenu");
+    auto* debugAction = window.findChild<QAction*>("projectionDebugAction");
+    require(debugMenu && debugAction && window.menuBar()->actions().contains(debugMenu->menuAction()) &&
+            debugMenu->actions().contains(debugAction) && !debugAction->isEnabled(),
+            "direct projection is in a top-level Debug menu and requires an imported cloud");
     auto* model=window.findChild<ModelingController*>();workspace->loadPointCloudFromFile(path);
     auto* action=window.findChild<QAction*>("reconstructCadAction");require(action->isEnabled() && !action->text().contains("STEP"),"button exposes only point-cloud reconstruction");
-    const auto* projectionAction=window.findChild<QAction*>("projectionCadAction");
-    require(projectionAction && projectionAction->isEnabled(),"projection fallback action is enabled for a metric cloud");
+    const auto* projectionAction=window.findChild<QAction*>("cadWithoutProjectionAction");
+    require(projectionAction && projectionAction->isEnabled(),"projection opt-out is enabled for a metric cloud");
+    require(debugAction->isEnabled(), "import enables direct projection");
+    debugAction->trigger();
+    auto* debugPage = window.findChild<PropertyPanel*>()->findChild<QWidget*>("projectionDebugPage");
+    auto* mode = debugPage ? debugPage->findChild<QComboBox*>("projectionDebugMode") : nullptr;
+    require(debugPage && debugPage->isVisible() && mode && mode->count() == 3 && !task->isRunning(),
+            "debug action opens the Properties page with three manual modes");
+    const QStringList paths{QStringLiteral("single_axis"), QStringLiteral("two_axis_intersection"),
+                            QStringLiteral("segmented")};
+    const auto waitForProjection = [&] {
+        QElapsedTimer timer;
+        timer.start();
+        while (task->isRunning() && timer.elapsed() < 30000) { QApplication::processEvents(); QThread::msleep(5); }
+    };
+    for (int index = 0; index < paths.size(); ++index) {
+        mode->setCurrentIndex(index);
+        QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        require(!debugPage->findChild<QPlainTextEdit*>("projectionDebugReportText"),
+                "switching modes clears the previous report");
+        auto* inspect = debugPage->findChild<QPushButton*>("inspectProjectionSketchButton");
+        require(inspect && inspect->isVisible() == (index < 2),
+                "2D projection inspection is available for single-axis and intersection modes");
+        if (index < 2) {
+            inspect->click();
+            waitForProjection();
+            auto* inputs = debugPage->findChild<QComboBox*>("projectionSketchInput");
+            auto* boundary = debugPage->findChild<QPushButton*>("fitProjectionBoundaryButton");
+            require(inputs && inputs->count() >= 2 && boundary && boundary->isEnabled()
+                    && !debugPage->findChild<QPushButton*>("applyProjectionDebugCadButton"),
+                    "point-only inspection shows selectable inputs without creating CAD");
+            inputs->setCurrentIndex(1);
+            boundary->click();
+            QElapsedTimer timer;
+            timer.start();
+            while (!boundary->isEnabled() && timer.elapsed() < 10000) { QApplication::processEvents(); QThread::msleep(5); }
+            auto* status = debugPage->findChild<QLabel*>("projectionSketchStatus");
+            require(boundary->isEnabled() && status && status->text().contains("Alpha"),
+                    "the boundary action fits and publishes the selected 2D input");
+        }
+        debugPage->findChild<QPushButton*>("runProjectionDebugButton")->click();
+        require(task->isRunning() && !mode->isEnabled() && !debugAction->isEnabled(),
+                "debug projection runs in the background");
+        waitForProjection();
+        auto* debugReport = debugPage->findChild<QPlainTextEdit*>("projectionDebugReportText");
+        require(debugReport && mode->isEnabled() && debugAction->isEnabled() && model->features().empty(),
+                "debug projection publishes a report without applying CAD");
+        const auto report = QJsonDocument::fromJson(debugReport->toPlainText().toUtf8()).object();
+        require(report["input_points"].toInt() == 600 && report["axes"].isArray() &&
+                report["requested_path"] == paths[index] && report["source_cloud"].toString() == path,
+                "debug report uses the requested path and the original imported observations");
+    }
+    debugPage->findChild<QPushButton*>("closeProjectionDebugButton")->click();
+    auto* viewer = window.findChild<VTKViewer*>();
+    const auto bodyRevision = viewer->bodyRevision();
+    reconstruction::ProjectionOperation guide;
+    guide.sketch.plane = Plane3d{};
+    guide.sketch.entities = {{1,Rectangle2D{0,0,4,6}}};
+    guide.depth = 9;
+    guide.reverse = true;
+    viewer->setProjectionPreviewOperations({guide},.001);
+    const auto findArrows = [&]() {
+        std::vector<vtkActor*> found;
+        auto* renderers = viewer->renderWindow()->GetRenderers();
+        renderers->InitTraversal();
+        while (auto* renderer = renderers->GetNextItem()) {
+            if (renderer->GetLayer() != 2) continue;
+            auto* actors = renderer->GetActors();
+            actors->InitTraversal();
+            while (auto* actor = actors->GetNextActor()) {
+                auto* mapper = vtkPolyDataMapper::SafeDownCast(actor->GetMapper());
+                if (actor->GetVisibility() && mapper) {
+                    auto* data = mapper->GetInput();
+                    if (data && data->GetNumberOfLines()==5 && data->GetNumberOfPoints()==6) found.push_back(actor);
+                }
+            }
+        }
+        return found;
+    };
+    const auto arrows = findArrows();
+    auto* arrow = arrows.size() == 1 ? arrows.front() : nullptr;
+    require(arrow && !arrow->GetPickable() && near(arrow->GetBounds()[4],-.009)
+            && near(arrow->GetBounds()[5],0) && viewer->bodyRevision()==bodyRevision,
+            "projection overlay draws the reverse arrow at point cloud scale without modifying the body");
+    auto transverse = guide;
+    transverse.sketch.plane = Plane3d{{0,0,0},{1,0,0},{0,1,0}};
+    transverse.operation = ExtrudeOperation::Intersect;
+    viewer->setProjectionPreviewOperations({guide,transverse},.001);
+    require(findArrows().size() == 2, "intersection overlay shows both directions together");
+    viewer->setProjectionPreviewOperations({guide,transverse},.001,1);
+    const auto selectedArrows = findArrows();
+    require(selectedArrows.size() == 1 && selectedArrows.front() != arrow,
+            "selecting an operation isolates its direction");
+    viewer->clearProjectionPreview();
+    require(findArrows().empty(), "closing projection preview removes its viewport geometry");
     std::optional<CadReconstructionResult> result;QObject::connect(task,&CadReconstructionTask::finished,&window,[&](const auto& value){result=value;});
     action->trigger();QElapsedTimer timer;timer.start();while(task->isRunning()&&timer.elapsed()<30000){QApplication::processEvents();QThread::msleep(5);}
     require(result && result->outcome==CadReconstructionResult::Outcome::Success && !model->features().empty(),"button reconstructs using only observations despite poisoned source-model sidecars");
@@ -319,6 +505,8 @@ void profileBodyEditing() {
 int main(int argc,char** argv) {
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat()); QApplication app(argc,argv);
     try {
+        hyperparameterSettingsWorkflow();
+        projectionSketchDrawing();
         cloudOnlyButtonWorkflow();
         assemblyButtonWorkflow();
         observedAssemblyWorkflow();

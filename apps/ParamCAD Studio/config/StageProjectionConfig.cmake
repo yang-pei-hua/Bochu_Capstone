@@ -1,0 +1,5 @@
+file(MAKE_DIRECTORY "${PROJECTION_CONFIG_DIRECTORY}")
+set(destination "${PROJECTION_CONFIG_DIRECTORY}/projection.conf")
+if(NOT EXISTS "${destination}")
+    configure_file("${PROJECTION_CONFIG_SOURCE}" "${destination}" COPYONLY)
+endif()

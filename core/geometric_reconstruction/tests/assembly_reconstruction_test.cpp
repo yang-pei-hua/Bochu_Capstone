@@ -26,6 +26,8 @@ void box(std::vector<PointSample>& cloud,Vec3 center,Vec3 dimensions,double angl
 }
 reconstruction::AssemblyReconstructionResult run(const std::vector<PointSample>& cloud,double tolerance=.02) {
     reconstruction::AssemblyOptions options;options.distanceTolerance=tolerance;reconstruction::AssemblyReconstructionResult result;std::string error;
+    // Exercise finite-shell and specialized profile recovery in isolation.
+    options.maximumProjectionParts = 0;
     require(reconstruction::reconstructAssembly(PointStore(cloud),options,result,error),error);return result;
 }
 double volume(const reconstruction::CompoundCandidate& candidate) {
@@ -223,6 +225,7 @@ void drilledProfiles() {
     assemblyOptions.distanceTolerance = .006;
     assemblyOptions.maximumWorkingPoints = points.size() * 3 / 2;
     assemblyOptions.maximumLocalProfileAttempts = 0;
+    assemblyOptions.maximumProjectionParts = 0;
     const PointStore assemblySource(std::move(assemblyPoints));
     reconstruction::AssemblyReconstructionResult assembly;
     std::string assemblyError;

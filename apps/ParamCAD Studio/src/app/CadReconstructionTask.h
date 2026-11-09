@@ -8,11 +8,24 @@
 #include <reconstruction/recognition/AssemblyReconstruction.h>
 
 #include <QObject>
+#include <TopoDS_Shape.hxx>
 
 #include <atomic>
 #include <memory>
 
 class QThread;
+
+struct CadProjectionDebugResult
+{
+    reconstruction::ProjectionExtrusionResult fit;
+    reconstruction::ProjectionPath path = reconstruction::ProjectionPath::Automatic;
+    bool inspectOnly = false;
+    TopoDS_Shape previewShape;
+    reconstruction::LengthUnit sourceUnit = reconstruction::LengthUnit::Arbitrary;
+    std::size_t inputPoints = 0;
+    std::size_t validPoints = 0;
+    qint64 elapsedMilliseconds = 0;
+};
 
 struct CadReconstructionResult
 {
@@ -30,6 +43,7 @@ struct CadReconstructionResult
     int failedRegionId = 0;
     QString error;
     std::optional<reconstruction::AssemblyReconstructionResult> assembly;
+    std::optional<CadProjectionDebugResult> projectionDebug;
     std::size_t skippedInvalidObservations = 0;
 };
 
@@ -39,7 +53,7 @@ class CadReconstructionTask final : public QObject
 {
     Q_OBJECT
 public:
-    enum class Stage { Preprocessing, FittingTemplates, Recognizing, SeparatingParts, Cancelling };
+    enum class Stage { Preprocessing, FittingTemplates, Recognizing, SeparatingParts, Projecting, Cancelling };
     Q_ENUM(Stage)
 
     explicit CadReconstructionTask(QObject* parent = nullptr);
@@ -48,7 +62,12 @@ public:
                std::vector<reconstruction::TemplateHint> hints = {}, double sourceTolerance = 0,
                std::optional<reconstruction::SurfaceAnalysisResult> analysis = {},
                std::vector<reconstruction::SurfaceRelationHint> relations = {},
-               bool projectionFallback = false);
+               bool projectionFallback = true, bool specializedRecovery = true,
+               std::optional<reconstruction::ProjectionExtrusionOptions> projectionOptions = {});
+    bool startProjection(PlyCloud cloud, reconstruction::LengthUnit unit,
+                         reconstruction::ProjectionPath path = reconstruction::ProjectionPath::Automatic,
+                         bool inspectOnly = false,
+                         std::optional<reconstruction::ProjectionExtrusionOptions> projectionOptions = {});
     bool isRunning() const noexcept;
     bool isCancellationRequested() const noexcept;
     void cancel();
@@ -60,6 +79,10 @@ signals:
     void finished(const CadReconstructionResult& result);
 
 private:
+    using Work = std::function<void(CadReconstructionResult&, const std::function<bool()>&,
+                                    const std::function<void(Stage)>&)>;
+    bool startWork(Work work, Stage initialStage);
+
     QThread* m_thread = nullptr;
     bool m_running = false;
     std::shared_ptr<std::atomic_bool> m_cancelled;

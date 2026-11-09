@@ -2,9 +2,14 @@
 
 #include "app/WorkspaceController.h"
 #include <modeling/ModelPatch.h>
+#include <reconstruction/data/PointStore.h>
 #include <reconstruction/analysis/SurfaceAnalysis.h>
+#include <QPointer>
 
 class QAction;
+class QLabel;
+class QPushButton;
+class QComboBox;
 class CadReconstructionTask;
 struct CadReconstructionResult;
 class ModelingController;
@@ -17,6 +22,7 @@ struct ReconstructRequest;
 class ScenePanel;
 class QThread;
 class VTKViewer;
+namespace reconstruction { enum class ProjectionPath; }
 
 struct PointCloudWorkspaceUi
 {
@@ -28,6 +34,7 @@ struct PointCloudWorkspaceUi
     QAction* reconstructCadAction;
     QAction* cancelCadAction;
     QAction* reconstructToolAction;
+    QAction* projectionDebugAction;
 };
 
 // Owns cloud editing/analysis and the UI side of photo and CAD reconstruction.
@@ -45,12 +52,17 @@ public:
     void openPointCloud();
     void loadPointCloudFromFile(const QString& filePath);
     void reconstructCad();
-    void reconstructCadWithProjection();
+    void reconstructCadWithoutProjection();
+    void runProjectionDebug();
     void cancelCadReconstruction();
     void prepareProjectReplacement();
 
 private:
     void startCadReconstruction(bool projectionFallback);
+    void startProjectionDebug(reconstruction::ProjectionPath path, bool inspectOnly);
+    void clearProjectionDebugResult();
+    std::optional<reconstruction::LengthUnit> confirmCloudUnit();
+    void showProjectionDebugResult(const CadReconstructionResult& result);
     void updateCadActions();
     void requestGuidedReconstruction();
     void startQueuedReconstruction();
@@ -66,6 +78,12 @@ private:
     const PointCloudWorkspaceUi m_ui;
     QThread* m_analysisThread = nullptr;
     CadReconstructionTask* m_cadTask;
+    QPointer<QWidget> m_projectionPage;
+    QPointer<QWidget> m_projectionReport;
+    QPointer<QLabel> m_projectionStatus;
+    QPointer<QPushButton> m_runProjection;
+    QPointer<QPushButton> m_inspectProjection;
+    QPointer<QComboBox> m_projectionMode;
     bool m_startingCad = false;
     bool m_cadOverwriteManual = false;
     bool m_analyseAfterCad = false;

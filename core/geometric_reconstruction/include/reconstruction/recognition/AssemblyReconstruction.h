@@ -1,6 +1,7 @@
 #pragma once
 #include "reconstruction/data/PointStore.h"
 #include "reconstruction/recognition/CompoundRecognizer.h"
+#include "reconstruction/recognition/ProjectionExtrusion.h"
 #include <functional>
 #include <string>
 
@@ -14,9 +15,11 @@ struct AssemblyOptions {
     double connectivityFactor=2.5,alphaFactor=2.5;
     bool buildSolids=true;
     // Zero disables projection-based recovery.
-    std::size_t maximumProjectionParts=0;
+    std::size_t maximumProjectionParts=6;
     // Refit open groups from their full observations after global sampling.
     std::size_t maximumLocalProfileAttempts=48;
+    bool enableSpecializedRecovery=true;
+    std::optional<ProjectionExtrusionOptions> projectionOptions;
 };
 // Counters only: diagnostics do not repair, filter or change recovered geometry.
 struct BoundaryRecoveryDiagnostics {
@@ -79,7 +82,7 @@ struct AssemblyReconstructionResult {
     std::vector<PatchConnection> connections;
     std::vector<AssemblyPart> parts;
     std::vector<PointId> unassignedPointIds;
-    // CAD contains only parts that pass closed-shell and B-Rep checks.
+    // CAD contains only parts that pass geometric validation and B-Rep checks.
     // candidate.surfaceCoverage counts observations assigned to those parts;
     // it is not a source completeness score or an independent surface distance.
     CompoundCandidate candidate;

@@ -1,6 +1,7 @@
 #include "reconstruction/recognition/ProjectionExtrusion.h"
 
 #include "ProjectionInternal.h"
+#include "reconstruction/recognition/ProjectionSettings.h"
 #include "modeling/ModelingCore.h"
 #include "preprocessing/detail/KdTree.h"
 #include "recognition/assembly/BoundaryGeometry.h"
@@ -46,7 +47,8 @@ std::vector<PointSample> sample(const std::vector<PointSample>& points, std::siz
     return result;
 }
 
-double convexArea(BoundaryLoop points) {
+BoundaryLoop convexHull(BoundaryLoop points) {
+    if (points.size() < 3) return {};
     std::sort(points.begin(), points.end(), [](auto a, auto b) {
         return std::tie(a.x, a.y) < std::tie(b.x, b.y);
     });
@@ -65,27 +67,35 @@ double convexArea(BoundaryLoop points) {
             hull.pop_back();
         hull.push_back(*i);
     }
-    return std::abs(boundaryArea(hull));
+    hull.pop_back(); // The reverse pass repeats the first vertex.
+    return hull;
+}
+
+double convexArea(BoundaryLoop points) {
+    return std::abs(boundaryArea(convexHull(std::move(points))));
+}
+
+bool hasAxis(const std::vector<ProjectionAxisReport>& axes, Vec3 axis, double alignment) {
+    return std::any_of(axes.begin(), axes.end(), [&](const auto& entry) {
+        return std::abs(dot(entry.axis, axis)) >= alignment;
+    });
 }
 
 void addAxis(std::vector<ProjectionAxisReport>& axes, Vec3 axis, const char* source,
-             std::size_t limit) {
+             std::size_t limit, double alignment) {
     if (axes.size() >= limit || !finite(axis) || length(axis) < 1e-8) return;
     axis = normalized(axis);
-    if (std::any_of(axes.begin(), axes.end(), [&](const auto& entry) {
-        return std::abs(dot(entry.axis, axis)) >= axisAlignment;
-    })) return;
-    axes.push_back({axis, source, 0, 0, {}});
+    if (!hasAxis(axes, axis, alignment)) axes.push_back({axis, source});
 }
 
-std::vector<PrimitiveEvidence> detect(const PointStore& points, double tolerance) {
+std::vector<PrimitiveEvidence> detect(const PointStore& points, double tolerance, const ProjectionExtrusionOptions& tuning) {
     PrimitiveDetectionOptions options;
     options.detectSpheres = options.detectCones = options.detectTori = false;
     options.plane.distanceThreshold = options.cylinder.distanceThreshold = tolerance;
     options.plane.minimumSupportPoints = options.cylinder.minimumSupportPoints =
-        std::max<std::size_t>(minimumCapPoints, points.size()/300);
-    options.plane.maximumPlanes = 16;
-    options.cylinder.maximumCylinders = 6;
+        std::max<std::size_t>(tuning.minimumCapPoints, points.size()/tuning.evidenceSupportDivisor);
+    options.plane.maximumPlanes = tuning.maximumEvidencePlanes;
+    options.cylinder.maximumCylinders = tuning.maximumEvidenceCylinders;
     PrimitiveDetectionResult output;
     std::string error;
     detectPrimitiveEvidence(points, options, output, error);
@@ -97,14 +107,14 @@ std::vector<PrimitiveEvidence> detect(const PointStore& points, double tolerance
 namespace detail::projection {
 std::optional<Fit> trialProgram(const std::vector<ProjectionOperation>& operations,
     const std::vector<PointSample>& observations, double tolerance,
-    const std::function<bool()>& cancelled) {
+    const std::function<bool()>& cancelled, const ProjectionExtrusionOptions& options) {
     try {
         ModelingCore model;
         std::string error;
         if (!buildProjectionProgram(operations, model, error)) return {};
         const auto curves = std::accumulate(operations.begin(), operations.end(), std::size_t(0),
             [](auto sum, const auto& op) { return sum+op.sketch.entities.size(); });
-        return scoreShape(model.bodyShape(), observations, tolerance, operations.size(), curves, cancelled);
+        return scoreShape(model.bodyShape(), observations, tolerance, operations.size(), curves, cancelled, options);
     } catch (const Standard_Failure&) {
         // Invalid candidate geometry should leave the remaining candidates testable.
     }
@@ -116,10 +126,9 @@ bool prepareProjection(const PointStore& source, const ProjectionExtrusionOption
     const std::function<bool()>& cancelled) {
     work = {};
     error.clear();
-    if (source.unit() != LengthUnit::Millimeter || source.size() < 2*minimumCapPoints ||
-        options.maximumFitPoints < 2*minimumCapPoints || options.maximumScorePoints == 0 ||
-        options.maximumAxes == 0 || options.maximumOperations == 0 || options.distanceTolerance < 0 ||
-        !std::isfinite(options.distanceTolerance)) {
+    try { validateProjectionOptions(options); }
+    catch (const std::invalid_argument& failure) { error = failure.what(); return false; }
+    if (source.unit() != LengthUnit::Millimeter || source.size() < 2*options.minimumCapPoints) {
         error = "Expected one metric component and valid projection fit options";
         return false;
     }
@@ -142,7 +151,7 @@ bool prepareProjection(const PointStore& source, const ProjectionExtrusionOption
         error = "Unresolved component extent";
         return false;
     }
-    const double tolerance = options.distanceTolerance > 0 ? options.distanceTolerance : span*.0025;
+    const double tolerance = options.distanceTolerance > 0 ? options.distanceTolerance : span*options.relativeDistanceTolerance;
     auto points = sample(source.points(), options.maximumFitPoints);
     for (auto& p : points) {
         if (p.normal && finite(*p.normal) && length(*p.normal) > 1e-8)
@@ -155,10 +164,10 @@ bool prepareProjection(const PointStore& source, const ProjectionExtrusionOption
         detail::preprocessing::estimateNormalsAndCurvature(points,normals,report);
     }
     const auto evenlySpaced = detail::preprocessing::voxelDownsample(
-        points, span/(2*std::sqrt(double(options.maximumScorePoints))), {});
+        points, span/(options.scoreVoxelScale*std::sqrt(double(options.maximumScorePoints))), {});
     auto observations = sample(evenlySpaced, options.maximumScorePoints);
     auto evidence = supplied;
-    auto detected = detect(PointStore(points), tolerance);
+    auto detected = detect(PointStore(points), tolerance, options);
     evidence.insert(evidence.end(),std::make_move_iterator(detected.begin()),std::make_move_iterator(detected.end()));
     work = {std::move(points), std::move(observations), std::move(evidence), point((high+low)*.5), tolerance};
     return true;
@@ -171,24 +180,25 @@ Frame makeFrame(Vec3 origin, Vec3 axis) {
 }
 
 std::optional<Cap> capAt(const std::vector<PointSample>& points, const Frame& frame,
-                         double boundary, double tolerance) {
+                         double boundary, double tolerance, const ProjectionExtrusionOptions& options) {
     Cap cap{0, {}};
     std::vector<double> depths;
     for (const auto& p : points) {
         const auto depth = frame.depth(p.position);
-        if (std::abs(depth-boundary) > 3*tolerance ||
-            (p.normal && std::abs(dot(*p.normal, frame.axis)) < .9)) continue;
+        if (std::abs(depth-boundary) > options.capBandMultiplier*tolerance ||
+            (p.normal && std::abs(dot(*p.normal, frame.axis)) < options.capNormalCosine)) continue;
         cap.points.push_back(p);
         depths.push_back(depth);
     }
-    if (depths.size() < minimumCapPoints) return {};
+    if (depths.size() < options.minimumCapPoints) return {};
     const auto median = depths.begin()+depths.size()/2;
     std::nth_element(depths.begin(), median, depths.end());
     cap.depth = *median;
     return cap;
 }
 
-Interval inspectInterval(const std::vector<PointSample>& points, const Frame& frame, double tolerance) {
+Interval inspectInterval(const std::vector<PointSample>& points, const Frame& frame, double tolerance,
+                         const ProjectionExtrusionOptions& options) {
     if (points.empty()) return {};
     BoundaryLoop projected;
     std::vector<double> depths;
@@ -197,16 +207,16 @@ Interval inspectInterval(const std::vector<PointSample>& points, const Frame& fr
         depths.push_back(frame.depth(p.position));
     }
     std::sort(depths.begin(), depths.end());
-    const auto margin = depths.size()/500;
+    const auto margin = std::size_t(depths.size()*options.extentTrimFraction);
     const double start = depths[margin], end = depths[depths.size()-1-margin];
     return {start, end, convexArea(std::move(projected)),
-        capAt(points, frame, start, tolerance), capAt(points, frame, end, tolerance)};
+        capAt(points, frame, start, tolerance, options), capAt(points, frame, end, tolerance, options)};
 }
 
 bool generateAxes(const std::vector<PointSample>& points,
     const std::vector<PointSample>& directionObservations, const std::vector<PrimitiveEvidence>& evidence,
     Vec3 center, const ProjectionExtrusionOptions& options, std::vector<ProjectionAxisReport>& axes,
-    const std::function<bool()>& cancelled) {
+    const std::function<bool()>& cancelled, std::array<Vec3, 3>* principalAxes) {
     axes.clear();
     if (points.empty()) return true;
     Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
@@ -221,40 +231,48 @@ bool generateAxes(const std::vector<PointSample>& points,
     std::vector<Vec3> normals;
     for (const auto& primitive : evidence) {
         if (const auto* cylinder = std::get_if<CylinderEvidence>(&primitive))
-            addAxis(axes, cylinder->cylinder.axisDirection, "cylinder_axis", options.maximumAxes);
+            addAxis(axes, cylinder->cylinder.axisDirection, "cylinder_axis", options.maximumAxes, options.axisAlignmentCosine);
         if (const auto* plane = std::get_if<PlaneEvidence>(&primitive)) {
             const auto n = plane->plane.normal;
             if (std::none_of(normals.begin(), normals.end(), [&](auto other) {
-                return std::abs(dot(n,other)) >= axisAlignment;
+                return std::abs(dot(n,other)) >= options.axisAlignmentCosine;
             })) normals.push_back(n);
         }
     }
-    for (const auto n : normals) addAxis(axes,n,"plane_normal",options.maximumAxes);
-    for (int i = 2; i >= 0; --i)
-        addAxis(axes,point(pca.eigenvectors().col(i)),"coordinate_pca",options.maximumAxes);
+    for (const auto n : normals) addAxis(axes,n,"plane_normal",options.maximumAxes, options.axisAlignmentCosine);
+    const std::array pcaAxes{point(pca.eigenvectors().col(2)), point(pca.eigenvectors().col(1)),
+                             point(pca.eigenvectors().col(0))};
+    if (principalAxes) *principalAxes = pcaAxes;
+    const auto pcaEnd = pcaAxes.begin() + std::min(options.maximumAxes, pcaAxes.size());
+    // Keep evidence priority and reuse a slot when it already covers a PCA direction.
+    while (axes.size() + std::count_if(pcaAxes.begin(), pcaEnd, [&](Vec3 axis) {
+        return !hasAxis(axes, axis, options.axisAlignmentCosine);
+    }) > options.maximumAxes) axes.pop_back();
+    for (auto axis = pcaAxes.begin(); axis != pcaEnd; ++axis)
+        addAxis(axes, *axis, "coordinate_pca", options.maximumAxes, options.axisAlignmentCosine);
     for (std::size_t i = 0; i < normals.size(); ++i)
         for (std::size_t j = i+1; j < normals.size(); ++j)
-            addAxis(axes,cross(normals[i],normals[j]),"side_plane_pair",options.maximumAxes);
+            addAxis(axes,cross(normals[i],normals[j]),"side_plane_pair",options.maximumAxes, options.axisAlignmentCosine);
     const auto seeds = axes;
     for (const auto& seed : seeds) {
         Eigen::Matrix3d moment = Eigen::Matrix3d::Zero();
         for (const auto& p : directionObservations) {
-            if (!p.normal || std::abs(dot(*p.normal,seed.axis)) > .2) continue;
+            if (!p.normal || std::abs(dot(*p.normal,seed.axis)) > options.sideMomentNormalCosine) continue;
             const auto n = vector(*p.normal);
             moment += n*n.transpose();
         }
         const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> fit(moment);
         const auto eigenvalues = fit.eigenvalues();
-        if (eigenvalues[1]-eigenvalues[0] > .03*eigenvalues[2])
-            addAxis(axes,point(fit.eigenvectors().col(0)),"side_normal_moment",options.maximumAxes);
+        if (eigenvalues[1]-eigenvalues[0] > options.sideMomentEigenGap*eigenvalues[2])
+            addAxis(axes,point(fit.eigenvectors().col(0)),"side_normal_moment",options.maximumAxes, options.axisAlignmentCosine);
     }
     if (options.includeAreaDirections) {
         // A small deterministic screen; the metric is the area of the convexified projection.
-        const auto areaPoints = sample(points, 2000);
+        const auto areaPoints = sample(points, options.areaSamplePoints);
         std::vector<std::pair<double, Vec3>> ranked;
-        for (int i = 0; i < 64; ++i) {
+        for (std::size_t i = 0; i < options.areaSampleDirections; ++i) {
             if (cancelled && cancelled()) return false;
-            const double z = (i+.5)/64;
+            const double z = (i+.5)/options.areaSampleDirections;
             const double r = std::sqrt(1-z*z), angle = i*pi*(3-std::sqrt(5.));
             const Vec3 direction{r*std::cos(angle), r*std::sin(angle), z};
             const auto frame = makeFrame(center, direction);
@@ -265,8 +283,8 @@ bool generateAxes(const std::vector<PointSample>& points,
         std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
             return a.first < b.first;
         });
-        const auto limit = std::min(options.maximumAxes,axes.size()+3);
-        for (const auto& item : ranked) addAxis(axes,item.second,"small_convex_projection",limit);
+        const auto limit = std::min(options.maximumAxes,axes.size()+options.maximumAreaDirections);
+        for (const auto& item : ranked) addAxis(axes,item.second,"small_convex_projection",limit,options.axisAlignmentCosine);
     }
 
     return true;
@@ -306,83 +324,102 @@ bool buildProjectionProgram(const std::vector<ProjectionOperation>& operations,
     return true;
 }
 
-bool fitProjectionExtrusion(const PointStore& source, const ProjectionExtrusionOptions& options,
+namespace {
+bool prepareProjectionAxes(const PointStore& source, const ProjectionExtrusionOptions& options,
     ProjectionExtrusionResult& result, const std::vector<PrimitiveEvidence>& supplied,
-    const std::function<bool()>& cancelled) {
+    ProjectionWork& work, std::array<Vec3, 3>& principalAxes, const std::function<bool()>& cancelled) {
     result = {};
-    auto stopped = [&] {
-        if (!cancelled || !cancelled()) return false;
-        result.reason = "Cancelled";
-        return true;
-    };
-    ProjectionWork work;
     if (!prepareProjection(source, options, supplied, work, result.reason, cancelled)) return false;
-    const auto& [points, observations, evidence, center, tolerance] = work;
-    result.distanceTolerance = tolerance;
-    if (stopped()) return false;
-    if (!generateAxes(points, observations, evidence, center, options, result.axes, cancelled)) {
+    result.distanceTolerance = work.tolerance;
+    if ((cancelled && cancelled()) || !generateAxes(work.points, work.scoringPoints, work.evidence,
+            work.center, options, result.axes, cancelled, &principalAxes)) {
         result.reason = "Cancelled";
         return false;
     }
+    return true;
+}
+} // namespace
+
+bool inspectProjectionSketches(const PointStore& source, const ProjectionExtrusionOptions& options,
+    ProjectionExtrusionResult& result, const std::function<bool()>& cancelled) {
+    ProjectionWork work;
+    std::array<Vec3, 3> principalAxes{};
+    if (!prepareProjectionAxes(source,options,result,{},work,principalAxes,cancelled)) return false;
+    collectSketchInputs(work,principalAxes,options,result.axes,result.sketchInputs,cancelled);
+    if (cancelled && cancelled()) {
+        result.sketchInputs.clear();
+        result.reason = "Cancelled";
+        return false;
+    }
+    if (!result.sketchInputs.empty()) return true;
+    result.reason = "No supported projection samples for this path";
+    return false;
+}
+
+bool fitProjectionExtrusion(const PointStore& source, const ProjectionExtrusionOptions& options,
+    ProjectionExtrusionResult& result, const std::vector<PrimitiveEvidence>& supplied,
+    const std::function<bool()>& cancelled) {
+    ProjectionWork work;
+    std::array<Vec3, 3> principalAxes{};
+    if (!prepareProjectionAxes(source,options,result,supplied,work,principalAxes,cancelled)) return false;
+    const auto& observations = work.scoringPoints;
+    const auto tolerance = work.tolerance;
+    if (options.collectSketchInputs)
+        collectSketchInputs(work,principalAxes,options,result.axes,result.sketchInputs,cancelled);
 
     const ProgramEvaluator evaluate = [&](const std::vector<ProjectionOperation>& operations) {
-        return trialProgram(operations, observations, tolerance, cancelled);
+        if (cancelled && cancelled()) return std::optional<Fit>{};
+        return trialProgram(operations, observations, tolerance, cancelled, options);
     };
-    std::vector<Program> programs;
-    auto operations = options.maximumOperations > 1 ? blindHoles(points,evidence,tolerance) :
-        std::vector<ProjectionOperation>{};
-    for (auto& report : result.axes) {
-        if (stopped()) return false;
-        const auto frame = makeFrame(center, report.axis);
-        const auto interval = inspectInterval(points, frame, tolerance);
-        report.convexProjectionArea = interval.convexProjectionArea;
-        report.convexEnvelopeVolume = report.convexProjectionArea*(interval.end-interval.start);
-        report.status = "missing_end_face_support";
-        const auto& first = interval.first;
-        const auto& last = interval.last;
-        if (!first || !last || last->depth-first->depth < 3*tolerance) continue;
-        report.status = "invalid_profile_or_solid";
-        std::vector<AxisProposal> proposals;
-        if (!proposeAxisOperations(points, evidence, frame, *first, *last, tolerance,
-                options.maximumOperations > 1, proposals, cancelled)) {
-            result.reason = "Cancelled";
-            return false;
-        }
-        for (auto& proposal : proposals) {
-            auto& operation = proposal.operation;
-            if (operation.operation == ExtrudeOperation::Cut) {
-                operations.push_back(std::move(operation));
-                continue;
-            }
-            if (auto fit = evaluate({operation})) {
-                report.status = "evaluated";
-                programs.push_back({{operation}, std::move(*fit)});
-                if (proposal.allowJoin) {
-                    operation.operation = ExtrudeOperation::Join;
-                    operations.push_back(std::move(operation));
-                }
-            }
-        }
-    }
-    if (stopped()) return false;
-    auto search = searchPrograms(std::move(programs), operations, options.maximumOperations,
-        tolerance, evaluate, cancelled);
+    auto search = searchProjectionPaths(work, principalAxes, options, result.axes, evaluate, cancelled);
     if (search.status == SearchStatus::Cancelled) {
         result.reason = "Cancelled";
         return false;
     }
     if (search.status == SearchStatus::NoValidBase) {
-        result.reason = "No axis produced a valid profile with two supported end faces";
+        result.reason = "No projection path produced a valid extrusion program";
         return false;
     }
     result.quality = search.best.fit.quality;
     result.residualPointIds = std::move(search.best.fit.residuals);
+    const auto& base = search.best.operations.front();
+    if (const auto* plane = std::get_if<Plane3d>(&base.sketch.plane)) {
+        const auto axis = std::find_if(result.axes.begin(), result.axes.end(), [&](const auto& report) {
+            return dot(report.axis, plane->normal) >= options.axisAlignmentCosine;
+        });
+        if (axis != result.axes.end()) result.bestAxisIndex = std::size_t(axis - result.axes.begin());
+    }
     if (search.status == SearchStatus::InsufficientSupport) {
         result.reason = "Best valid program did not explain enough observed surface";
+        if (options.retainRejectedProgram) result.rejectedOperations = std::move(search.best.operations);
         return false;
     }
     result.operations = std::move(search.best.operations);
     return true;
+}
+
+bool inspectProjectionSketches(const PointStore& source, ProjectionExtrusionResult& result,
+    const std::function<bool()>& cancelled) {
+    try {
+        auto options = loadProjectionOptions();
+        options.path = ProjectionPath::SingleAxis;
+        return inspectProjectionSketches(source, options, result, cancelled);
+    } catch (const std::exception& error) {
+        result = {};
+        result.reason = error.what();
+        return false;
+    }
+}
+
+bool fitProjectionExtrusion(const PointStore& source, ProjectionExtrusionResult& result,
+    const std::vector<PrimitiveEvidence>& supplied, const std::function<bool()>& cancelled) {
+    try {
+        return fitProjectionExtrusion(source, loadProjectionOptions(), result, supplied, cancelled);
+    } catch (const std::exception& error) {
+        result = {};
+        result.reason = error.what();
+        return false;
+    }
 }
 
 } // namespace reconstruction

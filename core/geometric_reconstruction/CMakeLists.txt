@@ -13,6 +13,13 @@ find_package(OpenCASCADE REQUIRED)
 find_package(CGAL CONFIG REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
 
+if(NOT TARGET ContourFitting::ContourFitting)
+    add_subdirectory(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/contour_fitting"
+        "${CMAKE_CURRENT_BINARY_DIR}/contour_fitting"
+    )
+endif()
+
 if(NOT TARGET CadModelCore::CadModelCore)
     set(CAD_MODEL_CORE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     add_subdirectory(
@@ -48,11 +55,12 @@ add_library(GeometricReconstruction
     src/recognition/AxisAlignedBoxRecognizer.cpp
     src/recognition/BoxRecognizer.cpp
     src/recognition/ParametricSolidRecognizer.cpp
-    src/recognition/ProjectionExtrusion.cpp
-    src/recognition/ProjectionProfile.cpp
-    src/recognition/ProjectionProposals.cpp
-    src/recognition/ProjectionScoring.cpp
-    src/recognition/ProjectionSearch.cpp
+    src/recognition/projection/ProjectionExtrusion.cpp
+    src/recognition/projection/ProjectionProfile.cpp
+    src/recognition/projection/ProjectionProposals.cpp
+    src/recognition/projection/ProjectionScoring.cpp
+    src/recognition/projection/ProjectionSearch.cpp
+    src/recognition/projection/ProjectionSettings.cpp
     src/recognition/assembly/AssemblyReconstruction.cpp
     src/recognition/assembly/BoundaryGeometry.cpp
     src/recognition/assembly/AnalyticProfileClosure.cpp
@@ -85,6 +93,8 @@ add_library(GeometricReconstruction::GeometricReconstruction ALIAS
     GeometricReconstruction)
 
 target_compile_features(GeometricReconstruction PUBLIC cxx_std_17)
+target_compile_definitions(GeometricReconstruction PRIVATE
+    PARAMCAD_PROJECTION_SOURCE_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/../../apps/ParamCAD Studio/config/projection.conf")
 target_include_directories(GeometricReconstruction PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -93,6 +103,7 @@ target_include_directories(GeometricReconstruction PUBLIC
 target_link_libraries(GeometricReconstruction PUBLIC
     CadModelCore::CadModelCore
     PRIVATE
+    ContourFitting::ContourFitting
     CGAL::CGAL
     Eigen3::Eigen
 )

@@ -37,6 +37,8 @@ public:
     void showPointCloudProperties();
     FeatureDetailsPanel* featureDetailsPanel() const;
     void showFeatureDetails();
+    void showProjectionDebug(QWidget* page);
+    void removeProjectionDebug(QWidget* page);
     ObjectPresentation presentation() const;
     void setPresentation(const ObjectPresentation& state);
 
