@@ -57,13 +57,13 @@ bool writeJsonObject(const QString& filePath, const QJsonObject& object, QString
 {
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        error = QObject::tr("Cannot open %1 for writing").arg(filePath);
+        error = QObject::tr("无法打开 %1 进行写入").arg(filePath);
         return false;
     }
 
     const QByteArray payload = QJsonDocument(object).toJson(QJsonDocument::Indented);
     if (file.write(payload) == -1) {
-        error = QObject::tr("Cannot write %1").arg(filePath);
+        error = QObject::tr("无法写入 %1").arg(filePath);
         return false;
     }
     return true;
@@ -117,7 +117,7 @@ QString CaptureController::createGroupDirectory()
     }
 
     if (!base.mkpath(group)) {
-        m_lastError = tr("Cannot create output directory %1").arg(base.filePath(group));
+        m_lastError = tr("无法创建输出目录 %1").arg(base.filePath(group));
         emit captureFailed(m_lastError);
         return QString();
     }
@@ -130,7 +130,7 @@ bool CaptureController::captureSingle(int width, int height)
         return false;
     }
     if (width <= 0 || height <= 0) {
-        m_lastError = tr("Output size must be positive");
+        m_lastError = tr("输出尺寸必须为正数");
         emit captureFailed(m_lastError);
         return false;
     }
@@ -153,7 +153,7 @@ bool CaptureController::captureSingle(int width, int height)
     shot.camera = camera;
 
     if (!m_viewer->captureImage(directory + QLatin1Char('/') + shot.imageName, width, height)) {
-        m_lastError = tr("Failed to write %1").arg(shot.imageName);
+        m_lastError = tr("写入 %1 失败").arg(shot.imageName);
         emit captureFailed(m_lastError);
         return false;
     }
@@ -176,7 +176,7 @@ bool CaptureController::captureSingle(int width, int height)
     }
 
     m_lastError.clear();
-    emit progressChanged(tr("Captured 1 photo in %1").arg(shot.groupName));
+    emit progressChanged(tr("已在 %1 中拍摄 1 张照片").arg(shot.groupName));
     return true;
 }
 
@@ -190,14 +190,14 @@ bool CaptureController::captureOrbit(const std::vector<OrbitRing>& rings, double
     int totalCount = 0;
     for (const OrbitRing& ring : rings) {
         if (ring.count < 1) {
-            m_lastError = tr("Capture count and output size must be positive");
+            m_lastError = tr("拍摄张数与输出尺寸必须为正数");
             emit captureFailed(m_lastError);
             return false;
         }
         totalCount += ring.count;
     }
     if (totalCount < 1 || width <= 0 || height <= 0) {
-        m_lastError = tr("Capture count and output size must be positive");
+        m_lastError = tr("拍摄张数与输出尺寸必须为正数");
         emit captureFailed(m_lastError);
         return false;
     }
@@ -242,7 +242,7 @@ bool CaptureController::captureOrbit(const std::vector<OrbitRing>& rings, double
             if (!m_viewer->captureImage(directory + QLatin1Char('/') + shot.imageName,
                                         width, height)
                 || !writeSidecar(directory, shot, camera, width, height)) {
-                failure = tr("Failed to capture %1").arg(shot.imageName);
+                failure = tr("拍摄 %1 失败").arg(shot.imageName);
                 break;
             }
 
@@ -250,7 +250,7 @@ bool CaptureController::captureOrbit(const std::vector<OrbitRing>& rings, double
             m_shots.push_back(shot);
             groupShots.push_back(shot);
             emit shotsChanged();
-            emit progressChanged(tr("Capturing %1/%2").arg(taken).arg(totalCount));
+            emit progressChanged(tr("正在拍摄 %1/%2").arg(taken).arg(totalCount));
 
             // Rendering does not pump the event loop, so the progress label and
             // shot list only repaint if events are flushed here. User input stays
@@ -278,13 +278,13 @@ bool CaptureController::captureOrbit(const std::vector<OrbitRing>& rings, double
     emit batchStateChanged(false);
 
     if (!failure.isEmpty() || !manifestWritten) {
-        m_lastError = failure.isEmpty() ? tr("Failed to write manifest.json") : failure;
+        m_lastError = failure.isEmpty() ? tr("写入 manifest.json 失败") : failure;
         emit captureFailed(m_lastError);
         return false;
     }
 
     m_lastError.clear();
-    emit progressChanged(tr("Captured %1 photos in %2").arg(groupShots.size()).arg(groupName));
+    emit progressChanged(tr("已在 %2 中拍摄 %1 张照片").arg(groupShots.size()).arg(groupName));
     return true;
 }
 

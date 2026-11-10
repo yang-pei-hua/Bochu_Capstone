@@ -14,6 +14,7 @@
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
+#include <QCoreApplication>
 
 namespace {
 using Vec = modeling::Vec3;
@@ -27,21 +28,21 @@ PointCloudRegion describe(const reconstruction::PrimitiveEvidence& evidence, int
         region.residual = surface.meanAbsoluteResidual;
         region.confidence = std::clamp(surface.confidence, 0.0, 1.0);
         if constexpr (std::is_same_v<T, reconstruction::PlaneEvidence>) {
-            region.geometry = "plane"; region.name = QStringLiteral("平面 %1").arg(index);
+            region.geometry = "plane"; region.name = QCoreApplication::translate("PointCloudAnalysis", "平面 %1").arg(index);
             region.parameters = {{"normal", array(surface.plane.normal)}, {"offset", surface.plane.offset}};
         } else if constexpr (std::is_same_v<T, reconstruction::SphereEvidence>) {
-            region.geometry = "sphere"; region.name = QStringLiteral("球面 %1").arg(index);
+            region.geometry = "sphere"; region.name = QCoreApplication::translate("PointCloudAnalysis", "球面 %1").arg(index);
             region.parameters = {{"center", array(surface.sphere.center)}, {"radius", surface.sphere.radius}};
         } else if constexpr (std::is_same_v<T, reconstruction::CylinderEvidence>) {
-            region.geometry = "cylinder"; region.name = QStringLiteral("圆柱面 %1").arg(index);
+            region.geometry = "cylinder"; region.name = QCoreApplication::translate("PointCloudAnalysis", "圆柱面 %1").arg(index);
             region.parameters = {{"center", array(surface.cylinder.axisPoint)}, {"axis", array(surface.cylinder.axisDirection)},
                 {"radius", surface.cylinder.radius}, {"axial_min", surface.axialMinimum}, {"axial_max", surface.axialMaximum}};
         } else if constexpr (std::is_same_v<T, reconstruction::ConeEvidence>) {
-            region.geometry = "cone"; region.name = QStringLiteral("圆锥面 %1").arg(index);
+            region.geometry = "cone"; region.name = QCoreApplication::translate("PointCloudAnalysis", "圆锥面 %1").arg(index);
             region.parameters = {{"center", array(surface.cone.apex)}, {"axis", array(surface.cone.axisDirection)},
                 {"angle", surface.cone.openingAngleRadians}, {"axial_min", surface.axialMinimum}, {"axial_max", surface.axialMaximum}};
         } else {
-            region.geometry = "ring"; region.name = QStringLiteral("环面 %1").arg(index);
+            region.geometry = "ring"; region.name = QCoreApplication::translate("PointCloudAnalysis", "环面 %1").arg(index);
             region.parameters = {{"center", array(surface.torus.center)}, {"axis", array(surface.torus.axisDirection)},
                 {"major_radius", surface.torus.majorRadius}, {"minor_radius", surface.torus.minorRadius}};
         }
@@ -56,10 +57,10 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
 {
     PointCloudAnalysisResult result;
     if (cloud.positions.size() < 20 || cloud.positions.size() != originalIds.size()) {
-        result.error = QStringLiteral("至少需要 20 个有效点进行表面识别。"); return result;
+        result.error = QCoreApplication::translate("PointCloudAnalysis", "至少需要 20 个有效点进行表面识别。"); return result;
     }
     if (!std::isfinite(distanceTolerance) || distanceTolerance <= 0) {
-        result.error = QStringLiteral("表面识别距离容差必须大于零。"); return result;
+        result.error = QCoreApplication::translate("PointCloudAnalysis", "表面识别距离容差必须大于零。"); return result;
     }
     const auto source = PointCloudAdapter::toPointStore(cloud, unit);
     auto preprocessing = PointCloudAdapter::preprocessingOptionsFor(cloud);
@@ -77,28 +78,34 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
         result.error = QString::fromStdString(error); return result;
     }
     result.processedPoints = points.size();
-    if (QThread::currentThread()->isInterruptionRequested()) { result.error = "识别已取消。"; return result; }
-    reconstruction::PrimitiveDetectionOptions options;
-    options.plane = PointCloudAdapter::planeOptionsFor(points);
-    options.cylinder = PointCloudAdapter::cylinderOptionsFor(points);
-    const size_t support = std::max<size_t>(20, std::min<size_t>(200, points.size()/200));
+    if (QThread::currentThread()->isInterruptionRequested()) { result.error = QCoreApplication::translate("PointCloudAnalysis", "识别已取消。"); return result; }
+    const auto detectionSettings = reconstruction::loadDetectionSettings();
+    const auto analysisSettings = reconstruction::loadAnalysisSettings();
+    const auto recognitionSettings = reconstruction::loadRecognitionSettings();
+    reconstruction::PrimitiveDetectionOptions options = detectionSettings.options;
+    options.plane = PointCloudAdapter::planeOptionsFor(points, detectionSettings);
+    options.cylinder = PointCloudAdapter::cylinderOptionsFor(points, detectionSettings);
+    const size_t support = std::max<size_t>(detectionSettings.planeSupportFloor,
+        std::min<size_t>(detectionSettings.planeSupportCeiling,
+            points.size() / std::max<std::size_t>(1, detectionSettings.planeSupportDivisor)));
     options.plane.distanceThreshold = distanceTolerance;
-    options.plane.maximumPlanes = geometry.isEmpty() ? 128 : 1;
+    options.plane.maximumPlanes = geometry.isEmpty() ? options.plane.maximumPlanes : 1;
     options.cylinder.distanceThreshold = distanceTolerance;
-    options.cylinder.minimumRadius = distanceTolerance*2;
+    options.cylinder.minimumRadius = distanceTolerance * detectionSettings.cylinderMinimumRadiusToleranceMultiplier;
     options.cylinder.minimumSupportPoints = support;
-    options.cylinder.maximumCylinders = geometry.isEmpty() ? 32 : 1;
+    options.cylinder.maximumCylinders = geometry.isEmpty() ? options.cylinder.maximumCylinders : 1;
     options.sphere.distanceThreshold = distanceTolerance; options.sphere.minimumSupportPoints = support;
-    options.sphere.maximumSpheres = geometry.isEmpty() ? 32 : 1;
+    options.sphere.maximumSpheres = geometry.isEmpty() ? options.sphere.maximumSpheres : 1;
     options.cone.distanceThreshold = distanceTolerance; options.cone.minimumSupportPoints = support;
-    options.cone.maximumCones = geometry.isEmpty() ? 32 : 1;
+    options.cone.maximumCones = geometry.isEmpty() ? options.cone.maximumCones : 1;
     options.torus.distanceThreshold = distanceTolerance; options.torus.minimumSupportPoints = support;
-    options.torus.maximumTori = geometry.isEmpty() ? 32 : 1;
+    options.torus.maximumTori = geometry.isEmpty() ? options.torus.maximumTori : 1;
     if (!geometry.isEmpty()) {
         options.detectPlanes = geometry == "plane"; options.detectCylinders = geometry == "cylinder";
         options.detectSpheres = geometry == "sphere"; options.detectCones = geometry == "cone";
         options.detectTori = geometry == "ring";
-    } else options = reconstruction::recognitionAnalysisOptions(points,options.plane,options.cylinder).detection;
+    } else options = reconstruction::recognitionAnalysisOptions(
+        points,options.plane,options.cylinder,recognitionSettings.analysis).detection;
     const auto seedText=qEnvironmentVariable("PCAD_RANSAC_SEED");
     if(!seedText.isEmpty()) {
         bool valid=false;options.randomSeed=seedText.toUInt(&valid);
@@ -106,8 +113,32 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
     }
     reconstruction::SurfaceAnalysisOptions analysisOptions;
     analysisOptions.detection=options;
-    analysisOptions.recoverResidualSurfaces=geometry.isEmpty();
-    analysisOptions.relations.distanceTolerance=distanceTolerance*4;
+    analysisOptions.recoverResidualSurfaces=geometry.isEmpty() || analysisSettings.recoverResidualSurfaces;
+    analysisOptions.connectivityDistance=analysisSettings.connectivityDistance;
+    analysisOptions.independentFamilies=analysisSettings.independentFamilies;
+    analysisOptions.relations.distanceTolerance=distanceTolerance*analysisSettings.relationDistanceToleranceMultiplier;
+    analysisOptions.relations.adjacentConfidence=analysisSettings.adjacentConfidence;
+    analysisOptions.relations.maximumConfidence=analysisSettings.maximumConfidence;
+    analysisOptions.relations.derivedConfidenceFraction=analysisSettings.derivedConfidenceFraction;
+    analysisOptions.relations.manualPatchOverlapFraction=analysisSettings.manualPatchOverlapFraction;
+    analysisOptions.relations.optimizationMaximumAttempts=analysisSettings.optimizationMaximumAttempts;
+    analysisOptions.relations.optimizationMaximumActiveSurfaces=analysisSettings.optimizationMaximumActiveSurfaces;
+    analysisOptions.relations.optimizationResidualSampleTarget=analysisSettings.optimizationResidualSampleTarget;
+    analysisOptions.relations.constraintWeight=analysisSettings.constraintWeight;
+    analysisOptions.relations.optimizationInlierFraction=analysisSettings.optimizationInlierFraction;
+    analysisOptions.relations.maximumMeanErrorIncreaseMultiplier=analysisSettings.maximumMeanErrorIncreaseMultiplier;
+    analysisOptions.relations.validationToleranceFraction=analysisSettings.validationToleranceFraction;
+    analysisOptions.relations.optimizationIterations=analysisSettings.optimizationIterations;
+    analysisOptions.relations.initialDamping=analysisSettings.initialDamping;
+    analysisOptions.relations.convergenceStep=analysisSettings.convergenceStep;
+    analysisOptions.relations.supportNormalCosine=analysisSettings.supportNormalCosine;
+    analysisOptions.minimumRecoveryRegionPoints=analysisSettings.minimumRecoveryRegionPoints;
+    analysisOptions.recoveryHaloToleranceMultiplier=analysisSettings.recoveryHaloToleranceMultiplier;
+    analysisOptions.recoveryHaloRelationMultiplier=analysisSettings.recoveryHaloRelationMultiplier;
+    analysisOptions.stablePlaneOverlapFraction=analysisSettings.stablePlaneOverlapFraction;
+    analysisOptions.stablePlaneNormalCosine=analysisSettings.stablePlaneNormalCosine;
+    analysisOptions.recoveryConnectivityToleranceMultiplier=analysisSettings.recoveryConnectivityToleranceMultiplier;
+    analysisOptions.recoveryConnectivityAdaptiveMultiplier=analysisSettings.recoveryConnectivityAdaptiveMultiplier;
     reconstruction::SurfaceAnalysisResult analysis;
     if (!reconstruction::analyzeSurfaces(points, analysisOptions, analysis, error, {}, [] {
             return QThread::currentThread()->isInterruptionRequested(); })) {
@@ -147,7 +178,7 @@ PointCloudAnalysisResult analysePointCloud(const PlyCloud& cloud,
     const double supportRadius = std::max(preprocessing.voxelSize*3.0, distanceTolerance*4.0);
     for (size_t i = 0; i < cloud.positions.size(); ++i) {
         if (i % 4096 == 0 && QThread::currentThread()->isInterruptionRequested()) {
-            result.error = "识别已取消。"; return result;
+            result.error = QCoreApplication::translate("PointCloudAnalysis", "识别已取消。"); return result;
         }
         const auto& coordinate = cloud.positions[i];
         if(!std::isfinite(coordinate[0]) || !std::isfinite(coordinate[1]) || !std::isfinite(coordinate[2])) continue;

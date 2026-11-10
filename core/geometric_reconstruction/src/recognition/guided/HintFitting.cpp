@@ -3,7 +3,8 @@
 #include <cmath>
 
 namespace reconstruction::detail::guided {
-PrimitiveDetectionOptions detectionFor(TemplateKind kind, double tolerance)
+PrimitiveDetectionOptions detectionFor(TemplateKind kind, double tolerance,
+                                       const GuidedRecognitionOptions& options)
 {
     PrimitiveDetectionOptions o;
     o.detectPlanes = kind == TemplateKind::Plane;
@@ -14,7 +15,8 @@ PrimitiveDetectionOptions detectionFor(TemplateKind kind, double tolerance)
     o.plane.distanceThreshold = o.cylinder.distanceThreshold = o.sphere.distanceThreshold =
         o.cone.distanceThreshold = o.torus.distanceThreshold = tolerance;
     o.plane.minimumSupportPoints = o.cylinder.minimumSupportPoints = o.sphere.minimumSupportPoints =
-        o.cone.minimumSupportPoints = o.torus.minimumSupportPoints = 20;
+        o.cone.minimumSupportPoints = o.torus.minimumSupportPoints =
+            options.templateDetectionMinimumSupportPoints;
     o.plane.maximumPlanes = o.cylinder.maximumCylinders = o.sphere.maximumSpheres =
         o.cone.maximumCones = o.torus.maximumTori = 1;
     return o;
@@ -27,9 +29,11 @@ std::size_t supportSize(const PrimitiveEvidence& e)
 
 std::vector<PointSample> expandCurvedSupport(const PrimitiveEvidence& evidence,
                                              const std::vector<PointSample>& samples,
-                                             double tolerance)
+                                             double tolerance,
+                                             const GuidedRecognitionOptions& options)
 {
     using namespace math3;
+    const double band = tolerance * options.boundaryToleranceMultiplier;
     return std::visit(
         [&](const auto& surface) {
             using S = std::decay_t<decltype(surface)>;
@@ -38,14 +42,14 @@ std::vector<PointSample> expandCurvedSupport(const PrimitiveEvidence& evidence,
                 modeling::CurvedPrimitiveParams params =
                     modeling::SpherePrimitiveParams{surface.sphere.center, surface.sphere.radius};
                 for (const auto& p : samples)
-                    if (matchesCurvedBoundary(params, p, tolerance * 3))
+                    if (matchesCurvedBoundary(params, p, band, options.boundaryNormalCosine))
                         expanded.push_back(p);
             } else if constexpr (std::is_same_v<S, TorusEvidence>) {
                 modeling::CurvedPrimitiveParams params = modeling::TorusPrimitiveParams{
                     surface.torus.center, surface.torus.axisDirection, surface.torus.majorRadius,
                     surface.torus.minorRadius};
                 for (const auto& p : samples)
-                    if (matchesCurvedBoundary(params, p, tolerance * 3))
+                    if (matchesCurvedBoundary(params, p, band, options.boundaryNormalCosine))
                         expanded.push_back(p);
             } else if constexpr (std::is_same_v<S, CylinderEvidence> ||
                                  std::is_same_v<S, ConeEvidence>) {
@@ -74,22 +78,22 @@ std::vector<PointSample> expandCurvedSupport(const PrimitiveEvidence& evidence,
                     if (expectedRadius < 0)
                         continue;
                     const auto normal = normalized(*p.normal);
-                    if (std::abs(dot(normal, axis)) > 0.98 && rho <= expectedRadius + tolerance * 3)
+                    if (std::abs(dot(normal, axis)) > options.capNormalCosine &&
+                        rho <= expectedRadius + band)
                         disks.push_back({p, axial});
                     if (rho <= 1e-12)
                         continue;
                     const auto outward =
                         normalized(subtract(scale(radial, 1 / rho), scale(axis, slope)));
-                    if (std::abs(rho - expectedRadius) / std::sqrt(1 + slope * slope) >
-                            tolerance * 3 ||
-                        dot(normal, outward) < 0.8)
+                    if (std::abs(rho - expectedRadius) / std::sqrt(1 + slope * slope) > band ||
+                        dot(normal, outward) < options.sideNormalCosine)
                         continue;
                     expanded.push_back(p);
                     minimum = std::min(minimum, axial);
                     maximum = std::max(maximum, axial);
                 }
                 if (!expanded.empty()) {
-                    const double margin = (maximum - minimum) * 0.1 + tolerance * 3;
+                    const double margin = (maximum - minimum) * options.capMarginFraction + band;
                     for (const auto& disk : disks)
                         if (disk.second >= minimum - margin && disk.second <= maximum + margin)
                             expanded.push_back(disk.first);

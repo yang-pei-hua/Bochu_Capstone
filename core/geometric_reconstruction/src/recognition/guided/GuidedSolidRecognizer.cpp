@@ -1,4 +1,5 @@
 #include "detail/GuidedInternal.h"
+#include "reconstruction/settings/ModuleConfig.h"
 #include <algorithm>
 #include <map>
 #include <set>
@@ -9,7 +10,8 @@ using namespace detail::guided;
 namespace detail::guided {
 bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& planes,
     const CylinderDetectionOptions& cylinders, const std::vector<TemplateHint>& hints,
-    TemplateRegions& output, std::string& error, const std::function<bool()>& cancelled) {
+    TemplateRegions& output, std::string& error, const std::function<bool()>& cancelled,
+    const GuidedRecognitionOptions& options) {
     error.clear();
     output = {};
     output.adjustedPoints = points.points();
@@ -36,8 +38,9 @@ bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& p
             if (found != indices.end())
                 selected.push_back(samples[found->second]);
         }
-        if (selected.size() < 20) {
-            error = "At least 20 valid retained points are required for a template";
+        if (selected.size() < options.minimumTemplatePoints) {
+            error = "At least " + std::to_string(options.minimumTemplatePoints) +
+                    " valid retained points are required for a template";
             return false;
         }
         const PointStore subset(selected, points.unit());
@@ -45,7 +48,7 @@ bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& p
         fit.regionId = hint.regionId;
         if (hint.kind == TemplateKind::Box) {
             auto settings = planes;
-            settings.minimumSupportPoints = 20;
+            settings.minimumSupportPoints = options.templateBoxMinimumSupportPoints;
             settings.maximumPlanes = 6;
             BoxCandidate box;
             if (!reconstructBox(subset, settings, {}, box, error)) {
@@ -57,8 +60,9 @@ bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& p
                 const auto found =
                     std::find_if(context.boxes.begin(), context.boxes.end(), [&](const auto& c) {
                         return std::count_if(selected.begin(), selected.end(), [&](const auto& p) {
-                                   return onBox(c.primitive, p, planes.distanceThreshold * 3);
-                               }) >= selected.size() * 0.9;
+                                   return onBox(c.primitive, p,
+                                       planes.distanceThreshold * options.boundaryToleranceMultiplier);
+                               }) >= selected.size() * options.minimumSupportFraction;
                     });
                 if (found == context.boxes.end()) {
                     error = "No observed box boundary supports this template patch";
@@ -71,8 +75,9 @@ bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& p
                 seeds.push_back(plane);
         } else {
             SurfaceAnalysisOptions localOptions;
-            localOptions.detection = detectionFor(hint.kind, planes.distanceThreshold);
-            localOptions.relations.distanceTolerance = planes.distanceThreshold * 4;
+            localOptions.detection = detectionFor(hint.kind, planes.distanceThreshold, options);
+            localOptions.relations.distanceTolerance =
+                planes.distanceThreshold * options.relationToleranceMultiplier;
             SurfaceAnalysisResult proposals;
             if (!analyzeSurfaces(subset, localOptions, proposals, error, {}, cancelled))
                 return false;
@@ -92,8 +97,8 @@ bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& p
                 bool complete = recognizeCurvedSolidFromAnalysis(subset, proposals, settings, solid, incomplete);
                 if (!complete && fit.surface) {
                     const auto expanded =
-                        expandCurvedSupport(*fit.surface, samples, planes.distanceThreshold);
-                    if (expanded.size() >= 20) {
+                        expandCurvedSupport(*fit.surface, samples, planes.distanceThreshold, options);
+                    if (expanded.size() >= options.minimumExpandedPoints) {
                         PointStore local(expanded, points.unit());
                         SurfaceAnalysisResult expandedAnalysis;
                         if (analyzeSurfaces(local, localOptions, expandedAnalysis, incomplete,
@@ -107,8 +112,10 @@ bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& p
                             return std::count_if(
                                        selected.begin(), selected.end(), [&](const auto& p) {
                                            return matchesCurvedBoundary(
-                                               known.primitive, p, planes.distanceThreshold * 3);
-                                       }) >= selected.size() * 0.9;
+                                               known.primitive, p,
+                                               planes.distanceThreshold * options.boundaryToleranceMultiplier,
+                                               options.boundaryNormalCosine);
+                                       }) >= selected.size() * options.minimumSupportFraction;
                         });
                     if (same != closed.end())
                         solid = *same;
@@ -117,7 +124,8 @@ bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& p
                     fit.solid = solid;
                 }
             }
-            if (!fit.solid && (!fit.surface || supportSize(*fit.surface) < selected.size() * 0.7)) {
+            if (!fit.solid && (!fit.surface ||
+                supportSize(*fit.surface) < selected.size() * options.minimumSurfaceSupportFraction)) {
                 error = "Selected points do not support the requested template; correct membership "
                         "or add observations (region=" + std::to_string(hint.regionId) +
                         ", kind=" + std::to_string(static_cast<int>(hint.kind)) +
@@ -162,11 +170,15 @@ bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOption
                             const std::vector<TemplateHint>& hints, GuidedSolidResult& output,
                             std::string& error, const std::function<bool()>& cancelled,
                             const SurfaceAnalysisResult* sharedAnalysis,
-                            const std::vector<SurfaceRelationHint>& relationHints, const PointStore* source)
+                            const std::vector<SurfaceRelationHint>& relationHints, const PointStore* source,
+                            const RecognitionSettings* settings)
 {
     output = {};
+    const GuidedRecognitionOptions& guided = settings
+        ? settings->guided : GuidedRecognitionOptions{};
     if (hints.empty()) {
-        const auto options = recognitionAnalysisOptions(points, planes, cylinders);
+        const auto options = recognitionAnalysisOptions(points, planes, cylinders,
+            settings ? settings->analysis : RecognitionAnalysisSettings{});
         if (sharedAnalysis && analysisInputMatches(points, *sharedAnalysis) &&
             analysisSettingsMatch(options,sharedAnalysis->options)) {
             output.analysis = *sharedAnalysis;
@@ -175,12 +187,13 @@ bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOption
         else if (!analyzeSurfaces(points, options,
                                   output.analysis, error, {}, cancelled)) return false;
         RepairTransactionReport transaction;
-        const bool recognized=recognizeAndRepairParametricSolid(points, output.analysis, output.candidate, error, source, &transaction, relationHints);
+        const bool recognized=recognizeAndRepairParametricSolid(points, output.analysis, output.candidate, error, source, &transaction, relationHints, settings);
         if(!recognized)output.analysis.localFailures=std::move(transaction.failures);
         return recognized;
     }
     TemplateRegions templates;
-    const bool fitted = fitTemplateRegions(points, planes, cylinders, hints, templates, error, cancelled);
+    const bool fitted = fitTemplateRegions(points, planes, cylinders, hints, templates, error,
+                                           cancelled, guided);
     output.fits = std::move(templates.fits);
     output.failedRegionId = templates.failedRegionId;
     if (!fitted) return false;
@@ -192,7 +205,9 @@ bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOption
     std::vector<PointSample> remaining;
     for (const auto& p : templates.adjustedPoints) {
         const bool consumed = std::any_of(closed.begin(), closed.end(), [&](const auto& solid) {
-            return matchesCurvedBoundary(solid.primitive, p, planes.distanceThreshold * 3);
+            return matchesCurvedBoundary(solid.primitive, p,
+                planes.distanceThreshold * guided.boundaryToleranceMultiplier,
+                guided.boundaryNormalCosine);
         });
         if (!consumed)
             remaining.push_back(p);
@@ -212,15 +227,16 @@ bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOption
                                                                     return !remainingIds.count(id);
                                                                 }),
                                                  ids.end());
-                                       return ids.size() < 20;
+                                       return ids.size() < guided.minimumSeedPoints;
                                    },
                                    seed);
                            }),
             seeds.end());
         PointStore local(remaining, points.unit());
-        if (!analyzeSurfaces(local, recognitionAnalysisOptions(local, planes, cylinders),
+        if (!analyzeSurfaces(local, recognitionAnalysisOptions(local, planes, cylinders,
+                                settings ? settings->analysis : RecognitionAnalysisSettings{}),
                              output.analysis, error, seeds, cancelled) ||
-            !recognizeParametricSolidFromAnalysis(local, output.analysis, output.candidate, error)) return false;
+            !recognizeParametricSolidFromAnalysis(local, output.analysis, output.candidate, error, nullptr, nullptr, settings)) return false;
     }
     output.candidate.curvedSolids.insert(output.candidate.curvedSolids.end(), closed.begin(),
                                          closed.end());
@@ -230,7 +246,7 @@ bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOption
         return false;
     }
     if (!verifyHints(points, hints, output.candidate, output.fits, planes.distanceThreshold,
-                     output.failedRegionId, error, cancelled))
+                     output.failedRegionId, error, cancelled, guided))
         return false;
     output.candidate.surfaceCoverage =
         (remaining.size() * output.candidate.surfaceCoverage + (points.size() - remaining.size())) /
@@ -239,7 +255,9 @@ bool reconstructGuidedSolid(const PointStore& points, const PlaneDetectionOption
     if(!relationHints.empty()) {
         // Guided completion may remove a fully observed independent component.
         // Relationship endpoints still refer to the original full snapshot.
-        if(!analyzeSurfaces(points,recognitionAnalysisOptions(points,planes,cylinders),output.analysis,error,{},cancelled) ||
+        if(!analyzeSurfaces(points,recognitionAnalysisOptions(points,planes,cylinders,
+                settings ? settings->analysis : RecognitionAnalysisSettings{}),
+                output.analysis,error,{},cancelled) ||
            !applySurfaceRelationHints(points,relationHints,output.analysis,error)) return false;
     }
     error.clear();

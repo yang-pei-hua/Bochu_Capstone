@@ -81,6 +81,12 @@ struct PrimitiveDetectionOptions {
     bool detectSpheres = true;
     bool detectCones = true;
     bool detectTori = true;
+    // Residual multi-scale recovery policy.
+    std::size_t multiScaleRounds = 3;
+    double multiScaleInitialAlignment = 0.94;
+    double multiScaleRecoveryAlignment = 0.85;
+    std::size_t multiScaleNeighborCount = 24;
+    std::size_t multiScaleMinimumSupportFloor = 3;
     PlaneDetectionOptions plane{};
     CylinderDetectionOptions cylinder{};
     SphereDetectionOptions sphere{};

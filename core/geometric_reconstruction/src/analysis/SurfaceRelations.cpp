@@ -70,11 +70,11 @@ bool inferSurfaceRelations(const PointStore& points, const std::vector<RelationS
         auto append = [&](SurfaceRelationKind kind, double deviation, double c) {
             output.push_back({nodes[i].id, nodes[j].id, kind, deviation, c, true});
         };
-        if (adjacent) append(SurfaceRelationKind::Adjacent, 0, 0.75);
+        if (adjacent) append(SurfaceRelationKind::Adjacent, 0, options.adjacentConfidence);
         if (!nodes[i].evidence || !nodes[j].evidence) continue;
         const auto& a = *nodes[i].evidence; const auto& b = *nodes[j].evidence;
         const auto ka = primitiveKind(a), kb = primitiveKind(b);
-        const double c = std::clamp(std::min({confidence(a), confidence(b), 0.95}), 0.0, 1.0);
+        const double c = std::clamp(std::min({confidence(a), confidence(b), options.maximumConfidence}), 0.0, 1.0);
         const auto u = axis(a), v = axis(b);
         const double alignment = std::abs(dot(u, v));
         if (ka == PrimitiveKind::Plane && kb == PrimitiveKind::Plane) {
@@ -86,7 +86,7 @@ bool inferSurfaceRelations(const PointStore& points, const std::vector<RelationS
                 if (d <= options.distanceTolerance) append(SurfaceRelationKind::Coplanar, d, c);
             } else {
                 if (alignment <= perpendicular) append(SurfaceRelationKind::Perpendicular, std::asin(alignment), c);
-                if (adjacent) append(SurfaceRelationKind::Intersect, 0, c*0.8);
+                if (adjacent) append(SurfaceRelationKind::Intersect, 0, c*options.derivedConfidenceFraction);
             }
         }
         if (axial(ka) && axial(kb) && alignment >= parallel) {
@@ -114,7 +114,7 @@ bool inferSurfaceRelations(const PointStore& points, const std::vector<RelationS
             tangent = std::abs(d-ra-rb) <= options.distanceTolerance ||
                 (d > options.distanceTolerance && std::abs(d-std::abs(ra-rb)) <= options.distanceTolerance);
         }
-        if (tangent && adjacent) append(SurfaceRelationKind::Tangent, 0, c*0.8);
+        if (tangent && adjacent) append(SurfaceRelationKind::Tangent, 0, c*options.derivedConfidenceFraction);
     }
     return true;
 }
@@ -132,7 +132,7 @@ bool applySurfaceRelationHints(const PointStore& points,const std::vector<Surfac
         PatchId best=0;std::size_t overlap=0;
         for(const auto& p:analysis.patches) {
             std::size_t shared=0;for(auto id:p.supportPointIds) shared+=eligible.count(id);
-            if(shared>overlap && shared>=0.6*std::min(eligible.size(),p.supportPointIds.size())) {best=p.id;overlap=shared;}
+            if(shared>overlap && shared>=analysis.options.relations.manualPatchOverlapFraction*std::min(eligible.size(),p.supportPointIds.size())) {best=p.id;overlap=shared;}
         }
         return best;
     };

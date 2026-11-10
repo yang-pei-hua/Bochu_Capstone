@@ -53,6 +53,9 @@ public:
     ObjectPresentation objectPresentation() const { return m_bodyActor.presentation(); }
     bool bodyTextureEnabled() const { return m_bodyActor.textureEnabled(); }
     bool captureImage(const QString& filePath, int width, int height);
+    // Writes the render window at its native pixel size exactly as displayed.
+    // Unlike captureImage(), editing aids stay in the frame.
+    bool captureViewport(const QString& filePath);
 
     // Pixel size of the render window that captureImage() resizes from. It
     // differs from the requested output size, which is what makes the

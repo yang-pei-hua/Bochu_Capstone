@@ -71,8 +71,8 @@ PropertyPanel::PropertyPanel(QWidget* parent)
     // laid out would float at the panel's top-left corner and paint its Transform
     // and Display groups straight over the tab bar.
     m_objectTab->hide();
-    m_tabs->addTab(m_cameraPanel, tr("Camera"));
-    m_tabs->addTab(m_renderPanel, tr("Render"));
+    m_tabs->addTab(m_cameraPanel, tr("相机"));
+    m_tabs->addTab(m_renderPanel, tr("渲染"));
     m_tabs->addTab(m_pointCloudPanel, tr("点云"));
     m_tabs->addTab(m_featureDetailsPanel, tr("特征"));
     // Capture and Reconstruct are tools, not permanent tabs: they are inserted
@@ -96,7 +96,7 @@ void PropertyPanel::showFeatureDetails() { m_tabs->setCurrentWidget(m_featureDet
 
 void PropertyPanel::showProjectionDebug(QWidget* page)
 {
-    if (m_tabs->indexOf(page) < 0) m_tabs->addTab(page, tr("Projection Debug"));
+    if (m_tabs->indexOf(page) < 0) m_tabs->addTab(page, tr("投影调试"));
     m_tabs->setCurrentWidget(page);
 }
 
@@ -133,7 +133,7 @@ void PropertyPanel::showCapturePanel(bool visible)
         if (index < 0) {
             // removeTab() only detaches the page, so the panel keeps its shot
             // list, output directory and orbit settings across a hide/show.
-            m_tabs->addTab(m_capturePanel, tr("Capture"));
+            m_tabs->addTab(m_capturePanel, tr("拍摄"));
         }
         m_tabs->setCurrentWidget(m_capturePanel);
     } else if (index >= 0) {
@@ -152,7 +152,7 @@ void PropertyPanel::showReconstructPanel(bool visible)
     if (visible) {
         if (index < 0) {
             // Detaching keeps the paths and options across a hide/show.
-            m_tabs->addTab(m_reconstructPanel, tr("Reconstruct"));
+            m_tabs->addTab(m_reconstructPanel, tr("重建"));
         }
         m_tabs->setCurrentWidget(m_reconstructPanel);
     } else if (index >= 0) {
@@ -172,7 +172,7 @@ void PropertyPanel::showSketchEntityPanel(bool visible)
         if (index < 0) {
             // Like Capture and Reconstruct, the sketch editor is a tool page: it
             // is detached rather than destroyed so the fields keep their state.
-            m_tabs->addTab(m_sketchEntityPanel, tr("Sketch"));
+            m_tabs->addTab(m_sketchEntityPanel, tr("草图"));
         }
         m_tabs->setCurrentWidget(m_sketchEntityPanel);
     } else if (index >= 0) {
@@ -190,7 +190,7 @@ void PropertyPanel::showObjectProperties()
     // Inserting rather than switching: the page joins the tabs the first time the
     // Model node is picked, and detaching keeps the transform fields across runs.
     if (m_tabs->indexOf(m_objectTab) < 0) {
-        m_tabs->insertTab(0, m_objectTab, tr("Object"));
+        m_tabs->insertTab(0, m_objectTab, tr("对象"));
     }
     m_tabs->setCurrentWidget(m_objectTab);
 }
@@ -215,26 +215,26 @@ QWidget* PropertyPanel::createObjectTab()
         field = makeTransformSpinBox(tab, 0.001, 1000.0, 1.0, 0.1);
     }
 
-    auto* transformGroup = new QGroupBox(tr("Transform"), tab);
+    auto* transformGroup = new QGroupBox(tr("变换"), tab);
     auto* transformForm = new QFormLayout(transformGroup);
-    transformForm->addRow(tr("Position"), makeVectorEditor(m_position, transformGroup));
-    transformForm->addRow(tr("Rotation"), makeVectorEditor(m_rotation, transformGroup));
-    transformForm->addRow(tr("Scale"), makeVectorEditor(m_scale, transformGroup));
+    transformForm->addRow(tr("位置"), makeVectorEditor(m_position, transformGroup));
+    transformForm->addRow(tr("旋转"), makeVectorEditor(m_rotation, transformGroup));
+    transformForm->addRow(tr("缩放"), makeVectorEditor(m_scale, transformGroup));
 
-    m_visible = new QCheckBox(tr("Visible"), tab);
+    m_visible = new QCheckBox(tr("可见"), tab);
     m_visible->setChecked(true);
     m_representation = new QComboBox(tab);
-    m_representation->addItems({tr("Surface"), tr("Wireframe"), tr("Points")});
+    m_representation->addItems({tr("表面"), tr("线框"), tr("点")});
     m_opacity = makeTransformSpinBox(tab, 0.0, 1.0, 1.0, 0.05);
     m_colorButton = new QPushButton(tab);
     updateColorButton();
 
-    auto* displayGroup = new QGroupBox(tr("Display"), tab);
+    auto* displayGroup = new QGroupBox(tr("显示"), tab);
     auto* displayForm = new QFormLayout(displayGroup);
     displayForm->addRow(QString(), m_visible);
-    displayForm->addRow(tr("Representation"), m_representation);
-    displayForm->addRow(tr("Opacity"), m_opacity);
-    displayForm->addRow(tr("Color"), m_colorButton);
+    displayForm->addRow(tr("表示方式"), m_representation);
+    displayForm->addRow(tr("不透明度"), m_opacity);
+    displayForm->addRow(tr("颜色"), m_colorButton);
 
     auto* layout = new QVBoxLayout(tab);
     layout->addWidget(transformGroup);
@@ -287,7 +287,7 @@ void PropertyPanel::setPresentation(const ObjectPresentation& state)
 
 void PropertyPanel::chooseObjectColor()
 {
-    const QColor color = QColorDialog::getColor(m_objectColor, this, tr("Object Color"));
+    const QColor color = QColorDialog::getColor(m_objectColor, this, tr("对象颜色"));
     if (!color.isValid()) {
         return;
     }

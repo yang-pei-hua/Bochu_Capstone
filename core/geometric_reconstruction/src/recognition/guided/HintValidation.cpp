@@ -36,8 +36,10 @@ GeomAbs_SurfaceType faceKind(TemplateKind kind)
 bool verifyHints(const PointStore& points, const std::vector<TemplateHint>& hints,
                  const CompoundCandidate& candidate, const std::vector<TemplateFit>& fits,
                  double tolerance, int& failed, std::string& error,
-                 const std::function<bool()>& cancelled)
+                 const std::function<bool()>& cancelled,
+                 const GuidedRecognitionOptions& options)
 {
+    const double band = tolerance * options.boundaryToleranceMultiplier;
     modeling::ModelingCore model;
     const auto built = commitCompoundCandidate(candidate, model);
     if (!built.success) {
@@ -64,7 +66,8 @@ bool verifyHints(const PointStore& points, const std::vector<TemplateHint>& hint
                 }
                 ++total;
                 if (fits[h].solid &&
-                    matchesCurvedBoundary(fits[h].solid->primitive, point, tolerance * 3)) {
+                    matchesCurvedBoundary(fits[h].solid->primitive, point, band,
+                                          options.boundaryNormalCosine)) {
                     ++matched;
                     continue;
                 }
@@ -74,13 +77,13 @@ bool verifyHints(const PointStore& points, const std::vector<TemplateHint>& hint
                         .Vertex();
                 for (const auto& face : faces[faceKind(hints[h].kind)]) {
                     BRepExtrema_DistShapeShape distance(vertex, face);
-                    if (distance.IsDone() && distance.Value() <= tolerance * 3) {
+                    if (distance.IsDone() && distance.Value() <= band) {
                         ++matched;
                         break;
                     }
                 }
             }
-        if (!total || matched < total * 0.9) {
+        if (!total || matched < total * options.minimumMatchFraction) {
             failed = hints[h].regionId;
             error = "The complete CAD boundary conflicts with the selected template (support " +
                     std::to_string(matched) + "/" + std::to_string(total) + ")";

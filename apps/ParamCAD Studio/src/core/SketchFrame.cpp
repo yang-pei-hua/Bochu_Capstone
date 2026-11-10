@@ -1,4 +1,5 @@
 #include "core/SketchFrame.h"
+#include <QCoreApplication>
 #include <modeling/SemanticFaces.h>
 
 #include <cmath>
@@ -132,22 +133,22 @@ QString planeLabel(const modeling::SketchPlaneReference& reference)
     if (const auto* datum = std::get_if<modeling::DatumPlaneReference>(&reference)) {
         switch (datum->plane) {
         case modeling::DatumPlane::YZ:
-            return QStringLiteral("YZ Plane");
+            return QCoreApplication::translate("SketchFrame", "YZ 平面");
         case modeling::DatumPlane::XZ:
-            return QStringLiteral("XZ Plane");
+            return QCoreApplication::translate("SketchFrame", "XZ 平面");
         case modeling::DatumPlane::XY:
         default:
-            return QStringLiteral("XY Plane");
+            return QCoreApplication::translate("SketchFrame", "XY 平面");
         }
     }
     if (std::holds_alternative<modeling::OffsetDatumPlane>(reference)) {
-        return QStringLiteral("Offset Plane");
+        return QCoreApplication::translate("SketchFrame", "偏移平面");
     }
     if (std::holds_alternative<modeling::Plane3d>(reference)) {
-        return QStringLiteral("Face Plane");
+        return QCoreApplication::translate("SketchFrame", "面平面");
     }
     const auto& face = std::get<modeling::FaceReference>(reference);
-    return QStringLiteral("%1 of #%2").arg(QString::fromLatin1(modeling::faceRoleName(face.role))).arg(face.ownerFeature);
+    return QCoreApplication::translate("SketchFrame", "%1（特征 #%2）").arg(QString::fromLatin1(modeling::faceRoleName(face.role))).arg(face.ownerFeature);
 }
 
 bool resolveSketchFrame(const std::vector<modeling::Feature>& features,

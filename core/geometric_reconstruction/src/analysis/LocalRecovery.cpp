@@ -48,13 +48,15 @@ bool retrieveLocalObservations(const PointStore& working, const PointStore& sour
     std::vector<PointSample> samples;
     for(const auto& p:working.points()) if(region.count(p.id)) samples.push_back(p);
     const double tolerance=analysis.options.detection.plane.distanceThreshold;
-    const double halo = searchHalo.value_or(region.size() < 20
-        ? std::max(tolerance*2, analysis.options.relations.distanceTolerance*16) : tolerance*2);
+    const double halo = searchHalo.value_or(region.size() < analysis.options.minimumRecoveryRegionPoints
+        ? std::max(tolerance*analysis.options.recoveryHaloToleranceMultiplier,
+                   analysis.options.relations.distanceTolerance*analysis.options.recoveryHaloRelationMultiplier)
+        : tolerance*analysis.options.recoveryHaloToleranceMultiplier);
     output.searchHalo = halo;
     std::vector<PlaneEvidence> stablePlanes;
     for(const auto& e:analysis.surfaces)if(const auto* plane=std::get_if<PlaneEvidence>(&e)) {
         std::size_t overlap=0;for(auto id:plane->supportPointIds)overlap+=region.count(id);
-        if(overlap<plane->supportPointIds.size()*0.1)stablePlanes.push_back(*plane);
+        if(overlap<plane->supportPointIds.size()*analysis.options.stablePlaneOverlapFraction)stablePlanes.push_back(*plane);
     }
     for(const auto& p:source.points()) {
         if(region.count(p.id)) continue;
@@ -66,16 +68,19 @@ bool retrieveLocalObservations(const PointStore& working, const PointStore& sour
         if(!observation.normal || !observation.normalOrientationKnown) continue;
         bool stableObservation=false;
         for(const auto& plane:stablePlanes) {
-            if(surfaceResidual(plane,q)<=tolerance*2 && std::abs(dot(normalized(*observation.normal),normalized(plane.plane.normal)))>=0.95) {stableObservation=true;break;}
+            if(surfaceResidual(plane,q)<=tolerance*analysis.options.recoveryHaloToleranceMultiplier &&
+               std::abs(dot(normalized(*observation.normal),normalized(plane.plane.normal)))>=analysis.options.stablePlaneNormalCosine) {stableObservation=true;break;}
         }
         if(stableObservation)continue;
         samples.push_back(observation); output.recoveredPointIds.push_back(p.id);
     }
-    if(region.size()<20 && samples.size()>region.size()) {
+    if(region.size()<analysis.options.minimumRecoveryRegionPoints && samples.size()>region.size()) {
         PointStore neighborhood(samples,working.unit());std::vector<PointId> available;
         for(const auto& p:samples)available.push_back(p.id);
         std::unordered_set<PointId> connected;
-        for(const auto& component:connectedPointComponents(neighborhood,available,analysis.options.relations.distanceTolerance*2,analysis.options.relations.distanceTolerance*4)) {
+        for(const auto& component:connectedPointComponents(neighborhood,available,
+                analysis.options.relations.distanceTolerance*analysis.options.recoveryConnectivityToleranceMultiplier,
+                analysis.options.relations.distanceTolerance*analysis.options.recoveryConnectivityAdaptiveMultiplier)) {
             if(std::any_of(component.begin(),component.end(),[&](auto id){return region.count(id)>0;}))connected.insert(component.begin(),component.end());
         }
         samples.erase(std::remove_if(samples.begin(),samples.end(),[&](const auto& p){return !connected.count(p.id);}),samples.end());

@@ -34,7 +34,7 @@ SketchEntityPanel::SketchEntityPanel(QWidget* parent)
     outer->setContentsMargins(8, 8, 8, 8);
     outer->setSpacing(8);
 
-    m_title = new QLabel(tr("No entity selected"), this);
+    m_title = new QLabel(tr("未选择图元"), this);
     m_title->setWordWrap(true);
     outer->addWidget(m_title);
 
@@ -42,7 +42,7 @@ SketchEntityPanel::SketchEntityPanel(QWidget* parent)
     // showing the fields of every kind at once would only invite mis-edits.
     auto* emptyPage = new QWidget(m_stack);
     auto* emptyLayout = new QVBoxLayout(emptyPage);
-    emptyLayout->addWidget(new QLabel(tr("Select an entity in the sketch list."),
+    emptyLayout->addWidget(new QLabel(tr("请在草图列表中选择一个图元。"),
                                       emptyPage));
     emptyLayout->addStretch();
 
@@ -55,13 +55,13 @@ SketchEntityPanel::SketchEntityPanel(QWidget* parent)
 
     auto* linePage = new QWidget(m_stack);
     auto* lineForm = new QFormLayout(linePage);
-    m_lineX1 = addField(linePage, lineForm, tr("Start X"), 0.0, -1000.0,
+    m_lineX1 = addField(linePage, lineForm, tr("起点 X"), 0.0, -1000.0,
                         QStringLiteral("sketchLineX1"));
-    m_lineY1 = addField(linePage, lineForm, tr("Start Y"), 0.0, -1000.0,
+    m_lineY1 = addField(linePage, lineForm, tr("起点 Y"), 0.0, -1000.0,
                         QStringLiteral("sketchLineY1"));
-    m_lineX2 = addField(linePage, lineForm, tr("End X"), 10.0, -1000.0,
+    m_lineX2 = addField(linePage, lineForm, tr("终点 X"), 10.0, -1000.0,
                         QStringLiteral("sketchLineX2"));
-    m_lineY2 = addField(linePage, lineForm, tr("End Y"), 0.0, -1000.0,
+    m_lineY2 = addField(linePage, lineForm, tr("终点 Y"), 0.0, -1000.0,
                         QStringLiteral("sketchLineY2"));
 
     auto* rectPage = new QWidget(m_stack);
@@ -70,18 +70,18 @@ SketchEntityPanel::SketchEntityPanel(QWidget* parent)
                        QStringLiteral("sketchRectX"));
     m_rectY = addField(rectPage, rectForm, tr("Y"), 0.0, -1000.0,
                        QStringLiteral("sketchRectY"));
-    m_rectWidth = addField(rectPage, rectForm, tr("Width"), 20.0, 0.001,
+    m_rectWidth = addField(rectPage, rectForm, tr("宽度"), 20.0, 0.001,
                            QStringLiteral("sketchRectWidth"));
-    m_rectHeight = addField(rectPage, rectForm, tr("Height"), 20.0, 0.001,
+    m_rectHeight = addField(rectPage, rectForm, tr("高度"), 20.0, 0.001,
                             QStringLiteral("sketchRectHeight"));
 
     auto* circlePage = new QWidget(m_stack);
     auto* circleForm = new QFormLayout(circlePage);
-    m_circleX = addField(circlePage, circleForm, tr("Center X"), 0.0, -1000.0,
+    m_circleX = addField(circlePage, circleForm, tr("中心 X"), 0.0, -1000.0,
                          QStringLiteral("sketchCircleX"));
-    m_circleY = addField(circlePage, circleForm, tr("Center Y"), 0.0, -1000.0,
+    m_circleY = addField(circlePage, circleForm, tr("中心 Y"), 0.0, -1000.0,
                          QStringLiteral("sketchCircleY"));
-    m_circleRadius = addField(circlePage, circleForm, tr("Radius"), 5.0, 0.001,
+    m_circleRadius = addField(circlePage, circleForm, tr("半径"), 5.0, 0.001,
                               QStringLiteral("sketchCircleRadius"));
 
     m_stack->addWidget(emptyPage);
@@ -123,7 +123,7 @@ void SketchEntityPanel::setEntity(const modeling::SketchEntity* entity)
 {
     if (entity == nullptr) {
         m_currentId = modeling::kInvalidSketchEntityId;
-        m_title->setText(tr("No entity selected"));
+        m_title->setText(tr("未选择图元"));
         m_stack->setCurrentIndex(0);
         return;
     }

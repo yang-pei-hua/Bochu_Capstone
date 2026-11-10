@@ -218,7 +218,7 @@ void PointCloudWorkspaceController::connectUi()
         updateCadActions();
         if (m_document->hasCloud()) m_ui.scenePanel->updateNodeLabel(SceneNodeType::PointCloud,
             workspaceTr("%1 (%2 有效点)").arg(QFileInfo(m_document->sourcePath()).fileName()).arg(m_document->pointCount()));
-        else m_ui.scenePanel->updateNodeLabel(SceneNodeType::PointCloud, workspaceTr("PointCloud"));
+        else m_ui.scenePanel->updateNodeLabel(SceneNodeType::PointCloud, workspaceTr("点云"));
         m_ui.scenePanel->setNodeState(SceneNodeType::PointCloud, m_document->hasCloud(),
                                      m_ui.viewer->pointCloudVisible());
     };
@@ -313,8 +313,8 @@ void PointCloudWorkspaceController::connectUi()
             this, [this, reconstructPanel](int stage, int totalStages, const QString& label) {
                 reconstructPanel->setProgress(stage, totalStages);
                 reconstructPanel->setStatusText(
-                    workspaceTr("Stage %1/%2: %3").arg(stage).arg(totalStages).arg(label));
-                emit statusMessage(workspaceTr("Reconstruction %1/%2: %3")
+                    workspaceTr("阶段 %1/%2：%3").arg(stage).arg(totalStages).arg(label));
+                emit statusMessage(workspaceTr("重建 %1/%2：%3")
                                              .arg(stage).arg(totalStages).arg(label), 4000);
             });
     connect(m_reconstructionController, &ReconstructionController::logMessage,
@@ -330,7 +330,7 @@ void PointCloudWorkspaceController::connectUi()
                     return;
                 }
                 emit logError(message);
-                QMessageBox::warning(m_dialogParent, workspaceTr("Point Cloud Reconstruction"), message);
+                QMessageBox::warning(m_dialogParent, workspaceTr("点云重建"), message);
             });
     connect(m_reconstructionController, &ReconstructionController::finished,
             this, &PointCloudWorkspaceController::onReconstructionFinished);
@@ -344,7 +344,7 @@ void PointCloudWorkspaceController::startReconstruction(const ReconstructRequest
         panel->setBusy(false);
         const QString error = m_reconstructionController->lastError();
         emit logError(error);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Point Cloud Reconstruction"), error);
+        QMessageBox::warning(m_dialogParent, workspaceTr("点云重建"), error);
     }
 }
 
@@ -358,7 +358,7 @@ void PointCloudWorkspaceController::onReconstructionFinished(const QString& poin
     if (!m_document->load(pointCloudPath, error)) {
         emit logError(error);
         panel->setStatusText(error);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Point Cloud Reconstruction"), error);
+        QMessageBox::warning(m_dialogParent, workspaceTr("点云重建"), error);
         return;
     }
 
@@ -371,9 +371,9 @@ void PointCloudWorkspaceController::onReconstructionFinished(const QString& poin
         SceneNodeType::PointCloud,
         QStringLiteral("%1 (%2 points)").arg(QFileInfo(pointCloudPath).fileName()).arg(pointCount));
 
-    panel->setStatusText(workspaceTr("Point cloud loaded: %1 points (%2)")
+    panel->setStatusText(workspaceTr("点云已载入：%1 个点（%2）")
                              .arg(pointCount)
-                             .arg(dense ? workspaceTr("dense") : workspaceTr("sparse")));
+                             .arg(dense ? workspaceTr("稠密") : workspaceTr("稀疏")));
     // Fixed wording: the UI automation script asserts on this exact line.
     emit logInfo(workspaceTr("Point Cloud loaded: %1 points").arg(pointCount));
 
@@ -390,8 +390,8 @@ void PointCloudWorkspaceController::openPointCloud()
 {
     // A cloud on disk carries no capture metadata, so no scale warning applies;
     // the file is read straight into the same actor the pipeline feeds.
-    const QString filePath = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("Open Point Cloud"), ProjectPaths::outputsRoot(),
-        workspaceTr("Point Cloud Files (*.ply)"));
+    const QString filePath = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("打开点云"), ProjectPaths::outputsRoot(),
+        workspaceTr("点云文件 (*.ply)"));
     if (filePath.isEmpty()) {
         return;
     }
@@ -405,7 +405,7 @@ void PointCloudWorkspaceController::loadPointCloudFromFile(const QString& filePa
     QString error;
     if (!m_document->load(filePath, error)) {
         emit logError(error);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Open Point Cloud"), error);
+        QMessageBox::warning(m_dialogParent, workspaceTr("打开点云"), error);
         return;
     }
 
@@ -420,10 +420,10 @@ void PointCloudWorkspaceController::loadPointCloudFromFile(const QString& filePa
     m_ui.scenePanel->updateNodeLabel(
         SceneNodeType::PointCloud,
         QStringLiteral("%1 (%2 points)").arg(info.fileName()).arg(pointCount));
-    emit statusTextChanged(workspaceTr("Ready | Point Cloud: %1 | Camera: %2")
+    emit statusTextChanged(workspaceTr("就绪 | 点云：%1 | 相机：%2")
                                .arg(info.fileName(),
                                     m_ui.viewer->cameraParameters().parallelProjection
-                                        ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
+                                        ? workspaceTr("正交投影") : workspaceTr("透视投影")));
     emit logInfo(workspaceTr("Point cloud loaded from %1: %2 points").arg(info.fileName()).arg(pointCount));
     m_ui.viewer->setFocus(Qt::OtherFocusReason);
 }
@@ -442,9 +442,8 @@ std::optional<reconstruction::LengthUnit> PointCloudWorkspaceController::confirm
 {
     const auto sourceUnit = cloudUnit(*m_document);
     if (sourceUnit != reconstruction::LengthUnit::Arbitrary) return sourceUnit;
-    const auto choice = QMessageBox::warning(m_dialogParent, workspaceTr("Unknown point-cloud scale"),
-        workspaceTr("This point cloud has no metric scale metadata. Continuing will interpret one "
-                    "source unit as one millimetre in the CAD model. Continue with that explicit assumption?"),
+    const auto choice = QMessageBox::warning(m_dialogParent, workspaceTr("点云尺度未知"),
+        workspaceTr("该点云没有公制尺度元数据。继续将把 1 个源单位视为 CAD 模型中的 1 毫米。是否按此明确假设继续？"),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (choice != QMessageBox::Yes) return std::nullopt;
     emit logWarning(workspaceTr("Point-cloud scale is unknown; using the user-approved "
@@ -560,7 +559,7 @@ void PointCloudWorkspaceController::startCadReconstruction(bool projectionFallba
     if (m_cadTask->isRunning() || m_startingCad || m_analysisThread) return;
     if (m_document->sourcePath().isEmpty()) {
         emit logWarning(workspaceTr("Load a point cloud before reconstructing a model."));
-        emit statusMessage(workspaceTr("No point cloud is loaded"), 3500);
+        emit statusMessage(workspaceTr("尚未载入点云"), 3500);
         return;
     }
 
@@ -683,7 +682,7 @@ void PointCloudWorkspaceController::updateCadActions()
 {
     const bool running = m_cadTask->isRunning();
     const bool busy = running || m_startingCad || m_analysisThread;
-    m_ui.reconstructCadAction->setText(workspaceTr("Reconstruct CAD"));
+    m_ui.reconstructCadAction->setText(workspaceTr("重建 CAD"));
     m_ui.reconstructCadAction->setToolTip(workspaceTr("仅使用点云的位置、法向和用户模板拟合 CAD，不读取源模型或拓扑对应表。"));
     m_ui.reconstructCadAction->setEnabled(!busy && m_document->hasCloud()
                                          && m_document->pointCount() > 0);
@@ -796,21 +795,21 @@ void PointCloudWorkspaceController::showProjectionDebugResult(const CadReconstru
     layout->addWidget(text, 1);
     auto* buttons = new QDialogButtonBox(report);
     layout->addWidget(buttons);
-    auto* save = buttons->addButton(workspaceTr("Save Report…"), QDialogButtonBox::ActionRole);
+    auto* save = buttons->addButton(workspaceTr("保存报告…"), QDialogButtonBox::ActionRole);
     const auto filename = QFileInfo(m_cadSourcePath).completeBaseName() + QStringLiteral(".projection.json");
     connect(save, &QPushButton::clicked, report, [report, bytes, filename] {
-        const auto path = QFileDialog::getSaveFileName(report, workspaceTr("Save Projection Debug Report"),
-            filename, workspaceTr("JSON Files (*.json)"));
+        const auto path = QFileDialog::getSaveFileName(report, workspaceTr("保存投影调试报告"),
+            filename, workspaceTr("JSON 文件 (*.json)"));
         if (path.isEmpty()) return;
         QSaveFile file(path);
         if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
-            QMessageBox::warning(report, workspaceTr("Save Projection Debug Report"), file.errorString());
+            QMessageBox::warning(report, workspaceTr("保存投影调试报告"), file.errorString());
     });
 
     if (accepted) {
-        auto* apply = buttons->addButton(workspaceTr("Apply to CAD"), QDialogButtonBox::ActionRole);
+        auto* apply = buttons->addButton(workspaceTr("应用到 CAD"), QDialogButtonBox::ActionRole);
         apply->setObjectName(QStringLiteral("applyProjectionDebugCadButton"));
-        apply->setToolTip(workspaceTr("Replace previous reconstructed CAD with this projection result"));
+        apply->setToolTip(workspaceTr("用本次投影结果替换之前的重建 CAD"));
         reconstruction::CompoundCandidate candidate;
         candidate.projectionPrograms.push_back(debug.fit.operations);
         connect(apply, &QPushButton::clicked, this,
@@ -819,12 +818,12 @@ void PointCloudWorkspaceController::showProjectionDebugResult(const CadReconstru
                 if (m_cadTask->isRunning() || m_startingCad || m_analysisThread
                     || m_document->revision() != cloudRevision || m_document->sourcePath() != sourcePath
                     || m_modelingController->revision() != modelRevision || m_ui.viewer->bodyRevision() != bodyRevision) {
-                    QMessageBox::warning(report, workspaceTr("Apply to CAD"),
-                        workspaceTr("The point cloud or CAD workspace has changed or is busy. Run projection again."));
+                    QMessageBox::warning(report, workspaceTr("应用到 CAD"),
+                        workspaceTr("点云或 CAD 工作区已变化或正忙，请重新运行投影。"));
                     return;
                 }
                 if (!m_modelingController->commitReconstructedCompound(candidate)) {
-                    QMessageBox::warning(report, workspaceTr("Apply to CAD"), m_modelingController->lastError());
+                    QMessageBox::warning(report, workspaceTr("应用到 CAD"), m_modelingController->lastError());
                     return;
                 }
                 apply->setEnabled(false);
@@ -911,7 +910,7 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
                 .arg(result.assembly->candidate.projectionPrograms.size()));
     }
     if (result.outcome == CadReconstructionResult::Outcome::Unsupported) {
-        QString message = workspaceTr("No supported solid could be reconstructed in %1: %2")
+        QString message = workspaceTr("在 %1 中未能重建受支持的实体：%2")
                                     .arg(QFileInfo(m_cadSourcePath).fileName(), result.error);
         if(const auto* region=m_document->selection().region(result.failedRegionId))
             message=workspaceTr("模板「%1」重建失败，模型保持原状：%2").arg(region->name,result.error);
@@ -923,11 +922,11 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
     }
     if (result.outcome != CadReconstructionResult::Outcome::Success) {
         const QString message = result.outcome == CadReconstructionResult::Outcome::PreprocessingFailed
-            ? workspaceTr("Point-cloud preprocessing failed: %1").arg(result.error)
-            : workspaceTr("CAD reconstruction failed: %1").arg(result.error);
+            ? workspaceTr("点云预处理失败：%1").arg(result.error)
+            : workspaceTr("CAD 重建失败：%1").arg(result.error);
         reportStatus(message);
         emit logError(message);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Reconstruct CAD"), message);
+        QMessageBox::warning(m_dialogParent, workspaceTr("重建 CAD"), message);
         return;
     }
     const auto& candidate = result.candidate;
@@ -935,7 +934,7 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
         const QString message = m_modelingController->lastError();
         reportStatus(message);
         emit logError(message);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Reconstruct CAD"), message);
+        QMessageBox::warning(m_dialogParent, workspaceTr("重建 CAD"), message);
         return;
     }
     // Derived results share the user's edit history instead of adding undo
@@ -950,17 +949,17 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
     }
 
     emit logInfo((result.assembly?workspaceTr("重建结果：%1 个长方体，%2 个棱柱，%3 个通孔，闭合候选所属观测点比例 %4，%5 个解析曲面实体，%6 个有限边界实体"):
-                workspaceTr("Reconstructed solid: %1 boxes, %2 polygonal prisms, %3 through holes, surface coverage %4, %5 curved solids, %6 finite shells"))
+                workspaceTr("重建实体：%1 个长方体，%2 个多边形棱柱，%3 个通孔，表面覆盖率 %4，%5 个曲面实体，%6 个有限壳体"))
                 .arg(candidate.boxes.size()).arg(candidate.prisms.size())
                 .arg(candidate.throughHoles.size()).arg(candidate.surfaceCoverage, 0, 'f', 3).arg(candidate.curvedSolids.size()).arg(candidate.profileBodies.size()));
     QString curvedName;
     if (!candidate.curvedSolids.empty()) {
         curvedName=std::visit([&](const auto& params)->QString {
             using P=std::decay_t<decltype(params)>;
-            if constexpr(std::is_same_v<P,modeling::SpherePrimitiveParams>)return workspaceTr("Sphere");
-            else if constexpr(std::is_same_v<P,modeling::CylinderPrimitiveParams>)return workspaceTr("Cylinder");
-            else if constexpr(std::is_same_v<P,modeling::ConePrimitiveParams>)return workspaceTr("Cone / Frustum");
-            else return workspaceTr("Torus");
+            if constexpr(std::is_same_v<P,modeling::SpherePrimitiveParams>)return workspaceTr("球");
+            else if constexpr(std::is_same_v<P,modeling::CylinderPrimitiveParams>)return workspaceTr("圆柱");
+            else if constexpr(std::is_same_v<P,modeling::ConePrimitiveParams>)return workspaceTr("圆锥 / 圆台");
+            else return workspaceTr("圆环");
         },candidate.curvedSolids.front().primitive);
     }
     for (const reconstruction::ThroughHoleCandidate& hole : candidate.throughHoles) {
@@ -969,11 +968,11 @@ void PointCloudWorkspaceController::onCadReconstructionFinished(const CadReconst
                     .arg(hole.bodyThickness, 0, 'f', 3)
                     .arg(hole.confidence, 0, 'f', 3));
     }
-    emit statusTextChanged(curvedName.isEmpty() ? workspaceTr("Ready | Model: Reconstructed Solid (%1 boxes, %2 prisms) | Camera: %3")
+    emit statusTextChanged(curvedName.isEmpty() ? workspaceTr("就绪 | 模型：重建实体（%1 个长方体，%2 个棱柱） | 相机：%3")
                                .arg(candidate.boxes.size()).arg(candidate.prisms.size())
                                .arg(m_ui.viewer->cameraParameters().parallelProjection
-                                         ? workspaceTr("Orthographic") : workspaceTr("Perspective")) :
-                          workspaceTr("Ready | Model: %1 | Camera: %2").arg(curvedName).arg(m_ui.viewer->cameraParameters().parallelProjection ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
+                                         ? workspaceTr("正交投影") : workspaceTr("透视投影")) :
+                          workspaceTr("就绪 | 模型：%1 | 相机：%2").arg(curvedName).arg(m_ui.viewer->cameraParameters().parallelProjection ? workspaceTr("正交投影") : workspaceTr("透视投影")));
     reportStatus(result.assembly?workspaceTr("已显示部件候选并更新可闭合部分的 CAD；未闭合部分保留在点云集合中。"):
         workspaceTr("CAD 重建完成，已更新参数化模型。"));
     m_analyseAfterCad = !result.assembly && m_document->selection().regionPointCount(0) >= 20;

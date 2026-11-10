@@ -21,7 +21,7 @@ CapturePanel::CapturePanel(QWidget* parent)
     m_directoryLabel->setObjectName(QStringLiteral("captureBaseDir"));
     m_directoryLabel->setReadOnly(true);
 
-    m_browseButton = new QPushButton(tr("Browse..."), this);
+    m_browseButton = new QPushButton(tr("浏览…"), this);
     m_browseButton->setObjectName(QStringLiteral("captureBrowseButton"));
 
     auto* directoryRow = new QWidget(this);
@@ -31,9 +31,9 @@ CapturePanel::CapturePanel(QWidget* parent)
     directoryLayout->addWidget(m_directoryLabel, 1);
     directoryLayout->addWidget(m_browseButton);
 
-    auto* outputGroup = new QGroupBox(tr("Output"), this);
+    auto* outputGroup = new QGroupBox(tr("输出"), this);
     auto* outputForm = new QFormLayout(outputGroup);
-    outputForm->addRow(tr("Base Directory"), directoryRow);
+    outputForm->addRow(tr("基础目录"), directoryRow);
 
     m_distance = new QDoubleSpinBox(this);
     m_distance->setObjectName(QStringLiteral("captureDistance"));
@@ -42,28 +42,26 @@ CapturePanel::CapturePanel(QWidget* parent)
     m_distance->setSingleStep(1.0);
     m_distance->setValue(OrbitParameters{}.distance);
 
-    auto* orbitGroup = new QGroupBox(tr("Spherical Capture"), this);
+    auto* orbitGroup = new QGroupBox(tr("球面拍摄"), this);
     auto* orbitForm = new QFormLayout(orbitGroup);
-    orbitForm->addRow(tr("Distance"), m_distance);
+    orbitForm->addRow(tr("距离"), m_distance);
     auto* gridSummary = new QLabel(
-        tr("62 views: longitude every 30° at latitudes -60°, -30°, 0°, "
-           "+30°, +60°, plus one top and one bottom view. Every camera "
-           "looks at the model centroid."),
+        tr("共 62 个视角：经度每 30°，纬度取 -60°、-30°、0°、+30°、+60°，另加一个顶视图和一个底视图；所有相机均朝向模型质心。"),
         this);
     gridSummary->setWordWrap(true);
     orbitForm->addRow(gridSummary);
 
-    m_photoButton = new QPushButton(tr("Capture Photo"), this);
+    m_photoButton = new QPushButton(tr("拍摄照片"), this);
     m_photoButton->setObjectName(QStringLiteral("capturePhotoButton"));
     m_photoButton->setProperty("primary", true);
 
-    m_orbitButton = new QPushButton(tr("Capture 62 Views"), this);
+    m_orbitButton = new QPushButton(tr("拍摄 62 个视角"), this);
     m_orbitButton->setObjectName(QStringLiteral("captureOrbitButton"));
 
     // The render panel resizes the viewport image to the configured output size
     // without preserving the window's aspect ratio, so keep the user informed.
     m_aspectHint = new QLabel(
-        tr("Images are resized to the Render tab output size."), this);
+        tr("图像会缩放到「渲染」页的输出尺寸。"), this);
     m_aspectHint->setWordWrap(true);
     m_aspectHint->setEnabled(false);
 
@@ -74,8 +72,8 @@ CapturePanel::CapturePanel(QWidget* parent)
     m_shots = new QTreeWidget(this);
     m_shots->setObjectName(QStringLiteral("captureShotList"));
     m_shots->setColumnCount(5);
-    m_shots->setHeaderLabels({tr("#"), tr("Group"), tr("Image"), tr("Azimuth"),
-                              tr("Elevation")});
+    m_shots->setHeaderLabels({tr("#"), tr("分组"), tr("图像"), tr("方位角"),
+                              tr("俯仰角")});
     m_shots->setRootIsDecorated(false);
     m_shots->setUniformRowHeights(true);
     m_shots->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -83,12 +81,12 @@ CapturePanel::CapturePanel(QWidget* parent)
     m_shots->setMinimumHeight(120);
     m_shots->header()->setSectionResizeMode(1, QHeaderView::Stretch);
 
-    auto* shotsGroup = new QGroupBox(tr("Captured"), this);
+    auto* shotsGroup = new QGroupBox(tr("已拍摄"), this);
     auto* shotsLayout = new QVBoxLayout(shotsGroup);
     shotsLayout->setContentsMargins(6, 6, 6, 6);
     shotsLayout->addWidget(m_shots);
 
-    m_status = new QLabel(tr("Ready"), this);
+    m_status = new QLabel(tr("就绪"), this);
     m_status->setObjectName(QStringLiteral("captureStatus"));
     m_status->setWordWrap(true);
 
@@ -161,7 +159,7 @@ void CapturePanel::setBusy(bool busy)
 void CapturePanel::browseForDirectory()
 {
     const QString directory = QFileDialog::getExistingDirectory(
-        this, tr("Capture Output Directory"), m_baseDirectory);
+        this, tr("拍摄输出目录"), m_baseDirectory);
     if (directory.isEmpty()) {
         return;
     }

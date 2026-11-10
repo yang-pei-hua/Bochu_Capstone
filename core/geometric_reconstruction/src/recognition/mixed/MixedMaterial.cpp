@@ -6,14 +6,15 @@ double median(std::vector<double> values) {
     auto at=values.begin()+values.size()/2; std::nth_element(values.begin(),at,values.end()); return *at;
 }
 
-std::vector<PrimitiveEvidence> restrictEvidence(const SurfaceAnalysisResult& a,const std::vector<PointId>& group) {
+std::vector<PrimitiveEvidence> restrictEvidence(const SurfaceAnalysisResult& a,const std::vector<PointId>& group,
+                                                const MixedFeatureRecognitionOptions& options) {
     std::unordered_set<PointId> ids(group.begin(),group.end());
     std::vector<PrimitiveEvidence> result;
     for(auto e : a.surfaces) {
         bool keep=std::visit([&](auto& s){
             auto& support=s.supportPointIds;
             support.erase(std::remove_if(support.begin(),support.end(),[&](auto id){return !ids.count(id);}),support.end());
-            return support.size()>=12;
+            return support.size()>=options.minimumEvidenceSupportPoints;
         },e);
         if(keep) result.push_back(std::move(e));
     }

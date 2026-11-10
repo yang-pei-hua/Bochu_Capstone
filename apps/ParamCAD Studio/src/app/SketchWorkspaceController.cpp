@@ -88,7 +88,7 @@ void SketchWorkspaceController::onModelRebuilt()
     const QString error = m_modelingController->lastError();
     m_ui.modelingPanel->setStatusText(
         error.isEmpty()
-            ? workspaceTr("Rebuild succeeded | %1 features").arg(m_modelingController->features().size())
+            ? workspaceTr("重建成功 | %1 个特征").arg(m_modelingController->features().size())
             : error);
 
     // The feature graph is the only sketch the client has, so whatever the core
@@ -149,9 +149,9 @@ void SketchWorkspaceController::onModelError(const QString& message)
     m_ui.propertyPanel->featureDetailsPanel()->setFeature(m_modelingController->features(),
                                                         m_ui.modelingPanel->selectedFeatureId());
     m_ui.modelingPanel->setStatusText(message);
-    emit statusTextChanged(workspaceTr("Ready | Model unchanged | Camera: %1")
+    emit statusTextChanged(workspaceTr("就绪 | 模型未变 | 相机：%1")
                                .arg(m_ui.viewer->cameraParameters().parallelProjection
-                                        ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
+                                        ? workspaceTr("正交投影") : workspaceTr("透视投影")));
 }
 
 void SketchWorkspaceController::clearPendingSelection()
@@ -181,7 +181,7 @@ void SketchWorkspaceController::onDatumPlaneSelected(modeling::DatumPlane plane)
     m_ui.viewer->highlightDatumPlane(plane);
     updateSketchEntryState();
     const QString label = sketchapp::planeLabel(*m_pendingSketchPlane);
-    emit statusMessage(workspaceTr("Sketch plane: %1 - press New Sketch to draw on it").arg(label),
+    emit statusMessage(workspaceTr("草图平面：%1，按「新建草图」在其上绘制").arg(label),
                              4000);
     emit logInfo(workspaceTr("Sketch plane %1 selected").arg(label));
 }
@@ -196,7 +196,7 @@ void SketchWorkspaceController::onFacePicked(int faceId, bool planar, const sket
         // lay a profile out on, so the pick is refused with an explanation rather
         // than silently ignored.
         clearPendingSelection();
-        emit statusMessage(workspaceTr("Face %1 is curved and cannot host a sketch").arg(faceId),
+        emit statusMessage(workspaceTr("面 %1 为曲面，无法作为草图平面").arg(faceId),
                                  4000);
         emit logWarning(workspaceTr("Face %1 is curved and cannot host a sketch; pick a planar face.")
                        .arg(faceId));
@@ -221,7 +221,7 @@ void SketchWorkspaceController::onFacePicked(int faceId, bool planar, const sket
     m_ui.viewer->highlightFace(faceId);
     updateSketchEntryState();
     emit statusMessage(
-        workspaceTr("Face %1 (planar) selected - press New Sketch to draw on it").arg(faceId), 4000);
+        workspaceTr("已选中面 %1（平面），按「新建草图」在其上绘制").arg(faceId), 4000);
     emit logInfo(workspaceTr("Face %1 selected as sketch plane").arg(faceId));
     if (const auto* reference = std::get_if<modeling::FaceReference>(&*m_pendingSketchPlane))
         emit statusMessage(workspaceTr("已关联特征 #%1 的 %2；草图将随上游尺寸更新。")
@@ -302,7 +302,7 @@ void SketchWorkspaceController::enterSketchMode()
     // Editing a sketch inserts the sketch page into the bottom tab group and
     // brings it forward; the console keeps its tab, so the log is one click away.
     if (m_ui.bottomTabs->indexOf(m_ui.sketchPanel) < 0) {
-        m_ui.bottomTabs->addTab(m_ui.sketchPanel, workspaceTr("Sketch"));
+        m_ui.bottomTabs->addTab(m_ui.sketchPanel, workspaceTr("草图"));
     }
     m_ui.bottomTabs->setCurrentWidget(m_ui.sketchPanel);
     m_ui.viewer->setDatumPlanesVisible(false);
@@ -379,24 +379,24 @@ void SketchWorkspaceController::updateSketchHint()
     }
     switch (m_ui.viewer->viewportTool()) {
     case ViewportTool::Select:
-        m_ui.toolPalette->setSelectionText(workspaceTr("Select: click a sketch entity"));
+        m_ui.toolPalette->setSelectionText(workspaceTr("选择：点击草图图元"));
         break;
     case ViewportTool::Point:
-        m_ui.toolPalette->setSelectionText(workspaceTr("Point: click the sketch plane"));
+        m_ui.toolPalette->setSelectionText(workspaceTr("点：点击草图平面"));
         break;
     case ViewportTool::Line:
-        m_ui.toolPalette->setSelectionText(m_hasDraftAnchor ? workspaceTr("Line: click the end point")
-                                                         : workspaceTr("Line: click the start point"));
+        m_ui.toolPalette->setSelectionText(m_hasDraftAnchor ? workspaceTr("直线：点击终点")
+                                                         : workspaceTr("直线：点击起点"));
         break;
     case ViewportTool::Rectangle:
         m_ui.toolPalette->setSelectionText(m_hasDraftAnchor
-                                            ? workspaceTr("Rectangle: click the opposite corner")
-                                            : workspaceTr("Rectangle: click one corner"));
+                                            ? workspaceTr("矩形：点击对角点")
+                                            : workspaceTr("矩形：点击一个角点"));
         break;
     case ViewportTool::Circle:
         m_ui.toolPalette->setSelectionText(m_hasDraftAnchor
-                                            ? workspaceTr("Circle: click a point on the radius")
-                                            : workspaceTr("Circle: click the center"));
+                                            ? workspaceTr("圆：点击半径上的一点")
+                                            : workspaceTr("圆：点击圆心"));
         break;
     }
 }
@@ -496,7 +496,7 @@ void SketchWorkspaceController::onSketchCancelled()
 void SketchWorkspaceController::onSketchEntityAdded(const modeling::SketchGeometry& geometry)
 {
     if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
-        m_ui.sketchPanel->setStatusText(workspaceTr("Start a new sketch before drawing"));
+        m_ui.sketchPanel->setStatusText(workspaceTr("请先新建草图再绘制"));
         return;
     }
 
@@ -521,7 +521,7 @@ void SketchWorkspaceController::deleteSelectedSketchEntity()
     // the two paths can never disagree about what is being removed.
     const modeling::SketchEntityId id = m_ui.sketchPanel->selectedEntityId();
     if (id == modeling::kInvalidSketchEntityId) {
-        m_ui.sketchPanel->setStatusText(workspaceTr("Select an entity to delete"));
+        m_ui.sketchPanel->setStatusText(workspaceTr("请选择要删除的图元"));
         return;
     }
     onSketchEntityRemoved(id);
@@ -577,7 +577,7 @@ void SketchWorkspaceController::onSketchEntityEdited()
 void SketchWorkspaceController::extrudeSketch(double depth, bool reverse, modeling::ExtrudeOperation operation)
 {
     if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
-        const QString message = workspaceTr("Start a sketch before extruding.");
+        const QString message = workspaceTr("请先新建草图再拉伸。");
         emit logError(message);
         m_ui.sketchPanel->setStatusText(message);
         return;
@@ -591,7 +591,7 @@ void SketchWorkspaceController::extrudeSketch(double depth, bool reverse, modeli
     std::string error;
     if (params == nullptr || !modeling::validateSketch(*params, error)) {
         const QString message = params == nullptr
-            ? workspaceTr("The sketch is no longer part of the document.")
+            ? workspaceTr("该草图已不在文档中。")
             : QString::fromStdString(error);
         emit logError(message);
         m_ui.sketchPanel->setStatusText(message);
@@ -608,14 +608,13 @@ void SketchWorkspaceController::extrudeSketch(double depth, bool reverse, modeli
     }
 
     emit logInfo(workspaceTr("Sketch extruded: feature %1, depth %2 mm").arg(extrudeId).arg(depth));
-    m_ui.sketchPanel->setStatusText(workspaceTr("Extruded %1 mm (feature %2); its end face is now "
-                                    "available as a sketch plane").arg(depth).arg(extrudeId));
+    m_ui.sketchPanel->setStatusText(workspaceTr("已拉伸 %1 mm（特征 %2）；其端面现在可作为草图平面").arg(depth).arg(extrudeId));
 }
 
 void SketchWorkspaceController::cutSketch(double depth, bool throughAll, bool reverse)
 {
     if (m_sketchFeatureId == modeling::kInvalidFeatureId) {
-        const QString message = workspaceTr("Start a sketch before cutting.");
+        const QString message = workspaceTr("请先新建草图再切除。");
         emit logError(message);
         m_ui.sketchPanel->setStatusText(message);
         return;
@@ -626,7 +625,7 @@ void SketchWorkspaceController::cutSketch(double depth, bool throughAll, bool re
     std::string error;
     if (params == nullptr || !modeling::validateSketch(*params, error)) {
         const QString message = params == nullptr
-            ? workspaceTr("The sketch is no longer part of the document.")
+            ? workspaceTr("该草图已不在文档中。")
             : QString::fromStdString(error);
         emit logError(message);
         m_ui.sketchPanel->setStatusText(message);
@@ -644,7 +643,7 @@ void SketchWorkspaceController::cutSketch(double depth, bool throughAll, bool re
     }
 
     emit logInfo(workspaceTr("Sketch cut: feature %1").arg(cutId));
-    m_ui.sketchPanel->setStatusText(workspaceTr("Cut applied (feature %1)").arg(cutId));
+    m_ui.sketchPanel->setStatusText(workspaceTr("已应用切除（特征 %1）").arg(cutId));
 }
 
 void SketchWorkspaceController::deleteFeature(modeling::FeatureId featureId)
@@ -655,18 +654,18 @@ void SketchWorkspaceController::deleteFeature(modeling::FeatureId featureId)
     const std::vector<modeling::FeatureId> dependents =
         m_modelingController->dependentsOf(featureId);
 
-    QString message = workspaceTr("Delete feature %1?").arg(featureId);
+    QString message = workspaceTr("删除特征 %1？").arg(featureId);
     if (!dependents.empty()) {
         QStringList ids;
         for (const modeling::FeatureId id : dependents) {
             ids << QString::number(id);
         }
-        message = workspaceTr("Feature %1 is used by feature(s) %2.\n\nDeleting it deletes them too.")
+        message = workspaceTr("特征 %1 被特征 %2 引用。\n\n删除它也会删除这些特征。")
                       .arg(featureId)
                       .arg(ids.join(QStringLiteral(", ")));
     }
 
-    if (QMessageBox::question(m_dialogParent, workspaceTr("Delete Feature"), message,
+    if (QMessageBox::question(m_dialogParent, workspaceTr("删除特征"), message,
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
         != QMessageBox::Yes) {
         return;

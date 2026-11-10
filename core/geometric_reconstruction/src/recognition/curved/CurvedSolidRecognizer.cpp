@@ -24,8 +24,10 @@ bool reconstructCurvedSolid(const PointStore &points, const CurvedSolidRecogniti
     planes.randomSeed = options.randomSeed;
     CylinderDetectionOptions cylinders;
     cylinders.distanceThreshold = options.distanceTolerance;
-    cylinders.minimumSupportPoints = std::max<std::size_t>(30, points.size()/8);
-    cylinders.probability = 0.001;
+    cylinders.minimumSupportPoints = std::max<std::size_t>(
+        options.curvedCylinderSupportFloor,
+        points.size() / std::max<std::size_t>(1, options.curvedCylinderSupportDivisor));
+    cylinders.probability = options.curvedCylinderProbability;
     auto settings = recognitionAnalysisOptions(points, planes, cylinders);
     settings.detection.detectPlanes = false;
     if (options.requiredKind) {
@@ -76,7 +78,7 @@ bool recognizeCurvedSolidFromAnalysis(const PointStore& points, const SurfaceAna
                     auto c = evidence.cylinder;
                     double t0, t1;
                     if (!ends(caps(points, c.axisPoint, c.axisDirection, options.distanceTolerance,
-                                   [&](double) { return c.radius; }),
+                                   [&](double) { return c.radius; }, options),
                               t0, t1, false))
                         return;
                     candidate.primitive = modeling::CylinderPrimitiveParams{
@@ -95,9 +97,9 @@ bool recognizeCurvedSolidFromAnalysis(const PointStore& points, const SurfaceAna
                     const double slope = std::tan(x[6]);
                     double t0, t1;
                     if (!ends(caps(points, apex, axis, options.distanceTolerance,
-                                   [&](double t) { return std::max(0.0, t * slope); }),
+                                   [&](double t) { return std::max(0.0, t * slope); }, options),
                               t0, t1, true) ||
-                        t0 < -2 * options.distanceTolerance)
+                        t0 < -options.coneStartToleranceMultiplier * options.distanceTolerance)
                         return;
                     t0 = std::max(0.0, t0);
                     candidate.primitive = modeling::ConePrimitiveParams{
@@ -120,7 +122,7 @@ bool recognizeCurvedSolidFromAnalysis(const PointStore& points, const SurfaceAna
         if (!constructed || !assess(points, options, candidate))
             continue;
         const double value = candidate.surfaceCoverage + candidate.boundaryCoverage -
-                             candidate.meanResidual / options.distanceTolerance;
+                             candidate.meanResidual / options.distanceTolerance * options.residualScoreWeight;
         if (value > score) {
             score = value;
             output = candidate;
@@ -137,9 +139,9 @@ bool recognizeCurvedSolidFromAnalysis(const PointStore& points, const SurfaceAna
 }
 
 bool matchesCurvedBoundary(const modeling::CurvedPrimitiveParams& primitive,
-                          const PointSample& point, double tolerance) {
+                          const PointSample& point, double tolerance, double normalCosine) {
     const auto b = boundary(primitive,point.position);
     return b.distance <= tolerance && point.normal &&
-        dot(b.normal,normalized(*point.normal)) >= 0.8;
+        dot(b.normal,normalized(*point.normal)) >= normalCosine;
 }
 } // namespace reconstruction

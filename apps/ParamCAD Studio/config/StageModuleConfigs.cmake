@@ -1,0 +1,23 @@
+file(MAKE_DIRECTORY "${MODULE_CONFIG_DIRECTORY}")
+file(GLOB MODULE_CONFIG_FILES "${MODULE_CONFIG_SOURCE_DIRECTORY}/*.conf")
+foreach(source ${MODULE_CONFIG_FILES})
+    get_filename_component(name "${source}" NAME)
+    set(destination "${MODULE_CONFIG_DIRECTORY}/${name}")
+    if(NOT EXISTS "${destination}")
+        configure_file("${source}" "${destination}" COPYONLY)
+    endif()
+endforeach()
+
+# The hyperparameter metadata translations live beside the .conf files so the
+# client can find them through the same config directory.
+file(GLOB MODULE_I18N_FILES "${MODULE_CONFIG_SOURCE_DIRECTORY}/i18n/*.json")
+if(MODULE_I18N_FILES)
+    file(MAKE_DIRECTORY "${MODULE_CONFIG_DIRECTORY}/i18n")
+    foreach(source ${MODULE_I18N_FILES})
+        get_filename_component(name "${source}" NAME)
+        set(destination "${MODULE_CONFIG_DIRECTORY}/i18n/${name}")
+        if(NOT EXISTS "${destination}")
+            configure_file("${source}" "${destination}" COPYONLY)
+        endif()
+    endforeach()
+endif()

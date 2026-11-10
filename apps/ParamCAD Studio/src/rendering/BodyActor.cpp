@@ -1,4 +1,5 @@
 #include "rendering/BodyActor.h"
+#include <QCoreApplication>
 
 #include <vtkActor.h>
 #include <vtkCellArray.h>
@@ -192,14 +193,14 @@ bool BodyActor::setTextureFromFile(const QString& imagePath, QString& error)
     vtkSmartPointer<vtkImageReader2> reader =
         vtkImageReader2Factory::CreateImageReader2(fileName.constData());
     if (reader == nullptr) {
-        error = QStringLiteral("Unsupported texture format: %1").arg(imagePath);
+        error = QCoreApplication::translate("BodyActor", "不支持的纹理格式：%1").arg(imagePath);
         return false;
     }
     reader->SetFileName(fileName.constData());
     reader->Update();
     vtkImageData* image = reader->GetOutput();
     if (image == nullptr || image->GetNumberOfPoints() == 0) {
-        error = QStringLiteral("Could not read the texture image: %1").arg(imagePath);
+        error = QCoreApplication::translate("BodyActor", "无法读取纹理图像：%1").arg(imagePath);
         return false;
     }
 

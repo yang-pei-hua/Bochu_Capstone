@@ -81,7 +81,7 @@ std::string validateRepairCandidate(const PointStore& points, const SurfaceAnaly
 
 bool recognizeAndRepairParametricSolid(const PointStore& points,SurfaceAnalysisResult& analysis,
     CompoundCandidate& output,std::string& error,const PointStore* source,RepairTransactionReport* report,
-    const std::vector<SurfaceRelationHint>& hints) {
+    const std::vector<SurfaceRelationHint>& hints,const RecognitionSettings* settings) {
     output={};error.clear();RepairTransactionReport status;
     std::vector<LocalAnalysisFailure> failures;
     auto reject=[&](std::string reason){error=std::move(reason);status.reason=error;status.failures=failures;if(report)*report=status;return false;};
@@ -92,7 +92,7 @@ bool recognizeAndRepairParametricSolid(const PointStore& points,SurfaceAnalysisR
     auto requested = withExistingHints(analysis, hints);
     if(!applySurfaceRelationHints(observed,requested,staged,error))return reject(error);
     CompoundCandidate baseline;
-    if(!recognizeParametricSolidFromAnalysis(observed,staged,baseline,error,&failures,source))return reject(error);
+    if(!recognizeParametricSolidFromAnalysis(observed,staged,baseline,error,&failures,source,settings))return reject(error);
     if(analysis.baseFingerprint) {
         if(std::any_of(failures.begin(),failures.end(),[](const auto& f){return f.repaired;}))return reject("Repaired snapshot needs an additional recovery transaction");
         status.reused=true;status.beforeCoverage=status.afterCoverage=baseline.surfaceCoverage;
@@ -110,7 +110,7 @@ bool recognizeAndRepairParametricSolid(const PointStore& points,SurfaceAnalysisR
     const auto manual = withExistingHints(staged, hints);
     if(!applySurfaceRelationHints(combined,manual,merged,error))return reject(error);
     CompoundCandidate checked;std::vector<LocalAnalysisFailure> retry;
-    if(!recognizeParametricSolidFromAnalysis(combined,merged,checked,error,&retry,nullptr))return reject("Repair merge rejected: "+error);
+    if(!recognizeParametricSolidFromAnalysis(combined,merged,checked,error,&retry,nullptr,settings))return reject("Repair merge rejected: "+error);
     if(std::any_of(retry.begin(),retry.end(),[](const auto& f){return f.repaired;}))return reject("Merged analysis requires repeated recovery");
     if (const auto reason = detail::repair::validateRepairCandidate(
             points, analysis.options, baseline, checked, failures, status); !reason.empty())

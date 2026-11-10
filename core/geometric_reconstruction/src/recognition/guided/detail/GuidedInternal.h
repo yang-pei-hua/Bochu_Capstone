@@ -13,20 +13,24 @@ struct TemplateRegions {
 };
 bool fitTemplateRegions(const PointStore& points, const PlaneDetectionOptions& planes,
     const CylinderDetectionOptions& cylinders, const std::vector<TemplateHint>& hints,
-    TemplateRegions& output, std::string& error, const std::function<bool()>& cancelled);
+    TemplateRegions& output, std::string& error, const std::function<bool()>& cancelled,
+    const GuidedRecognitionOptions& options);
 
-PrimitiveDetectionOptions detectionFor(TemplateKind kind, double tolerance);
+PrimitiveDetectionOptions detectionFor(TemplateKind kind, double tolerance,
+                                       const GuidedRecognitionOptions& options);
 
 std::size_t supportSize(const PrimitiveEvidence& e);
 
 std::vector<PointSample> expandCurvedSupport(const PrimitiveEvidence& evidence,
                                              const std::vector<PointSample>& samples,
-                                             double tolerance);
+                                             double tolerance,
+                                             const GuidedRecognitionOptions& options);
 
 bool onBox(const modeling::BoxPrimitiveParams& box, const PointSample& p, double tolerance);
 
 bool verifyHints(const PointStore& points, const std::vector<TemplateHint>& hints,
                  const CompoundCandidate& candidate, const std::vector<TemplateFit>& fits,
                  double tolerance, int& failed, std::string& error,
-                 const std::function<bool()>& cancelled);
+                 const std::function<bool()>& cancelled,
+                 const GuidedRecognitionOptions& options);
 } // namespace reconstruction::detail::guided

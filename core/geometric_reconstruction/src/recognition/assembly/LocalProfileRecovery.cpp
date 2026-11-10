@@ -445,7 +445,8 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
 
     std::vector<AssemblyPart*> pending;
     for (auto& part : result.parts) {
-        if (!part.closed && part.orientationKnown && part.patchIds.size() >= 2 && part.pointIds.size() >= 400 &&
+        if (!part.closed && part.orientationKnown && part.patchIds.size() >= 2 &&
+            part.pointIds.size() >= options.minimumPartPointsForLocalRecovery &&
             part.pointIds.size() <= options.maximumWorkingPoints)
             pending.push_back(&part);
     }
@@ -675,7 +676,8 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
         }
         appendAdmitted(result.unassignedPointIds);
         if (samples.size()>options.maximumWorkingPoints ||
-            (retained>.98*part->pointIds.size() && samples.size()-retained<24)) return;
+            (retained>options.minimumRetainedFraction*part->pointIds.size() &&
+             samples.size()-retained<options.minimumResidualSamples)) return;
         auto& previous = previousCropSizes[part->id];
         if (previous == samples.size()) return;
         previous = samples.size();
@@ -701,7 +703,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
         bool parentSplit = false;
         for (const auto& caps : pairs) {
             if (cancelled && cancelled()) throw std::runtime_error("Cancelled");
-            if (attempts==budget || parent->pointIds.size()<600) break;
+            if (attempts==budget || parent->pointIds.size()<options.minimumProfileSplitPoints) break;
             const auto& a = caps.first;
             const auto& b = caps.second;
             const Vec3 low{std::min(a.lower.x,b.lower.x),std::min(a.lower.y,b.lower.y),std::min(a.lower.z,b.lower.z)};
@@ -723,7 +725,8 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
             };
             appendAdmitted(parent->pointIds);
             const auto parentSupport = samples.size();
-            if (parentSupport<600 || (!parentSplit && parentSupport>.90*parent->pointIds.size())) continue;
+            if (parentSupport<options.minimumProfileSplitPoints ||
+                (!parentSplit && parentSupport>options.minimumParentSupportFraction*parent->pointIds.size())) continue;
             appendAdmitted(result.unassignedPointIds);
             std::vector<AssemblyPart*> donors{parent};
             for (auto& other : result.parts) {
@@ -753,7 +756,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
     const auto contactBudget = std::min<std::size_t>(12,options.maximumLocalProfileAttempts);
     for (auto* parent : pending) {
         if (contactAttempts==contactBudget) break;
-        if (parent->closed || parent->pointIds.size()<1200) continue;
+        if (parent->closed || parent->pointIds.size()<options.minimumParentSplitPoints) continue;
         const auto planes = partPlanes(*parent,result.patches,result.distanceTolerance);
         splitAlongCaps(parent,contactCapPairs(planes,result.distanceTolerance),contactAttempts,contactBudget);
     }
@@ -761,7 +764,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
     const auto splitBudget = std::min<std::size_t>(24,options.maximumLocalProfileAttempts);
     for (auto* parent : pending) {
         if (splitAttempts==splitBudget) break;
-        if (parent->closed || parent->pointIds.size()<1200) continue;
+        if (parent->closed || parent->pointIds.size()<options.minimumParentSplitPoints) continue;
         const auto pairs = rankedCapPairs(partPlanes(*parent,result.patches,result.distanceTolerance),
                                           result.distanceTolerance,6);
         if (pairs.size()<2) continue;
@@ -794,7 +797,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
         std::sort(proposals.begin(),proposals.end(),byId);
         return PointStore(std::move(proposals),source.unit());
     };
-    if (remainingCount>=600) {
+    if (remainingCount>=options.minimumProfileSamples) {
         if (cancelled && cancelled()) throw std::runtime_error("Cancelled");
         const bool sampled = remainingCount>options.maximumWorkingPoints;
         const auto proposalBudget = sampled ? std::min<std::size_t>(65536,options.maximumWorkingPoints) : remainingCount;
@@ -827,7 +830,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
                 part.upper = {std::max(part.upper.x,p.x),std::max(part.upper.y,p.y),std::max(part.upper.z,p.z)};
                 return true;
             });
-            if (!withinBudget || samples.size()<600) continue;
+            if (!withinBudget || samples.size()<options.minimumProfileSamples) continue;
             std::sort(samples.begin(),samples.end(),byId);
             fitAndPublish(part,std::move(samples),remainingParts,CropKind::Signed);
             if (part.closed) {
@@ -844,7 +847,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
     const auto concentratedBudget = std::min<std::size_t>(12,options.maximumLocalProfileAttempts);
     for (auto* parent : pending) {
         if (concentratedAttempts==concentratedBudget) break;
-        if (parent->closed || parent->pointIds.size()<1200) continue;
+        if (parent->closed || parent->pointIds.size()<options.minimumParentSplitPoints) continue;
         const auto planes = partPlanes(*parent,result.patches,result.distanceTolerance);
         const auto broad = rankedCapPairs(planes,result.distanceTolerance,6);
         if (broad.size()<2) continue;
@@ -864,7 +867,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
     const auto footprintBudget = std::min<std::size_t>(8,options.maximumLocalProfileAttempts);
     for (auto* parent : pending) {
         if (footprintAttempts==footprintBudget || footprintGroups==6) break;
-        if (parent->closed || parent->pointIds.size()<6000) continue;
+        if (parent->closed || parent->pointIds.size()<options.minimumHugeParentPoints) continue;
         if (cancelled && cancelled()) throw std::runtime_error("Cancelled");
         ++footprintGroups;
         constexpr std::size_t voteBudget = 16384;
@@ -881,7 +884,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
         };
         appendVotes(parent->pointIds);
         appendVotes(result.unassignedPointIds);
-        if (votes.size()<600) continue;
+        if (votes.size()<options.minimumProfileSamples) continue;
         const auto planes = sampledCapPlanes(PointStore(std::move(votes),source.unit()),result.patches,margin);
         auto pairs = rankedCapPairs(planes,margin,12);
         const auto parentSpan = length(subtract(parent->upper,parent->lower));
@@ -890,14 +893,14 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
                                        length(subtract(pair.second.upper,pair.second.lower)));
             return span<.6*parentSpan;
         }),pairs.end());
-        if (pairs.size()>3) pairs.resize(3);
+        if (pairs.size()>options.maximumBroadPairs) pairs.resize(options.maximumBroadPairs);
         splitAlongCaps(parent,pairs,footprintAttempts,footprintBudget,SplitFootprint::Parent);
     }
     // A slab can cross several initial groups. Localize signed cap votes
     // before admitting full-resolution observations from those groups.
     remainingCount = std::accumulate(remainingParts.begin(),remainingParts.end(),result.unassignedPointIds.size(),
         [](auto total, const auto* part) { return total+part->pointIds.size(); });
-    if (remainingCount>=600) {
+    if (remainingCount>=options.minimumProfileSamples) {
         if (cancelled && cancelled()) throw std::runtime_error("Cancelled");
         const auto proposalSource = sampleRemaining(remainingCount,std::min<std::size_t>(65536,options.maximumWorkingPoints));
         const auto planes = sampledCapPlanes(proposalSource,result.patches,margin);
@@ -906,7 +909,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
             const auto [low,high] = std::minmax(pair.first.observations,pair.second.observations);
             return low<.30*high;
         }),pairs.end());
-        if (pairs.size()>8) pairs.resize(8);
+        if (pairs.size()>options.maximumProfilePairs) pairs.resize(options.maximumProfilePairs);
         std::vector<std::vector<CapFootprint>> footprints;
         for (const auto& pair : pairs) footprints.push_back(connectedCapFootprints(pair,proposalSource,margin));
         std::size_t attempts = 0;
@@ -931,7 +934,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
                     samples.push_back(sample);
                     return true;
                 });
-                if (!withinBudget || samples.size()<600) continue;
+                if (!withinBudget || samples.size()<options.minimumProfileSamples) continue;
                 std::sort(samples.begin(),samples.end(),byId);
                 ++attempts;
                 fitAndPublish(part,std::move(samples),remainingParts,CropKind::SignedEnvelope);
@@ -949,9 +952,9 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
     const auto channelBudget = std::min<std::size_t>(8,options.maximumLocalProfileAttempts);
     for (auto* parent : pending) {
         if (channelAttempts==channelBudget) break;
-        if (parent->closed || parent->pointIds.size()<3000) continue;
+        if (parent->closed || parent->pointIds.size()<options.minimumLargeParentPoints) continue;
         const auto planes = partPlanes(*parent,result.patches,margin);
-        if (planes.size()<8 || planes.size()>64) continue;
+        if (planes.size()<options.minimumPlaneCount || planes.size()>options.maximumPlaneCount) continue;
         for (const auto& window : channelWindows(planes,margin)) {
             if (channelAttempts==channelBudget) break;
             if (cancelled && cancelled()) throw std::runtime_error("Cancelled");
@@ -972,7 +975,7 @@ void recoverLocalProfiles(const PointStore& source, const WorkingData& work, con
                 part.upper = {std::max(part.upper.x,p.x),std::max(part.upper.y,p.y),std::max(part.upper.z,p.z)};
                 return true;
             });
-            if (!withinBudget || samples.size()<3000) continue;
+            if (!withinBudget || samples.size()<options.minimumLargeProfileSamples) continue;
             const auto axialPad = scale({std::abs(window.along.x),std::abs(window.along.y),std::abs(window.along.z)},
                                         window.gauge);
             part.lower = subtract(part.lower,axialPad);

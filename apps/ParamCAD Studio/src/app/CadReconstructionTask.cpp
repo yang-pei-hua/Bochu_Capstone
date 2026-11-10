@@ -1,7 +1,9 @@
 #include "app/CadReconstructionTask.h"
+#include <QCoreApplication>
 #include "io/PointCloudAdapter.h"
 #include <modeling/ModelingCore.h>
 #include <reconstruction/recognition/ProjectionSettings.h>
+#include <reconstruction/settings/ModuleConfig.h>
 
 #include <QElapsedTimer>
 #include <QPointer>
@@ -31,6 +33,16 @@ void runCadWork(const CadWork& input, CadReconstructionResult& result,
     const auto& [cloud, unit, hints, sourceTolerance, analysis, relations, projectionFallback, specializedRecovery,
                  projectionOptions] = input;
     if (cancelled()) return;
+    reconstruction::RecognitionSettings recognitionSettings;
+    reconstruction::AssemblySettings assemblySettings;
+    try {
+        recognitionSettings = reconstruction::loadRecognitionSettings();
+        assemblySettings = reconstruction::loadAssemblySettings();
+    } catch (const std::exception& error) {
+        result.outcome = CadReconstructionResult::Outcome::Failed;
+        result.error = QString::fromUtf8(error.what());
+        return;
+    }
     const reconstruction::ObservationSnapshot source(PointCloudAdapter::toPointStore(cloud, unit));
     result.skippedInvalidObservations = cloud.positions.size() - source.observations().size();
     if (cancelled()) return;
@@ -61,7 +73,7 @@ void runCadWork(const CadWork& input, CadReconstructionResult& result,
     const auto& recoverySource = source.observations();
     reconstruction::GuidedSolidResult guided;
     const bool recognized=reconstruction::reconstructGuidedSolid(points,planes,cylinders,hints,guided,failure,
-            cancelled, analysis ? &*analysis : nullptr,relations,&recoverySource);
+            cancelled, analysis ? &*analysis : nullptr,relations,&recoverySource,&recognitionSettings);
     if(cancelled())return;
     // Decompose failed/multiple-body observations before attempting
     // finite-shell closure. Explicit user constraints stay authoritative.
@@ -70,7 +82,7 @@ void runCadWork(const CadWork& input, CadReconstructionResult& result,
         guided.candidate.surfaceCoverage < .99;
     if(hints.empty() && relations.empty() && (!recognized || bodies>1 || refineBox)) {
         stageChanged(Stage::SeparatingParts);
-        reconstruction::AssemblyOptions options;
+        reconstruction::AssemblyOptions options = assemblySettings;
         options.enableSpecializedRecovery = specializedRecovery;
         options.projectionOptions = projectionOptions;
         if (!projectionFallback || refineBox) options.maximumProjectionParts = 0;
@@ -109,7 +121,7 @@ void runCadWork(const CadWork& input, CadReconstructionResult& result,
             }
             result.analysis=std::move(guided.analysis);
             result.outcome=CadReconstructionResult::Outcome::Unsupported;
-            result.error=QStringLiteral("Separated %1 candidates; no verified closed solid").arg(result.assembly->parts.size());
+            result.error=QCoreApplication::translate("CadReconstructionTask", "分离出 %1 个候选，但没有验证闭合的实体").arg(result.assembly->parts.size());
             if (!recognized && !failure.empty()) result.error += "; conventional: " + QString::fromStdString(failure);
             return;
         } else if(!recognized)failure += "; decomposition: "+decompositionError;
@@ -230,7 +242,7 @@ bool CadReconstructionTask::startWork(Work work, Stage initialStage)
             result->error = QString::fromUtf8(error.what());
         } catch (...) {
             result->outcome = CadReconstructionResult::Outcome::Failed;
-            result->error = QStringLiteral("Unknown CAD reconstruction error");
+            result->error = QCoreApplication::translate("CadReconstructionTask", "未知的 CAD 重建错误");
         }
     });
     auto* thread = m_thread;

@@ -123,7 +123,7 @@ void estimateNormalsAndCurvature(
                 std::abs(math3::dot(delta, *points[index].normal)) > options.normalOrientationMaximumTangentDeviation * distance ||
                 std::abs(math3::dot(delta, *target.normal)) > options.normalOrientationMaximumTangentDeviation * distance) continue;
             const double nextCost = cost + 1.0 - std::abs(alignment) +
-                1.0e-3 * distance / std::max(spacing[index], spacing[neighbor]);
+                options.normalOrientationDistanceCostWeight * distance / std::max(spacing[index], spacing[neighbor]);
             if (nextCost >= costs[neighbor]) continue;
             costs[neighbor] = nextCost;
             if (alignment < 0) target.normal = math3::scale(*target.normal, -1);

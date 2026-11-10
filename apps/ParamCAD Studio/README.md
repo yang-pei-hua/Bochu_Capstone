@@ -490,16 +490,16 @@ across the interactive `captures/` and `reconstructions/` roots.
 - Real OBJ/PLY mesh parsing
 - Point-cloud meshing, CAD alignment, and AI editing
 - Production scene graph, selection, task progress, FPS, and mesh stats
-## 投影超参数
+## 模块超参数
 
-客户端顶栏的 **Settings → 超参数** 可以编辑投影参数。保存后，下一次投影调试或 CAD 重建中的投影回退会重新读取配置。配置按模块保存在可执行文件旁的 `config/` 目录，首次构建从本目录下的 `config/projection.conf` 复制。已有运行配置会保留。
+客户端顶栏的 **Settings → 超参数** 按模块编辑拍摄、预处理、曲面检测、曲面关系、常规识别、装配分解和投影拟合参数。配置保存在可执行文件旁的 `config/` 目录，每个模块一份 `.conf`；首次构建从本目录下的 `config/` 复制，已有运行配置会保留。
 
-命令行可以复用该文件，并用可重复的 `--set key=value` 覆盖单项。键名、默认值和单位见 [projection.conf](config/projection.conf)。
+命令行可以复用同一份文件，并用可重复的 `--set key=value` 覆盖单项。模块 CLI（`pcad_preprocess`、`pcad_detect`、`pcad_analyze`、`pcad_recognize`、`pcad_assemble`、`pcad_project`）无参数启动时自动加载同名配置；客户端启动时使用 `--config-dir` 和 `--set module.key=value`。
 
 ```powershell
-& .\cad_reconstruction_validation.exe fit-projection cloud.ply report.json output.step `
-    --path two-axis-intersection --config config/projection.conf `
+& .\pcad_project.exe --in cloud.ply --report report.json `
+    --config config\projection.conf `
     --set intersection_alpha_scale=1.5 --set intersection_simplification_mm=2
 ```
 
-`reconstruct-cloud` 也接受这些覆盖。默认查找顺序为 `PARAMCAD_PROJECTION_CONFIG`、可执行文件旁的配置、源码树的默认配置。显式 `--config` 优先于默认查找，`--set` 优先于所选配置。C++ 可传入 `ProjectionExtrusionOptions`，也可调用读取默认配置的重载。
+键名、分组、优先级和已执行的验证见 [模块超参数说明](../../docs/Hyperparameter_Configuration.md)。

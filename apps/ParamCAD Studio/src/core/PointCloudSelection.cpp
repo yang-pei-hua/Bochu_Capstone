@@ -17,6 +17,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <QCoreApplication>
 
 bool PointCloudSelection::validGeometry(const QString& geometry)
 {
@@ -237,7 +238,7 @@ bool PointCloudSelection::load(const QString& path, QString& error)
         || root["format"] != "paramcad-point-regions" || (version != 1 && version != 2)
         || root["pointCount"].toInteger(-1) != static_cast<qint64>(m_memberships.size())
         || root["positionsSha256"].toString() != m_fingerprint || !root["regions"].isArray()) {
-        error = QStringLiteral("标注格式无效，或点云坐标/点顺序与当前点云不一致。");
+        error = QCoreApplication::translate("PointCloudSelection", "标注格式无效，或点云坐标/点顺序与当前点云不一致。");
         return false;
     }
     // Validate into temporary state so a bad import cannot damage current work.
@@ -251,14 +252,14 @@ bool PointCloudSelection::load(const QString& path, QString& error)
     if (version == 2) {
         if (!root["deletedPointIndices"].isArray() || !root["relations"].isArray()
             || !root["suppressedRelations"].isArray()) {
-            error = QStringLiteral("标注缺少点删除状态或关系数据。"); return false;
+            error = QCoreApplication::translate("PointCloudSelection", "标注缺少点删除状态或关系数据。"); return false;
         }
         std::set<qint64> deletedIds;
         for (const auto& value : root["deletedPointIndices"].toArray()) {
             const qint64 id = value.toInteger(-1);
             if (!value.isDouble() || value.toDouble() != static_cast<double>(id) || id < 0
                 || id >= static_cast<qint64>(deleted.size()) || !deletedIds.insert(id).second) {
-                error = QStringLiteral("无效的已删除点索引。"); return false;
+                error = QCoreApplication::translate("PointCloudSelection", "无效的已删除点索引。"); return false;
             }
             deleted[static_cast<size_t>(id)] = 1;
         }
@@ -271,14 +272,14 @@ bool PointCloudSelection::load(const QString& path, QString& error)
         if (id <= 0 || id == std::numeric_limits<int>::max() || !seen.insert(id).second
             || !validGeometry(region["geometry"].toString()) || !region["name"].isString()
             || !region["pointIndices"].isArray()) {
-            error = QStringLiteral("标注包含无效或重复的分组。"); return false;
+            error = QCoreApplication::translate("PointCloudSelection", "标注包含无效或重复的分组。"); return false;
         }
         for (const auto& index : region["pointIndices"].toArray()) {
             const qint64 point = index.toInteger(-1);
             if (!index.isDouble() || index.toDouble() != static_cast<double>(point)
                 || point < 0 || point >= static_cast<qint64>(memberships.size())
                 || memberships[static_cast<size_t>(point)] != 0 || deleted[static_cast<size_t>(point)]) {
-                error = QStringLiteral("标注包含无效或重复的点索引。"); return false;
+                error = QCoreApplication::translate("PointCloudSelection", "标注包含无效或重复的点索引。"); return false;
             }
             memberships[static_cast<size_t>(point)] = id;
         }
@@ -286,7 +287,7 @@ bool PointCloudSelection::load(const QString& path, QString& error)
         surface.templateLocked = region.contains("templateLocked")
             ? region["templateLocked"].toBool() : region["source"].toString("manual") == "manual";
         if (region.contains("templateLocked") && !region["templateLocked"].isBool()) {
-            error = QStringLiteral("无效的模板锁定状态。"); return false;
+            error = QCoreApplication::translate("PointCloudSelection", "无效的模板锁定状态。"); return false;
         }
         if (version == 2) {
             surface.parameters = region["parameters"].toObject();
@@ -298,7 +299,7 @@ bool PointCloudSelection::load(const QString& path, QString& error)
                 || (surface.source != "manual" && surface.source != "detected")
                 || !std::isfinite(surface.residual) || surface.residual < 0
                 || !std::isfinite(surface.confidence) || surface.confidence < 0 || surface.confidence > 1) {
-                error = QStringLiteral("无效的表面拟合信息。"); return false;
+                error = QCoreApplication::translate("PointCloudSelection", "无效的表面拟合信息。"); return false;
             }
             if (!surface.parameters.isEmpty()) {
                 const auto validVector = [&](const char* key, bool unit) {
@@ -328,7 +329,7 @@ bool PointCloudSelection::load(const QString& path, QString& error)
                 if (surface.geometry == "cuboid") valid = validVector("origin", false)
                     && validVector("x_direction", true) && validVector("z_direction", true)
                     && validNumber("size_x", true) && validNumber("size_y", true) && validNumber("size_z", true);
-                if (!valid) { error = QStringLiteral("无效的表面参数。"); return false; }
+                if (!valid) { error = QCoreApplication::translate("PointCloudSelection", "无效的表面参数。"); return false; }
             }
         }
         regions.push_back(surface);
@@ -351,7 +352,7 @@ bool PointCloudSelection::load(const QString& path, QString& error)
                 || !seen.count(relation.first) || !seen.count(relation.second) || relation.first == relation.second
                 || !validRelation(relation.type) || !object["automatic"].isBool()
                 || !std::isfinite(relation.confidence) || relation.confidence < 0 || relation.confidence > 1) {
-                error = QStringLiteral("关系包含无效端点、类型或重复项。"); return false;
+                error = QCoreApplication::translate("PointCloudSelection", "关系包含无效端点、类型或重复项。"); return false;
             }
             nextRelationId = std::max(nextRelationId, relation.id + 1);
             relations.push_back(relation);
@@ -360,14 +361,14 @@ bool PointCloudSelection::load(const QString& path, QString& error)
             const auto parts = value.toString().split(':');
             if (!value.isString() || parts.size() != 3 || parts[0].toInt() <= 0
                 || parts[1].toInt() <= parts[0].toInt() || !validRelation(parts[2])) {
-                error = QStringLiteral("无效的已删除关系记录。"); return false;
+                error = QCoreApplication::translate("PointCloudSelection", "无效的已删除关系记录。"); return false;
             }
             suppressed.push_back(value.toString());
             // Old version 2 documents did not store ID counters. Retain IDs
             // mentioned by suppression records so a new group cannot inherit
             // a deleted group's relationships after reloading.
             if (parts[1].toInt() == std::numeric_limits<int>::max()) {
-                error = QStringLiteral("无效的已删除关系记录。"); return false;
+                error = QCoreApplication::translate("PointCloudSelection", "无效的已删除关系记录。"); return false;
             }
             nextId = std::max(nextId, parts[1].toInt() + 1);
         }
@@ -378,7 +379,7 @@ bool PointCloudSelection::load(const QString& path, QString& error)
             next = saved; return true;
         };
         if (!counter("nextRegionId", nextId) || !counter("nextRelationId", nextRelationId)) {
-            error = QStringLiteral("无效的集合或关系编号状态。"); return false;
+            error = QCoreApplication::translate("PointCloudSelection", "无效的集合或关系编号状态。"); return false;
         }
     }
     checkpoint();

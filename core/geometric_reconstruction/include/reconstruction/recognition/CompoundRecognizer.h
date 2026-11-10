@@ -19,6 +19,19 @@ struct CompoundRecognitionOptions {
     double maximumCellError = 0.12;
     std::size_t maximumGridCells = 512;
     std::size_t maximumSearchNodes = 200000;
+    // Sampling and quality gates previously embedded in the compound stages.
+    std::size_t minimumPoints = 30;
+    std::size_t minimumSupportPoints = 20;
+    std::size_t supportDivisor = 200;
+    double frameDistanceToleranceMultiplier = 4;
+    double levelMergeToleranceMultiplier = 5;
+    double orthogonalCosine = 0.1;
+    std::size_t maximumBoundaries = 10;
+    double extrusionAxisCosine = 0.05;
+    std::size_t maximumObliques = 6;
+    double coverageShiftToleranceMultiplier = 4;
+    double minimumSurfaceCoverage = 0.90;
+    std::size_t cellSamplesPerAxis = 5;
     // Observed equations are shared; interface planes are explicit inferred
     // contacts with an observed host, not fabricated source observations.
     std::vector<PlaneEvidence> boundaryEvidence;
@@ -49,12 +62,14 @@ struct RepairTransactionReport {
     std::string reason;
     std::vector<LocalAnalysisFailure> failures;
 };
+struct RecognitionSettings;
 // Publishes an augmented analysis only after complete recognition and stability checks.
 // Failure leaves the supplied analysis unchanged and clears the output candidate.
 bool recognizeAndRepairParametricSolid(const PointStore& points, SurfaceAnalysisResult& analysis,
     CompoundCandidate& output, std::string& error, const PointStore* source = nullptr,
     RepairTransactionReport* report = nullptr,
-    const std::vector<SurfaceRelationHint>& hints = {});
+    const std::vector<SurfaceRelationHint>& hints = {},
+    const RecognitionSettings* settings = nullptr);
 // Client and validator share this entry point. Curved-feature fallback is
 // accepted only if the complete surface agrees with its predicted boundary.
 bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOptions &planes,
@@ -64,5 +79,6 @@ bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOp
 bool recognizeParametricSolidFromAnalysis(const PointStore& points, const SurfaceAnalysisResult& analysis,
                                         CompoundCandidate& output, std::string& error,
                                         std::vector<LocalAnalysisFailure>* failures = nullptr,
-                                        const PointStore* source = nullptr);
+                                        const PointStore* source = nullptr,
+                                        const RecognitionSettings* settings = nullptr);
 } // namespace reconstruction

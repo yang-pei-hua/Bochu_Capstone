@@ -1,4 +1,7 @@
 #include "app/MainWindow.h"
+#include "app/UiLanguage.h"
+
+#include <reconstruction/settings/ModuleSettings.h>
 
 #include <QApplication>
 #include <QCommandLineOption>
@@ -7,6 +10,8 @@
 #include <QIcon>
 #include <QSurfaceFormat>
 #include <QVTKOpenGLNativeWidget.h>
+
+#include <filesystem>
 
 int main(int argc, char* argv[])
 {
@@ -32,10 +37,33 @@ int main(int argc, char* argv[])
     const QCommandLineOption texture(
         QStringLiteral("texture"), QStringLiteral("Optional feature-rich surface texture."),
         QStringLiteral("image-file"));
+    const QCommandLineOption configDirectory(
+        QStringLiteral("config-dir"), QStringLiteral("Directory that holds the module .conf files."),
+        QStringLiteral("directory"));
+    const QCommandLineOption overrides(
+        QStringLiteral("set"), QStringLiteral("Override one hyperparameter (module.key=value). Repeatable."),
+        QStringLiteral("module.key=value"));
+    const QCommandLineOption language(
+        QStringLiteral("lang"), QStringLiteral("Interface language: zh (default) or en."),
+        QStringLiteral("language"));
     parser.addOption(performanceCapture);
     parser.addOption(outputDirectory);
     parser.addOption(texture);
+    parser.addOption(configDirectory);
+    parser.addOption(overrides);
+    parser.addOption(language);
     parser.process(application);
+
+    // Catalogs must be installed before the first widget is constructed so
+    // every menu entry and panel uses the requested language.
+    i18n::installTranslators(application, parser.value(language));
+
+    if (parser.isSet(configDirectory)) {
+        reconstruction::settings::setConfigDirectory(
+            std::filesystem::path(parser.value(configDirectory).toStdU16String()));
+    }
+    for (const auto& assignment : parser.values(overrides))
+        reconstruction::settings::addOverride(assignment.toStdString());
 
     MainWindow window;
     window.show();

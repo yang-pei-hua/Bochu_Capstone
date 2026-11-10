@@ -5,6 +5,7 @@
 #include <reconstruction/preprocessing/PointCloudPreprocessor.h>
 #include <reconstruction/data/PointStore.h>
 #include <reconstruction/detection/PrimitiveDetector.h>
+#include <reconstruction/settings/ModuleConfig.h>
 
 #include <QString>
 
@@ -27,16 +28,27 @@ public:
 
     // Scale-relative defaults keep preprocessing useful for both metric and
     // arbitrary-unit clouds. Known metric input is converted to millimetres by
-    // the core preprocessor.
+    // the core preprocessor. The overloads without a settings argument load
+    // config/preprocessing.conf and config/detection.conf.
     static reconstruction::PointCloudPreprocessingOptions preprocessingOptionsFor(
         const PlyCloud& cloud);
+    static reconstruction::PointCloudPreprocessingOptions preprocessingOptionsFor(
+        const PlyCloud& cloud, const reconstruction::PreprocessingSettings& settings);
 
-    // Plane-detection tolerances for a cloud whose scale is unknown. A fixed
-    // millimetre threshold is meaningless for an arbitrary-unit COLMAP cloud,
-    // so the distance threshold follows the cloud's own diagonal instead.
     static reconstruction::PlaneDetectionOptions planeOptionsFor(const PlyCloud& cloud);
     static reconstruction::PlaneDetectionOptions planeOptionsFor(
         const reconstruction::PointStore& cloud);
+    static reconstruction::PlaneDetectionOptions planeOptionsFor(
+        const PlyCloud& cloud, const reconstruction::DetectionSettings& settings);
+    static reconstruction::PlaneDetectionOptions planeOptionsFor(
+        const reconstruction::PointStore& cloud, const reconstruction::DetectionSettings& settings);
     static reconstruction::CylinderDetectionOptions cylinderOptionsFor(
         const reconstruction::PointStore& cloud);
+    static reconstruction::CylinderDetectionOptions cylinderOptionsFor(
+        const reconstruction::PointStore& cloud, const reconstruction::DetectionSettings& settings);
+
+    // Applies the scale-aware policy to every primitive family in place.
+    static void applyDetectionScale(reconstruction::PrimitiveDetectionOptions& options,
+                                    double diagonal, std::size_t pointCount,
+                                    const reconstruction::DetectionSettings& settings);
 };

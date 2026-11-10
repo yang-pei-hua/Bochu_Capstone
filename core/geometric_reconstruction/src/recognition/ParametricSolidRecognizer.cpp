@@ -2,6 +2,7 @@
 #include "common/Math3.h"
 #include "reconstruction/recognition/ThroughHoleRecognizer.h"
 #include "reconstruction/recognition/MixedFeatureRecognizer.h"
+#include "reconstruction/settings/ModuleConfig.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -29,7 +30,8 @@ bool reconstructParametricSolid(const PointStore &points, const PlaneDetectionOp
 
 bool recognizeParametricSolidFromAnalysis(const PointStore& points, const SurfaceAnalysisResult& analysis,
                                         CompoundCandidate& output, std::string& error,
-                                        std::vector<LocalAnalysisFailure>* failures, const PointStore* source) {
+                                        std::vector<LocalAnalysisFailure>* failures, const PointStore* source,
+                                        const RecognitionSettings* settings) {
     output = {};
     if (!analysisMatches(points, analysis)) { error = "Stale surface analysis"; return false; }
     const auto& planes = analysis.options.detection.plane;
@@ -41,13 +43,14 @@ bool recognizeParametricSolidFromAnalysis(const PointStore& points, const Surfac
                 "or additional observations for disconnected surface patches";
         return false;
     }
-    CompoundRecognitionOptions options;
+    CompoundRecognitionOptions options = settings ? settings->compound : CompoundRecognitionOptions{};
     options.distanceTolerance = planes.distanceThreshold;
     for(const auto& e : analysis.surfaces)
         if(const auto* plane=std::get_if<PlaneEvidence>(&e)) options.boundaryEvidence.push_back(*plane);
     std::string mixedError;
     CompoundCandidate mixed;
-    const bool hasMixed = recognizeMixedFeatures(points, analysis, mixed, mixedError, failures, source);
+    const bool hasMixed = recognizeMixedFeatures(points, analysis, mixed, mixedError, failures, source,
+        settings);
     if(!hasMixed && mixedError!="No observed thin rectangular host") {
         error=mixedError;output={};return false;
     }
@@ -62,7 +65,7 @@ bool recognizeParametricSolidFromAnalysis(const PointStore& points, const Surfac
     const auto compoundError = error;
     if(hasMixed) {output=std::move(mixed);error.clear();return true;}
     auto tryCurved = [&](std::string previous) {
-        CurvedSolidRecognitionOptions curvedOptions;
+        CurvedSolidRecognitionOptions curvedOptions = settings ? settings->curved : CurvedSolidRecognitionOptions{};
         curvedOptions.distanceTolerance = planes.distanceThreshold;
         curvedOptions.randomSeed = planes.randomSeed;
 
@@ -79,8 +82,10 @@ bool recognizeParametricSolidFromAnalysis(const PointStore& points, const Surfac
         return true;
     };
     BoxWithThroughHolesCandidate legacy;
-    if (!recognizeBoxWithThroughHolesFromAnalysis(points, analysis, BoxRecognitionOptions{},
-                                        ThroughHoleRecognitionOptions{}, legacy, error)) {
+    if (!recognizeBoxWithThroughHolesFromAnalysis(points, analysis,
+                                        settings ? settings->box : BoxRecognitionOptions{},
+                                        settings ? settings->throughHole : ThroughHoleRecognitionOptions{},
+                                        legacy, error)) {
         return tryCurved(error);
     }
     const auto &box = legacy.box.primitive;

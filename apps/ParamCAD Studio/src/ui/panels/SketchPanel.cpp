@@ -4,6 +4,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleValidator>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -53,14 +54,14 @@ QString describe(const modeling::SketchGeometry& geometry)
             .arg(line->y2, 0, 'f', 2);
     }
     if (const auto* rectangle = std::get_if<modeling::Rectangle2D>(&geometry)) {
-        return QStringLiteral("at (%1, %2), %3 x %4")
+        return QCoreApplication::translate("SketchPanel", "位于 (%1, %2)，%3 × %4")
             .arg(rectangle->x, 0, 'f', 2)
             .arg(rectangle->y, 0, 'f', 2)
             .arg(rectangle->width, 0, 'f', 2)
             .arg(rectangle->height, 0, 'f', 2);
     }
     const auto& circle = std::get<modeling::Circle2D>(geometry);
-    return QStringLiteral("center (%1, %2), r %3")
+    return QCoreApplication::translate("SketchPanel", "中心 (%1, %2)，半径 %3")
         .arg(circle.x, 0, 'f', 2)
         .arg(circle.y, 0, 'f', 2)
         .arg(circle.radius, 0, 'f', 2);
@@ -89,42 +90,42 @@ SketchPanel::SketchPanel(QWidget* parent)
     outer->setContentsMargins(8, 8, 8, 8);
     outer->setSpacing(6);
 
-    m_planeLabel = new QLabel(tr("Plane: none"), this);
+    m_planeLabel = new QLabel(tr("平面：无"), this);
     m_planeLabel->setObjectName(QStringLiteral("sketchPlaneLabel"));
     outer->addWidget(m_planeLabel);
 
-    auto* extrudeGroup = new QGroupBox(tr("Extrude / Cut"), this);
+    auto* extrudeGroup = new QGroupBox(tr("拉伸 / 切除"), this);
     auto* extrudeLayout = new QGridLayout(extrudeGroup);
 
     m_extrudeOperation = new QComboBox(extrudeGroup);
     m_extrudeOperation->setObjectName(QStringLiteral("extrudeOperation"));
-    m_extrudeOperation->addItems({tr("New Body"), tr("Join"), tr("Cut"), tr("Intersect")});
+    m_extrudeOperation->addItems({tr("新建实体"), tr("合并"), tr("切除"), tr("求交")});
 
     m_extrudeDepth = new QLineEdit(QStringLiteral("30.0"), extrudeGroup);
     m_extrudeDepth->setObjectName(QStringLiteral("extrudeDepth"));
     m_extrudeDepth->setValidator(new QDoubleValidator(0.001, 1000.0, 3, m_extrudeDepth));
-    m_extrudeReverse = new QCheckBox(tr("Reverse"), extrudeGroup);
+    m_extrudeReverse = new QCheckBox(tr("反向"), extrudeGroup);
     m_extrudeReverse->setObjectName(QStringLiteral("extrudeReverse"));
-    auto* extrudeButton = new QPushButton(tr("Extrude"), extrudeGroup);
+    auto* extrudeButton = new QPushButton(tr("拉伸"), extrudeGroup);
     extrudeButton->setObjectName(QStringLiteral("extrudeButton"));
 
     m_cutDepth = new QLineEdit(QStringLiteral("10.0"), extrudeGroup);
     m_cutDepth->setObjectName(QStringLiteral("cutDepth"));
     m_cutDepth->setValidator(new QDoubleValidator(0.001, 1000.0, 3, m_cutDepth));
-    m_cutThroughAll = new QCheckBox(tr("Through all"), extrudeGroup);
+    m_cutThroughAll = new QCheckBox(tr("贯穿全部"), extrudeGroup);
     m_cutThroughAll->setObjectName(QStringLiteral("cutThroughAll"));
-    m_cutReverse = new QCheckBox(tr("Reverse"), extrudeGroup);
+    m_cutReverse = new QCheckBox(tr("反向"), extrudeGroup);
     m_cutReverse->setObjectName(QStringLiteral("cutReverse"));
-    auto* cutButton = new QPushButton(tr("Cut"), extrudeGroup);
+    auto* cutButton = new QPushButton(tr("切除"), extrudeGroup);
     cutButton->setObjectName(QStringLiteral("cutButton"));
 
-    extrudeLayout->addWidget(new QLabel(tr("Operation"), extrudeGroup), 0, 0);
+    extrudeLayout->addWidget(new QLabel(tr("操作"), extrudeGroup), 0, 0);
     extrudeLayout->addWidget(m_extrudeOperation, 0, 1);
-    extrudeLayout->addWidget(new QLabel(tr("Depth"), extrudeGroup), 0, 2);
+    extrudeLayout->addWidget(new QLabel(tr("深度"), extrudeGroup), 0, 2);
     extrudeLayout->addWidget(m_extrudeDepth, 0, 3);
     extrudeLayout->addWidget(m_extrudeReverse, 0, 4);
     extrudeLayout->addWidget(extrudeButton, 0, 5);
-    extrudeLayout->addWidget(new QLabel(tr("Cut Depth"), extrudeGroup), 1, 0);
+    extrudeLayout->addWidget(new QLabel(tr("切除深度"), extrudeGroup), 1, 0);
     extrudeLayout->addWidget(m_cutDepth, 1, 1);
     extrudeLayout->addWidget(m_cutThroughAll, 1, 2);
     extrudeLayout->addWidget(m_cutReverse, 1, 4);
@@ -134,18 +135,18 @@ SketchPanel::SketchPanel(QWidget* parent)
     m_entities = new QTreeWidget(this);
     m_entities->setObjectName(QStringLiteral("sketchEntityList"));
     m_entities->setColumnCount(3);
-    m_entities->setHeaderLabels({tr("Id"), tr("Type"), tr("Geometry")});
+    m_entities->setHeaderLabels({tr("ID"), tr("类型"), tr("几何")});
     m_entities->setRootIsDecorated(false);
     m_entities->setUniformRowHeights(true);
     m_entities->setMinimumHeight(110);
     m_entities->setSelectionMode(QAbstractItemView::SingleSelection);
     outer->addWidget(m_entities, 1);
 
-    auto* deleteButton = new QPushButton(tr("Delete Entity"), this);
+    auto* deleteButton = new QPushButton(tr("删除图元"), this);
     deleteButton->setObjectName(QStringLiteral("deleteEntityButton"));
     outer->addWidget(deleteButton);
 
-    m_status = new QLabel(tr("Ready"), this);
+    m_status = new QLabel(tr("就绪"), this);
     m_status->setObjectName(QStringLiteral("sketchStatus"));
     m_status->setWordWrap(true);
     outer->addWidget(m_status);
@@ -188,7 +189,7 @@ void SketchPanel::setSketch(const modeling::SketchFeatureParams& params,
     m_params = params;
     m_frame = frame;
     m_hasSketch = true;
-    setPlaneText(QStringLiteral("Plane: %1").arg(sketchapp::planeLabel(m_params.plane)));
+    setPlaneText(tr("平面：%1").arg(sketchapp::planeLabel(m_params.plane)));
     rebuildList();
     updateStatus();
 }
@@ -198,7 +199,7 @@ void SketchPanel::clearSketch()
     m_params = modeling::SketchFeatureParams{};
     m_frame = sketchapp::PlaneFrame{};
     m_hasSketch = false;
-    setPlaneText(tr("Plane: none"));
+    setPlaneText(tr("平面：无"));
     rebuildList();
     updateStatus();
 }
@@ -254,7 +255,7 @@ void SketchPanel::deleteSelected()
 {
     const modeling::SketchEntityId id = selectedEntityId();
     if (id == modeling::kInvalidSketchEntityId) {
-        setStatusText(tr("Select an entity to delete"));
+        setStatusText(tr("请选择要删除的图元"));
         return;
     }
     emit entityRemoveRequested(id);
@@ -309,7 +310,7 @@ void SketchPanel::rebuildList()
 void SketchPanel::updateStatus()
 {
     if (!m_hasSketch) {
-        m_status->setText(tr("Ready | no sketch open"));
+        m_status->setText(tr("就绪 | 未打开草图"));
         return;
     }
 
@@ -318,10 +319,10 @@ void SketchPanel::updateStatus()
     // perfectly normal state here.
     std::string error;
     const bool ready = modeling::validateSketch(m_params, error);
-    m_status->setText(tr("%1 entities | %2 | %3")
+    m_status->setText(tr("%1 个图元 | %2 | %3")
                           .arg(static_cast<int>(m_params.entities.size()))
                           .arg(sketchapp::planeLabel(m_params.plane))
-                          .arg(ready ? tr("closed profile ready")
+                          .arg(ready ? tr("闭合轮廓已就绪")
                                      : QString::fromStdString(error)));
 }
 

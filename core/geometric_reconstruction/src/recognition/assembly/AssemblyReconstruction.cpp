@@ -23,7 +23,8 @@ void fitOpenParts(const PointStore& source, const AssemblyOptions& options,
     if (!options.buildSolids || !options.maximumProjectionParts) return;
     std::vector<AssemblyPart*> pending;
     for (auto& part : output.parts)
-        if (!part.closed && part.patchIds.size() >= 2 && part.pointIds.size() >= 60)
+        if (!part.closed && part.patchIds.size() >= 2 &&
+            part.pointIds.size() >= options.minimumProjectionPartPoints)
             pending.push_back(&part);
     if (pending.empty()) return;
     std::stable_sort(pending.begin(),pending.end(),[](const auto* a,const auto* b) {
@@ -127,7 +128,7 @@ PatchExtraction extractPatches(const PointStore& source, const AssemblyOptions& 
     if(!std::isfinite(diagonal)||diagonal<=1e-12)throw std::runtime_error("Unresolved or nonfinite observation extent");
     data.tolerance=options.distanceTolerance>0?options.distanceTolerance:std::max(diagonal*1e-6,3*quantile(std::move(noise),.25));
     data.tolerance=std::max(data.tolerance,diagonal*1e-9);
-    for(auto& spacing:data.spacing)spacing=std::max(spacing,data.tolerance*2);
+    for(auto& spacing:data.spacing)spacing=std::max(spacing,data.tolerance*options.patchSpacingToleranceMultiplier);
     data.labels.assign(count,-1);
     for(size_t seed=0;seed<count;++seed) {
         if(data.labels[seed]!=-1||!data.points[seed].normal)continue;checkCancel(cancelled);
@@ -206,11 +207,11 @@ PatchGrouping groupPatches(const WorkingData& data, const std::vector<FiniteSurf
         const double reach=options.connectivityFactor*std::max(data.spacing[i],data.spacing[j]);if(pair.first>reach*reach)continue;
         if(crossesObservedBoundary(data,options,i,j))continue;
         const auto d=subtract(data.points[j].position,data.points[i].position);auto& link=links[std::minmax(size_t(a),size_t(b))];++link.all;link.distance=std::min(link.distance,std::sqrt(pair.first));
-        if(pa.orientationKnown&&pb.orientationKnown && dot(na,d)<=data.tolerance*2 && dot(nb,scale(d,-1))<=data.tolerance*2)++link.convex;
+        if(pa.orientationKnown&&pb.orientationKnown && dot(na,d)<=data.tolerance*options.connectionToleranceMultiplier && dot(nb,scale(d,-1))<=data.tolerance*options.connectionToleranceMultiplier)++link.convex;
     }}
     UnionFind groups(patches.size());
     for(const auto& item:links){const auto& l=item.second;const bool known=patches[item.first.first].orientationKnown&&patches[item.first.second].orientationKnown;
-        const bool convex=l.all>=3 && l.convex>=.7*l.all;const bool accepted=convex||(!known&&l.all>=3);
+        const bool convex=l.all>=options.minimumLinkCount && l.convex>=options.minimumConvexLinkFraction*l.all;const bool accepted=convex||(!known&&l.all>=options.minimumLinkCount);
         result.connections.push_back({item.first.first+1,item.first.second+1,convex,l.all,l.distance,accepted,known});if(accepted)groups.join(item.first.first,item.first.second);}
     std::map<size_t,size_t> parts;result.patchParts.resize(patches.size());
     for(size_t i=0;i<patches.size();++i){const auto root=groups.root(i);auto inserted=parts.emplace(root,result.parts.size());

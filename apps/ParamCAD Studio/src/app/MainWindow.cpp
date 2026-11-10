@@ -7,6 +7,8 @@
 #include "app/PointCloudWorkspaceController.h"
 #include "app/ReconstructionController.h"
 #include "app/SketchWorkspaceController.h"
+#include "app/ShortcutSettings.h"
+#include "app/UiLanguage.h"
 #include "app/FeatureEditingController.h"
 #include "core/CameraController.h"
 #include "core/PointCloudDocument.h"
@@ -26,6 +28,7 @@
 #include "ui/viewport/VTKViewer.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QAbstractItemView>
 #include <QAbstractSlider>
 #include <QAbstractSpinBox>
@@ -85,7 +88,7 @@ bool consumesArrowKeys(QWidget* widget)
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    setWindowTitle(tr("CAD & Point Cloud Studio"));
+    setWindowTitle(tr("CAD 与点云工作台"));
     setAcceptDrops(true);
     resize(1500, 920);
     setDockNestingEnabled(true);
@@ -266,7 +269,7 @@ void MainWindow::createWorkspaceControllers()
     connect(m_projectController, &ProjectController::projectAboutToReplace,
             m_pointCloudWorkspace, &PointCloudWorkspaceController::prepareProjectReplacement);
     connect(m_projectController, &ProjectController::projectPathChanged, this, [this](const QString& path) {
-        setWindowTitle(tr("CAD & Point Cloud Studio — %1").arg(QFileInfo(path).fileName()));
+        setWindowTitle(tr("CAD 与点云工作台 — %1").arg(QFileInfo(path).fileName()));
     });
     connect(capture, &CaptureController::batchStateChanged, m_projectController, &ProjectController::setCaptureBusy);
 
@@ -305,85 +308,91 @@ void MainWindow::createActions()
     m_redoCadAction = new QAction(tr("重做 CAD 编辑"),this);
     m_redoCadAction->setObjectName("redoCadAction"); m_redoCadAction->setShortcut(QKeySequence::Redo);
     m_undoCadAction->setEnabled(false); m_redoCadAction->setEnabled(false);
-    m_openAction = new QAction(style()->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Model"), this);
+    m_openAction = new QAction(style()->standardIcon(QStyle::SP_DialogOpenButton), tr("打开模型"), this);
     m_openAction->setShortcut(QKeySequence::Open);
     // A cloud produced elsewhere (or by an earlier reconstruction run) can be
     // inspected without going through the pipeline again.
-    m_openPointCloudAction = new QAction(tr("Open Point Cloud..."), this);
-    m_openPointCloudAction->setToolTip(tr("Load a .ply point cloud into the viewport"));
+    m_openPointCloudAction = new QAction(tr("打开点云…"), this);
+    m_openPointCloudAction->setToolTip(tr("将 .ply 点云载入视口"));
     // The toolbar and Tools menu share the point-cloud-to-CAD command.
-    m_reconstructCadAction = new QAction(tr("Reconstruct CAD"), this);
+    m_reconstructCadAction = new QAction(tr("重建 CAD"), this);
     m_reconstructCadAction->setObjectName(QStringLiteral("reconstructCadAction"));
     m_reconstructCadAction->setToolTip(
-        tr("Recognize geometry in the loaded point cloud and reconstruct a parametric CAD model"));
+        tr("识别已载入点云中的几何并重建参数化 CAD 模型"));
     m_reconstructCadAction->setEnabled(false);
-    m_cadWithoutProjectionAction = new QAction(tr("Reconstruct CAD without Projection Fallback"), this);
+    m_cadWithoutProjectionAction = new QAction(tr("重建 CAD（不使用投影回退）"), this);
     m_cadWithoutProjectionAction->setObjectName(QStringLiteral("cadWithoutProjectionAction"));
     m_cadWithoutProjectionAction->setEnabled(false);
     connect(m_reconstructCadAction,&QAction::changed,this,[this] {
         m_cadWithoutProjectionAction->setEnabled(m_reconstructCadAction->isEnabled());
     });
-    m_projectionDebugAction = new QAction(tr("Fit Projection on Imported Point Cloud…"), this);
+    m_projectionDebugAction = new QAction(tr("在导入的点云上拟合投影…"), this);
     m_projectionDebugAction->setObjectName(QStringLiteral("projectionDebugAction"));
-    m_projectionDebugAction->setToolTip(tr("Fit the original imported point cloud as one component"));
+    m_projectionDebugAction->setToolTip(tr("将原始导入点云作为单个部件拟合"));
     m_projectionDebugAction->setEnabled(false);
-    m_cancelCadAction = new QAction(tr("Cancel CAD Reconstruction"), this);
+    m_cancelCadAction = new QAction(tr("取消 CAD 重建"), this);
     m_cancelCadAction->setObjectName(QStringLiteral("cancelCadReconstructionAction"));
     m_cancelCadAction->setEnabled(false);
     // Texturing is a presentation tool, available once a body exists.
-    m_textureAction = new QAction(tr("Apply Texture..."), this);
+    m_textureAction = new QAction(tr("应用纹理…"), this);
     m_textureAction->setToolTip(
-        tr("Project an image onto the model without unwrapping it"));
+        tr("将图像直接投影到模型上，不做展开"));
     // Capturing the current viewport is the data-generation step of the
     // pipeline, so it sits right next to Open Model in the toolbar.
-    m_captureAction = new QAction(tr("Capture Image"), this);
-    m_captureAction->setToolTip(tr("Save the current viewport as a PNG"));
+    m_captureAction = new QAction(tr("拍摄图像"), this);
+    m_captureAction->setToolTip(tr("将当前视口保存为 PNG"));
+    // The screenshot command writes straight to outputs/screenshots so it can be
+    // bound to a key without interrupting the user with a save dialog.
+    m_screenshotAction = new QAction(tr("视图截图"), this);
+    m_screenshotAction->setObjectName(QStringLiteral("screenshotAction"));
+    m_screenshotAction->setToolTip(tr("将当前视口截图保存到 outputs/screenshots"));
+    m_screenshotAction->setShortcut(shortcuts::screenshotSequence());
     // Starting a sketch is the entry point of manual modeling, and the plane it
     // will use is picked by clicking a datum plane or a planar face in the
     // viewport, so the action stays inert until such a selection exists.
-    m_newSketchAction = new QAction(tr("New Sketch"), this);
+    m_newSketchAction = new QAction(tr("新建草图"), this);
     m_newSketchAction->setToolTip(
-        tr("Create a sketch on the selected datum plane or planar face"));
+        tr("在选定的基准面或平面上创建草图"));
     m_newSketchAction->setEnabled(false);
-    m_closeAction = new QAction(tr("Close Model"), this);
-    m_saveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Save"), this);
+    m_closeAction = new QAction(tr("关闭模型"), this);
+    m_saveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), tr("保存"), this);
     m_saveAction->setShortcut(QKeySequence::Save);
     m_saveAction->setObjectName(QStringLiteral("saveProjectAction"));
-    m_openProjectAction = new QAction(tr("Open Project..."), this);
+    m_openProjectAction = new QAction(tr("打开项目…"), this);
     m_openProjectAction->setObjectName(QStringLiteral("openProjectAction"));
     m_openProjectAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
-    m_saveAsAction = new QAction(tr("Save Project As..."), this);
+    m_saveAsAction = new QAction(tr("项目另存为…"), this);
     m_saveAsAction->setObjectName(QStringLiteral("saveProjectAsAction"));
     m_saveAsAction->setShortcut(QKeySequence::SaveAs);
-    m_exportStepAction = new QAction(tr("Export STEP..."), this);
+    m_exportStepAction = new QAction(tr("导出 STEP…"), this);
     m_exportStepAction->setObjectName(QStringLiteral("exportStepAction"));
-    m_exportStepAction->setToolTip(tr("Export the current CAD geometry in millimetres"));
+    m_exportStepAction->setToolTip(tr("以毫米为单位导出当前 CAD 几何"));
     m_exportStepAction->setEnabled(false);
-    m_exitAction = new QAction(tr("Exit"), this);
+    m_exitAction = new QAction(tr("退出"), this);
     m_exitAction->setShortcut(QKeySequence::Quit);
 
-    m_resetCameraAction = new QAction(style()->standardIcon(QStyle::SP_BrowserReload), tr("Reset Camera"), this);
-    m_frontViewAction = new QAction(tr("Front View"), this);
-    m_backViewAction = new QAction(tr("Back View"), this);
-    m_leftViewAction = new QAction(tr("Left View"), this);
-    m_rightViewAction = new QAction(tr("Right View"), this);
-    m_topViewAction = new QAction(tr("Top View"), this);
-    m_bottomViewAction = new QAction(tr("Bottom View"), this);
+    m_resetCameraAction = new QAction(style()->standardIcon(QStyle::SP_BrowserReload), tr("重置相机"), this);
+    m_frontViewAction = new QAction(tr("前视图"), this);
+    m_backViewAction = new QAction(tr("后视图"), this);
+    m_leftViewAction = new QAction(tr("左视图"), this);
+    m_rightViewAction = new QAction(tr("右视图"), this);
+    m_topViewAction = new QAction(tr("俯视图"), this);
+    m_bottomViewAction = new QAction(tr("底视图"), this);
 
-    m_datumPlanesAction = new QAction(tr("Datum Planes"), this);
+    m_datumPlanesAction = new QAction(tr("基准面"), this);
     m_datumPlanesAction->setCheckable(true);
     // The planes are drawn from the first frame of the 3D view, so the entry
     // starts checked and always reflects what the viewport shows.
     m_datumPlanesAction->setChecked(true);
-    m_datumPlanesAction->setToolTip(tr("Show the XY, YZ and XZ datum planes"));
+    m_datumPlanesAction->setToolTip(tr("显示 XY、YZ 和 XZ 基准面"));
 
-    m_captureToolAction = new QAction(tr("Capture"), this);
+    m_captureToolAction = new QAction(tr("拍摄"), this);
     m_captureToolAction->setCheckable(true);
-    m_captureToolAction->setToolTip(tr("Show the capture panel in Properties"));
+    m_captureToolAction->setToolTip(tr("在属性面板中显示拍摄页"));
 
-    m_reconstructToolAction = new QAction(tr("Reconstruct Point Cloud"), this);
+    m_reconstructToolAction = new QAction(tr("重建点云"), this);
     m_reconstructToolAction->setCheckable(true);
-    m_reconstructToolAction->setToolTip(tr("Reconstruct a point cloud from multi-view images"));
+    m_reconstructToolAction->setToolTip(tr("由多视角图像重建点云"));
     m_textEditAction = new QAction(tr("文字修改参数"), this);
     m_textEditAction->setObjectName("textParameterEditAction");
     m_textEditAction->setToolTip(tr("打开中文尺寸修改与预览"));
@@ -392,7 +401,7 @@ void MainWindow::createActions()
 
 void MainWindow::createMenus()
 {
-    QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
+    QMenu* fileMenu = menuBar()->addMenu(tr("文件(&F)"));
     fileMenu->addAction(m_openAction);
     fileMenu->addAction(m_openPointCloudAction);
     fileMenu->addAction(m_closeAction);
@@ -403,21 +412,51 @@ void MainWindow::createMenus()
     fileMenu->addAction(m_exportStepAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_exitAction);
-    auto* editMenu=menuBar()->addMenu(tr("&Edit"));
+    auto* editMenu=menuBar()->addMenu(tr("编辑(&E)"));
     editMenu->addAction(m_undoCadAction); editMenu->addAction(m_redoCadAction);
     editMenu->addSeparator(); editMenu->addAction(m_textEditAction);
 
-    auto* settingsMenu = menuBar()->addMenu(tr("&Settings"));
+    auto* settingsMenu = menuBar()->addMenu(tr("设置(&S)"));
     settingsMenu->setObjectName(QStringLiteral("settingsMenu"));
+    // The language picker is checkable and mutually exclusive; switching only
+    // takes effect after a restart because catalogs are installed at startup.
+    auto* languageMenu = settingsMenu->addMenu(tr("语言"));
+    languageMenu->setObjectName(QStringLiteral("languageMenu"));
+    auto* languageGroup = new QActionGroup(languageMenu);
+    languageGroup->setExclusive(true);
+    const auto addLanguage = [this, languageMenu, languageGroup](const char* code, const QString& label) {
+        auto* action = languageMenu->addAction(label);
+        action->setObjectName(QStringLiteral("language_") + QString::fromLatin1(code));
+        action->setCheckable(true);
+        action->setChecked(i18n::currentLanguage() == QLatin1String(code));
+        action->setData(QString::fromLatin1(code));
+        languageGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, code] {
+            if (i18n::currentLanguage() == QLatin1String(code)) return;
+            i18n::storeLanguage(QString::fromLatin1(code));
+            const auto answer = QMessageBox::question(
+                this, tr("语言"),
+                tr("语言已更改，重启 ParamCAD Studio 后生效。是否立即重启？"),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+            if (answer == QMessageBox::Yes) i18n::restartApplication();
+        });
+    };
+    addLanguage("zh", tr("中文"));
+    addLanguage("en", tr("English"));
+    settingsMenu->addSeparator();
+    auto* shortcutSettings = settingsMenu->addAction(tr("快捷键…"));
+    shortcutSettings->setObjectName(QStringLiteral("shortcutSettingsAction"));
+    connect(shortcutSettings, &QAction::triggered, this, &MainWindow::openShortcutSettings);
+    settingsMenu->addSeparator();
     auto* hyperparameters = settingsMenu->addAction(tr("超参数"));
     hyperparameters->setObjectName(QStringLiteral("hyperparametersAction"));
     connect(hyperparameters,&QAction::triggered,this,[this] { showHyperparameterSettings(this); });
 
-    auto* debugMenu = menuBar()->addMenu(tr("&Debug"));
+    auto* debugMenu = menuBar()->addMenu(tr("调试(&D)"));
     debugMenu->setObjectName(QStringLiteral("debugMenu"));
     debugMenu->addAction(m_projectionDebugAction);
 
-    QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
+    QMenu* viewMenu = menuBar()->addMenu(tr("视图(&V)"));
     viewMenu->addAction(m_resetCameraAction);
     viewMenu->addSeparator();
     viewMenu->addActions({m_frontViewAction, m_backViewAction, m_leftViewAction,
@@ -425,23 +464,24 @@ void MainWindow::createMenus()
     viewMenu->addSeparator();
     viewMenu->addAction(m_datumPlanesAction);
 
-    QMenu* toolsMenu = menuBar()->addMenu(tr("&Tools"));
+    QMenu* toolsMenu = menuBar()->addMenu(tr("工具(&T)"));
     toolsMenu->addAction(m_textureAction);
     toolsMenu->addSeparator();
+    toolsMenu->addAction(m_screenshotAction);
     toolsMenu->addAction(m_captureToolAction);
     toolsMenu->addAction(m_reconstructToolAction);
     toolsMenu->addAction(m_reconstructCadAction);
     toolsMenu->addAction(m_cadWithoutProjectionAction);
     toolsMenu->addAction(m_cancelCadAction);
 
-    QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
-    QAction* aboutAction = helpMenu->addAction(tr("About"));
+    QMenu* helpMenu = menuBar()->addMenu(tr("帮助(&H)"));
+    QAction* aboutAction = helpMenu->addAction(tr("关于"));
     connect(aboutAction, &QAction::triggered, this, &MainWindow::showAbout);
 }
 
 void MainWindow::createToolBar()
 {
-    QToolBar* toolBar = addToolBar(tr("Main Tools"));
+    QToolBar* toolBar = addToolBar(tr("主工具栏"));
     toolBar->setObjectName(QStringLiteral("mainToolBar"));
     toolBar->setMovable(true);
     toolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -496,7 +536,7 @@ void MainWindow::createCentralArea()
 void MainWindow::createDockPanels()
 {
     m_scenePanel = new ScenePanel(this);
-    auto* sceneDock = new QDockWidget(tr("Scene"), this);
+    auto* sceneDock = new QDockWidget(tr("场景"), this);
     sceneDock->setObjectName(QStringLiteral("sceneDock"));
     sceneDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     sceneDock->setWidget(m_scenePanel);
@@ -504,7 +544,7 @@ void MainWindow::createDockPanels()
     addDockWidget(Qt::LeftDockWidgetArea, sceneDock);
 
     m_propertyPanel = new PropertyPanel(this);
-    auto* propertyDock = new QDockWidget(tr("Properties"), this);
+    auto* propertyDock = new QDockWidget(tr("属性"), this);
     propertyDock->setObjectName(QStringLiteral("propertyDock"));
     propertyDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     propertyDock->setWidget(m_propertyPanel);
@@ -526,9 +566,9 @@ void MainWindow::createDockPanels()
     // like Properties groups Camera and Render, so the tabs sit on top and no
     // title is repeated above them.
     m_bottomTabs = new QTabWidget(this);
-    m_bottomTabs->addTab(m_console, tr("Console / Log"));
+    m_bottomTabs->addTab(m_console, tr("控制台 / 日志"));
 
-    m_bottomDock = new QDockWidget(tr("Output"), this);
+    m_bottomDock = new QDockWidget(tr("输出"), this);
     m_bottomDock->setObjectName(QStringLiteral("outputDock"));
     m_bottomDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
     m_bottomDock->setWidget(m_bottomTabs);
@@ -554,7 +594,7 @@ void MainWindow::createDockPanels()
 
 void MainWindow::createStatusBar()
 {
-    m_statusLabel = new QLabel(tr("Ready | Model: None | Camera: Perspective"), this);
+    m_statusLabel = new QLabel(tr("就绪 | 模型：无 | 相机：透视投影"), this);
     statusBar()->addWidget(m_statusLabel, 1);
     m_rotationStepLabel = new QLabel(this);
     m_rotationStepLabel->setObjectName("keyboardRotationStep");
@@ -577,6 +617,7 @@ void MainWindow::connectUi()
             m_pointCloudWorkspace, &PointCloudWorkspaceController::cancelCadReconstruction);
     connect(m_textureAction, &QAction::triggered, m_modelViewController, &ModelViewController::chooseTexture);
     connect(m_captureAction, &QAction::triggered, m_captureWorkspace, &CaptureWorkspaceController::captureImage);
+    connect(m_screenshotAction, &QAction::triggered, m_captureWorkspace, &CaptureWorkspaceController::captureViewport);
     connect(m_closeAction, &QAction::triggered, m_modelViewController, &ModelViewController::closeModel);
     connect(m_closeAction, &QAction::triggered,
             m_pointCloudWorkspace, &PointCloudWorkspaceController::cancelCadReconstruction);
@@ -670,21 +711,36 @@ void MainWindow::connectUi()
             m_propertyPanel->reconstructPanel(), &ReconstructPanel::setCaptureBaseDirectory);
 }
 
+void MainWindow::openShortcutSettings()
+{
+    QList<QKeySequence> reserved;
+    for (const QAction* action : findChildren<QAction*>()) {
+        if (action == m_screenshotAction) continue;
+        for (const auto& sequence : action->shortcuts()) {
+            if (!sequence.isEmpty() && !reserved.contains(sequence)) reserved.append(sequence);
+        }
+    }
+    // The screenshot shortcut must not fire while the editor is recording it.
+    const bool wasEnabled = m_screenshotAction->isEnabled();
+    m_screenshotAction->setEnabled(false);
+    const bool accepted = shortcuts::showShortcutSettings(this, reserved);
+    m_screenshotAction->setEnabled(wasEnabled);
+    if (accepted) m_screenshotAction->setShortcut(shortcuts::screenshotSequence());
+}
+
 void MainWindow::showAbout()
 {
-    QMessageBox::about(this, tr("About"),
-                       tr("CAD & Point Cloud Studio\n\n"
-                          "C++17 / Qt 6 Widgets / VTK UI skeleton\n"
-                          "Version %1").arg(QApplication::applicationVersion()));
+    QMessageBox::about(this, tr("关于"),
+                       tr("CAD 与点云工作台\n\nC++17 / Qt 6 Widgets / VTK 界面框架\n版本 %1").arg(QApplication::applicationVersion()));
 }
 
 void MainWindow::updateCameraStatus(bool parallelProjection)
 {
     const QString current = m_statusLabel->text();
     const int cameraSeparator = current.lastIndexOf(QStringLiteral(" | Camera:"));
-    const QString prefix = cameraSeparator >= 0 ? current.left(cameraSeparator) : tr("Ready | Model: None");
+    const QString prefix = cameraSeparator >= 0 ? current.left(cameraSeparator) : tr("就绪 | 模型：无");
     m_statusLabel->setText(prefix + QStringLiteral(" | Camera: ")
-                           + (parallelProjection ? tr("Orthographic") : tr("Perspective")));
+                           + (parallelProjection ? tr("正交投影") : tr("透视投影")));
 }
 
 void MainWindow::applyDarkTheme()

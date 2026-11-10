@@ -9,6 +9,7 @@
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <QCoreApplication>
 
 using modeling::ResizeAnchor;
 
@@ -104,7 +105,7 @@ void FeatureEditorPanel::setFeature(const modeling::Feature* feature, modeling::
     };
     if (feature->type == modeling::FeatureType::BoxPrimitive) {
         add(tr("中心：三个方向对称调整"),ResizeAnchor::Center);
-        const QStringList sides{"X− 面","X+ 面","Y− 面","Y+ 面","Z− 面","Z+ 面"};
+        const QStringList sides{QCoreApplication::translate("FeatureEditorPanel", "X− 面"),QCoreApplication::translate("FeatureEditorPanel", "X+ 面"),QCoreApplication::translate("FeatureEditorPanel", "Y− 面"),QCoreApplication::translate("FeatureEditorPanel", "Y+ 面"),QCoreApplication::translate("FeatureEditorPanel", "Z− 面"),QCoreApplication::translate("FeatureEditorPanel", "Z+ 面")};
         for (int i=0;i<6;++i) add(sides[i],static_cast<ResizeAnchor>(i+1));
         m_labels[0]->setText(tr("长 / 局部 X")); m_labels[1]->setText(tr("宽 / 局部 Y"));
         m_labels[2]->setText(tr("高 / 局部 Z"));

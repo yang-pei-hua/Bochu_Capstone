@@ -70,7 +70,7 @@ CameraPanel::CameraPanel(QWidget* parent)
     m_fov->setSuffix(QStringLiteral("°"));
 
     m_projection = new QComboBox(this);
-    m_projection->addItems({QStringLiteral("Perspective"), QStringLiteral("Orthographic")});
+    m_projection->addItems({tr("透视投影"), tr("正交投影")});
 
     m_orbitDistance = new QDoubleSpinBox(this);
     m_orbitDistance->setObjectName(QStringLiteral("orbitDistance"));
@@ -93,28 +93,28 @@ CameraPanel::CameraPanel(QWidget* parent)
     m_orbitElevation->setSingleStep(5.0);
     m_orbitElevation->setSuffix(QStringLiteral("°"));
 
-    m_lookAtOrigin = new QCheckBox(tr("Look at origin"), this);
+    m_lookAtOrigin = new QCheckBox(tr("注视原点"), this);
     m_lookAtOrigin->setObjectName(QStringLiteral("lookAtOrigin"));
     m_lookAtOrigin->setToolTip(
-        tr("Keep the target pinned to (0, 0, 0) and place the camera from the orbit values."));
+        tr("将目标固定在 (0, 0, 0)，并根据环绕参数放置相机。"));
     m_lookAtOrigin->setChecked(true);
 
     auto* form = new QFormLayout();
-    form->addRow(tr("Position"), makeVectorRow(m_position, this));
-    form->addRow(tr("Target"), makeVectorRow(m_target, this));
-    form->addRow(tr("Up"), makeVectorRow(m_up, this));
+    form->addRow(tr("位置"), makeVectorRow(m_position, this));
+    form->addRow(tr("目标点"), makeVectorRow(m_target, this));
+    form->addRow(tr("上方向"), makeVectorRow(m_up, this));
     form->addRow(tr("FOV"), m_fov);
-    form->addRow(tr("Projection"), m_projection);
+    form->addRow(tr("投影"), m_projection);
 
-    auto* orbitGroup = new QGroupBox(tr("Orbit"), this);
+    auto* orbitGroup = new QGroupBox(tr("环绕"), this);
     auto* orbitForm = new QFormLayout(orbitGroup);
-    orbitForm->addRow(tr("Distance"), m_orbitDistance);
-    orbitForm->addRow(tr("Azimuth"), m_orbitAzimuth);
-    orbitForm->addRow(tr("Elevation"), m_orbitElevation);
+    orbitForm->addRow(tr("距离"), m_orbitDistance);
+    orbitForm->addRow(tr("方位角"), m_orbitAzimuth);
+    orbitForm->addRow(tr("俯仰角"), m_orbitElevation);
     orbitForm->addRow(QString(), m_lookAtOrigin);
 
-    auto* applyButton = new QPushButton(tr("Apply"), this);
-    auto* resetButton = new QPushButton(tr("Reset Camera"), this);
+    auto* applyButton = new QPushButton(tr("应用"), this);
+    auto* resetButton = new QPushButton(tr("重置相机"), this);
     auto* buttonRow = new QHBoxLayout();
     buttonRow->addWidget(applyButton);
     buttonRow->addWidget(resetButton);

@@ -25,17 +25,19 @@ bool classifyMaterialCells(const PointStore& store, const CompoundRecognitionOpt
                     hi{{boundaries[0][x + 1], boundaries[1][y + 1], boundaries[2][z + 1]}};
                 std::vector<std::pair<Coord, bool>> samples;
                 int insideCount = 0;
-                for (int i = 0; i < 5; ++i)
-                    for (int j = 0; j < 5; ++j)
-                        for (int k = 0; k < 5; ++k) {
-                            Coord q{{lo[0] + (hi[0] - lo[0]) * (i + 0.5) / 5,
-                                     lo[1] + (hi[1] - lo[1]) * (j + 0.5) / 5,
-                                     lo[2] + (hi[2] - lo[2]) * (k + 0.5) / 5}};
+                const int samplesPerAxis = static_cast<int>(options.cellSamplesPerAxis);
+                const int sampleCount = samplesPerAxis * samplesPerAxis * samplesPerAxis;
+                for (int i = 0; i < samplesPerAxis; ++i)
+                    for (int j = 0; j < samplesPerAxis; ++j)
+                        for (int k = 0; k < samplesPerAxis; ++k) {
+                            Coord q{{lo[0] + (hi[0] - lo[0]) * (i + 0.5) / samplesPerAxis,
+                                     lo[1] + (hi[1] - lo[1]) * (j + 0.5) / samplesPerAxis,
+                                     lo[2] + (hi[2] - lo[2]) * (k + 0.5) / samplesPerAxis}};
                             const bool inside = nearest.inside(world(q, axes));
                             insideCount += inside;
                             samples.push_back({q, inside});
                         }
-                const double ratio = insideCount / 125.0;
+                const double ratio = insideCount / double(sampleCount);
                 if (ratio >= 1 - options.maximumCellError) {
                     cells.push_back({{{x, y, z}}, true});
                     totalError += 1 - ratio;
@@ -58,8 +60,8 @@ bool classifyMaterialCells(const PointStore& store, const CompoundRecognitionOpt
                                 d += plane.n[a] * sample.first[a];
                             mismatch += (sign * d <= 0) != sample.second;
                         }
-                        if (mismatch / 125.0 < bestError) {
-                            bestError = mismatch / 125.0;
+                        if (mismatch / double(sampleCount) < bestError) {
+                            bestError = mismatch / double(sampleCount);
                             best = &plane;
                             bestSign = sign;
                         }

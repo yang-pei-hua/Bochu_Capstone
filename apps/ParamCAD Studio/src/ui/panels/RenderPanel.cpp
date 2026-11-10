@@ -1,5 +1,7 @@
 #include "ui/panels/RenderPanel.h"
 
+#include "app/CaptureSettings.h"
+
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -15,12 +17,12 @@
 
 RenderPanel::RenderPanel(QWidget* parent)
     : QWidget(parent)
-    , m_backgroundButton(new QPushButton(tr("Choose..."), this))
-    , m_lighting(new QCheckBox(tr("Enable Lighting"), this))
+    , m_backgroundButton(new QPushButton(tr("选择…"), this))
+    , m_lighting(new QCheckBox(tr("启用光照"), this))
     , m_width(new QSpinBox(this))
     , m_height(new QSpinBox(this))
     , m_texturePath(new QLabel(this))
-    , m_textureEnabled(new QCheckBox(tr("Project Texture"), this))
+    , m_textureEnabled(new QCheckBox(tr("投影纹理"), this))
     , m_textureAxis(new QComboBox(this))
 {
     m_lighting->setChecked(true);
@@ -29,24 +31,31 @@ RenderPanel::RenderPanel(QWidget* parent)
         spinBox->setRange(64, 16384);
         spinBox->setSingleStep(64);
     }
-    m_width->setValue(1920);
-    m_height->setValue(1080);
+    int width = 1920, height = 1080;
+    try {
+        const auto settings = loadCaptureSettings();
+        width = settings.imageWidth;
+        height = settings.imageHeight;
+    } catch (const std::exception&) {
+    }
+    m_width->setValue(width);
+    m_height->setValue(height);
 
-    auto* captureButton = new QPushButton(tr("Capture Image"), this);
+    auto* captureButton = new QPushButton(tr("拍摄图像"), this);
     captureButton->setProperty("primary", true);
 
     auto* form = new QFormLayout();
-    form->addRow(tr("Background Color"), m_backgroundButton);
+    form->addRow(tr("背景颜色"), m_backgroundButton);
     form->addRow(QString(), m_lighting);
-    form->addRow(tr("Output Width"), m_width);
-    form->addRow(tr("Output Height"), m_height);
+    form->addRow(tr("输出宽度"), m_width);
+    form->addRow(tr("输出高度"), m_height);
 
-    auto* textureGroup = new QGroupBox(tr("Texture"), this);
+    auto* textureGroup = new QGroupBox(tr("纹理"), this);
     auto* textureLayout = new QVBoxLayout(textureGroup);
 
-    auto* browseButton = new QPushButton(tr("Load Image..."), textureGroup);
+    auto* browseButton = new QPushButton(tr("载入图像…"), textureGroup);
     browseButton->setObjectName(QStringLiteral("textureBrowseButton"));
-    auto* clearButton = new QPushButton(tr("Remove"), textureGroup);
+    auto* clearButton = new QPushButton(tr("移除"), textureGroup);
     clearButton->setObjectName(QStringLiteral("textureClearButton"));
 
     auto* buttonRow = new QHBoxLayout();
@@ -59,15 +68,15 @@ RenderPanel::RenderPanel(QWidget* parent)
     m_textureAxis->setObjectName(QStringLiteral("textureProjection"));
     // Per Face projects each face from its own normal, so it is the only choice
     // that keeps the picture square on every side of a box.
-    m_textureAxis->addItems({tr("Auto"), tr("X Axis"), tr("Y Axis"), tr("Z Axis"),
-                             tr("Per Face")});
+    m_textureAxis->addItems({tr("自动"), tr("X 轴"), tr("Y 轴"), tr("Z 轴"),
+                             tr("按面")});
     m_texturePath->setObjectName(QStringLiteral("texturePathLabel"));
     m_texturePath->setWordWrap(true);
 
     auto* textureForm = new QFormLayout();
-    textureForm->addRow(tr("Image"), m_texturePath);
-    textureForm->addRow(tr("Display"), m_textureEnabled);
-    textureForm->addRow(tr("Direction"), m_textureAxis);
+    textureForm->addRow(tr("图像"), m_texturePath);
+    textureForm->addRow(tr("显示"), m_textureEnabled);
+    textureForm->addRow(tr("方向"), m_textureAxis);
 
     textureLayout->addLayout(buttonRow);
     textureLayout->addLayout(textureForm);
@@ -102,7 +111,7 @@ int RenderPanel::outputHeight() const
 
 void RenderPanel::setTexturePath(const QString& path)
 {
-    m_texturePath->setText(path.isEmpty() ? tr("No texture") : QFileInfo(path).fileName());
+    m_texturePath->setText(path.isEmpty() ? tr("无纹理") : QFileInfo(path).fileName());
     m_texturePath->setToolTip(path);
 }
 
@@ -138,7 +147,7 @@ void RenderPanel::setPresentation(const RenderPresentation& state)
 
 void RenderPanel::chooseBackgroundColor()
 {
-    const QColor color = QColorDialog::getColor(m_backgroundColor, this, tr("Viewport Background"));
+    const QColor color = QColorDialog::getColor(m_backgroundColor, this, tr("视口背景"));
     if (!color.isValid()) {
         return;
     }

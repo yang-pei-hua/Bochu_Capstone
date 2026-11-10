@@ -65,6 +65,7 @@ private:
     void connectUi();
     void applyDarkTheme();
     void showAbout();
+    void openShortcutSettings();
     void updateCameraStatus(bool parallelProjection);
 
     Scene m_scene;
@@ -113,6 +114,7 @@ private:
     // sketch is open; this entry is the user's preference for the 3D view.
     QAction* m_datumPlanesAction = nullptr;
     QAction* m_captureAction = nullptr;
+    QAction* m_screenshotAction = nullptr;
     QAction* m_newSketchAction = nullptr;
     QAction* m_captureToolAction = nullptr;
     QAction* m_reconstructToolAction = nullptr;

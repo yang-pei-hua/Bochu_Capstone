@@ -33,7 +33,7 @@ public:
     {
         setObjectName(QStringLiteral("projectionSketchCanvas"));
         setMinimumHeight(155);
-        setToolTip(QObject::tr("Scroll to zoom, drag to pan, double-click to reset."));
+        setToolTip(QObject::tr("滚轮缩放，拖动平移，双击复位。"));
     }
 
     void setInput(const ProjectionSketchInput& input)

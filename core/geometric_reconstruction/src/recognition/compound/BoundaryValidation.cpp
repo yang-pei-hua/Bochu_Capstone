@@ -33,12 +33,13 @@ bool validateCompoundBoundary(const std::vector<PointSample>& points, const Comp
     };
     std::size_t supported = 0;
     for (const auto &p : points) {
-        const auto shift = scale(math3::normalized(*p.normal), options.distanceTolerance * 4);
+        const auto shift = scale(math3::normalized(*p.normal),
+            options.distanceTolerance * options.coverageShiftToleranceMultiplier);
         supported +=
             modelContains(subtract(p.position, shift)) && !modelContains(add(p.position, shift));
     }
     output.surfaceCoverage = double(supported) / points.size();
-    if (output.surfaceCoverage < 0.90) {
+    if (output.surfaceCoverage < options.minimumSurfaceCoverage) {
         error = "Compound surface coverage too low: " + std::to_string(output.surfaceCoverage);
         return false;
     }

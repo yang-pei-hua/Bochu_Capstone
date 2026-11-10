@@ -1,4 +1,5 @@
 #include "io/PlyReader.h"
+#include <QCoreApplication>
 
 #include <QByteArray>
 #include <QFile>
@@ -130,7 +131,7 @@ bool parseHeader(QFile& file, Format& format, std::vector<Element>& elements, QS
     while (true) {
         const QByteArray rawLine = file.readLine();
         if (rawLine.isEmpty()) {
-            error = QStringLiteral("PLY header ended before end_header");
+            error = QCoreApplication::translate("PlyReader", "PLY 头部在 end_header 之前结束");
             return false;
         }
         const QStringList parts = splitFields(QString::fromLatin1(rawLine).trimmed());
@@ -144,7 +145,7 @@ bool parseHeader(QFile& file, Format& format, std::vector<Element>& elements, QS
         }
         if (keyword == QLatin1String("format")) {
             if (parts.size() < 2) {
-                error = QStringLiteral("PLY format line is incomplete");
+                error = QCoreApplication::translate("PlyReader", "PLY 格式行不完整");
                 return false;
             }
             const QString& name = parts.at(1);
@@ -155,7 +156,7 @@ bool parseHeader(QFile& file, Format& format, std::vector<Element>& elements, QS
             } else if (name == QLatin1String("binary_big_endian")) {
                 format = Format::BinaryBigEndian;
             } else {
-                error = QStringLiteral("unsupported PLY format: %1").arg(name);
+                error = QCoreApplication::translate("PlyReader", "不支持的 PLY 格式：%1").arg(name);
                 return false;
             }
             sawFormat = true;
@@ -163,7 +164,7 @@ bool parseHeader(QFile& file, Format& format, std::vector<Element>& elements, QS
         }
         if (keyword == QLatin1String("element")) {
             if (parts.size() < 3) {
-                error = QStringLiteral("PLY element line is incomplete");
+                error = QCoreApplication::translate("PlyReader", "PLY 元素行不完整");
                 return false;
             }
             Element element;
@@ -171,7 +172,7 @@ bool parseHeader(QFile& file, Format& format, std::vector<Element>& elements, QS
             bool ok = false;
             element.count = parts.at(2).toULongLong(&ok);
             if (!ok) {
-                error = QStringLiteral("PLY element %1 has an invalid count").arg(element.name);
+                error = QCoreApplication::translate("PlyReader", "PLY 元素 %1 的数量无效").arg(element.name);
                 return false;
             }
             elements.push_back(element);
@@ -179,30 +180,30 @@ bool parseHeader(QFile& file, Format& format, std::vector<Element>& elements, QS
         }
         if (keyword == QLatin1String("property")) {
             if (elements.empty()) {
-                error = QStringLiteral("PLY property declared before any element");
+                error = QCoreApplication::translate("PlyReader", "PLY 属性出现在任何元素之前");
                 return false;
             }
             Property property;
             if (parts.size() >= 2 && parts.at(1) == QLatin1String("list")) {
                 if (parts.size() < 5) {
-                    error = QStringLiteral("PLY list property line is incomplete");
+                    error = QCoreApplication::translate("PlyReader", "PLY 列表属性行不完整");
                     return false;
                 }
                 property.isList = true;
                 if (!lookupScalarType(parts.at(2), property.countType)
                     || !lookupScalarType(parts.at(3), property.itemType)) {
-                    error = QStringLiteral("unsupported PLY list property types: %1 %2")
+                    error = QCoreApplication::translate("PlyReader", "不支持的 PLY 列表属性类型：%1 %2")
                                 .arg(parts.at(2), parts.at(3));
                     return false;
                 }
                 property.name = parts.at(4);
             } else {
                 if (parts.size() < 3) {
-                    error = QStringLiteral("PLY property line is incomplete");
+                    error = QCoreApplication::translate("PlyReader", "PLY 属性行不完整");
                     return false;
                 }
                 if (!lookupScalarType(parts.at(1), property.scalar)) {
-                    error = QStringLiteral("unsupported PLY property type: %1").arg(parts.at(1));
+                    error = QCoreApplication::translate("PlyReader", "不支持的 PLY 属性类型：%1").arg(parts.at(1));
                     return false;
                 }
                 property.name = parts.at(2);
@@ -218,7 +219,7 @@ bool parseHeader(QFile& file, Format& format, std::vector<Element>& elements, QS
     }
 
     if (!sawFormat) {
-        error = QStringLiteral("PLY header has no format line");
+        error = QCoreApplication::translate("PlyReader", "PLY 头部缺少格式行");
         return false;
     }
     return true;
@@ -266,7 +267,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
 {
     for (const Property& property : element.properties) {
         if (property.isList) {
-            error = QStringLiteral("PLY vertex element uses an unsupported list property: %1")
+            error = QCoreApplication::translate("PlyReader", "PLY 顶点元素使用了不支持的列表属性：%1")
                         .arg(property.name);
             return false;
         }
@@ -311,7 +312,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
     }
 
     if (stride <= 0 || xIndex < 0 || yIndex < 0 || zIndex < 0) {
-        error = QStringLiteral("PLY vertex element has no x/y/z properties");
+        error = QCoreApplication::translate("PlyReader", "PLY 顶点元素缺少 x/y/z 属性");
         return false;
     }
     // Colors are all-or-nothing: a partial set would desynchronise the two
@@ -337,14 +338,14 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
         for (quint64 index = 0; index < count; ++index) {
             const QByteArray rawLine = file.readLine();
             if (rawLine.isEmpty()) {
-                error = QStringLiteral("PLY vertex data ended after %1 of %2 vertices")
+                error = QCoreApplication::translate("PlyReader", "PLY 顶点数据在 %2 个顶点中的第 %1 个之后结束")
                             .arg(index)
                             .arg(count);
                 return false;
             }
             const QStringList tokens = splitFields(QString::fromLatin1(rawLine));
             if (tokens.size() < expected) {
-                error = QStringLiteral("PLY vertex %1 has %2 fields, expected %3")
+                error = QCoreApplication::translate("PlyReader", "PLY 顶点 %1 有 %2 个字段，应为 %3 个")
                             .arg(index)
                             .arg(tokens.size())
                             .arg(expected);
@@ -356,7 +357,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
                 bool ok = false;
                 values[axis] = tokens.at(coordinates[axis]).toDouble(&ok);
                 if (!ok) {
-                    error = QStringLiteral("PLY vertex %1 has a non-numeric coordinate").arg(index);
+                    error = QCoreApplication::translate("PlyReader", "PLY 顶点 %1 的坐标不是数值").arg(index);
                     return false;
                 }
             }
@@ -372,7 +373,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
                     bool ok = false;
                     components[axis] = tokens.at(normalIndices[axis]).toDouble(&ok);
                     if (!ok) {
-                        error = QStringLiteral("PLY vertex %1 has a non-numeric normal")
+                        error = QCoreApplication::translate("PlyReader", "PLY 顶点 %1 的法向不是数值")
                                     .arg(index);
                         return false;
                     }
@@ -389,7 +390,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
                     bool ok = false;
                     channels[channel] = tokens.at(components[channel]).toDouble(&ok);
                     if (!ok) {
-                        error = QStringLiteral("PLY vertex %1 has a non-numeric color").arg(index);
+                        error = QCoreApplication::translate("PlyReader", "PLY 顶点 %1 的颜色不是数值").arg(index);
                         return false;
                     }
                 }
@@ -405,7 +406,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
     const quint64 blockSize = count * static_cast<quint64>(stride);
     const qint64 remaining = file.size() - file.pos();
     if (remaining < 0 || static_cast<quint64>(remaining) < blockSize) {
-        error = QStringLiteral("PLY vertex data is truncated: %1 bytes available, %2 required")
+        error = QCoreApplication::translate("PlyReader", "PLY 顶点数据被截断：可用 %1 字节，需要 %2 字节")
                     .arg(remaining < 0 ? 0 : remaining)
                     .arg(blockSize);
         return false;
@@ -413,7 +414,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
 
     QByteArray block;
     if (!readFully(file, blockSize, block)) {
-        error = QStringLiteral("cannot read %1 bytes of PLY vertex data").arg(blockSize);
+        error = QCoreApplication::translate("PlyReader", "无法读取 %1 字节的 PLY 顶点数据").arg(blockSize);
         return false;
     }
 
@@ -433,7 +434,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
         if (!decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(xIndex)), properties.at(static_cast<std::size_t>(xIndex)).scalar, littleEndian, x)
             || !decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(yIndex)), properties.at(static_cast<std::size_t>(yIndex)).scalar, littleEndian, y)
             || !decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(zIndex)), properties.at(static_cast<std::size_t>(zIndex)).scalar, littleEndian, z)) {
-            error = QStringLiteral("PLY vertex %1 has an unsupported coordinate type").arg(index);
+            error = QCoreApplication::translate("PlyReader", "PLY 顶点 %1 的坐标类型不受支持").arg(index);
             return false;
         }
         cloud.positions.push_back({static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
@@ -442,7 +443,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
             if (!decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(normalXIndex)), properties.at(static_cast<std::size_t>(normalXIndex)).scalar, littleEndian, normalX)
                 || !decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(normalYIndex)), properties.at(static_cast<std::size_t>(normalYIndex)).scalar, littleEndian, normalY)
                 || !decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(normalZIndex)), properties.at(static_cast<std::size_t>(normalZIndex)).scalar, littleEndian, normalZ)) {
-                error = QStringLiteral("PLY vertex %1 has an unsupported normal type").arg(index);
+                error = QCoreApplication::translate("PlyReader", "PLY 顶点 %1 的法向类型不受支持").arg(index);
                 return false;
             }
             cloud.normals.push_back({static_cast<float>(normalX),
@@ -454,7 +455,7 @@ bool readVertices(QFile& file, const Element& element, Format format, PlyCloud& 
             if (!decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(redIndex)), properties.at(static_cast<std::size_t>(redIndex)).scalar, littleEndian, red)
                 || !decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(greenIndex)), properties.at(static_cast<std::size_t>(greenIndex)).scalar, littleEndian, green)
                 || !decodeBinaryScalar(row + offsets.at(static_cast<std::size_t>(blueIndex)), properties.at(static_cast<std::size_t>(blueIndex)).scalar, littleEndian, blue)) {
-                error = QStringLiteral("PLY vertex %1 has an unsupported color type").arg(index);
+                error = QCoreApplication::translate("PlyReader", "PLY 顶点 %1 的颜色类型不受支持").arg(index);
                 return false;
             }
             cloud.colors.push_back({toColorByte(red), toColorByte(green), toColorByte(blue)});
@@ -472,7 +473,7 @@ bool skipElement(QFile& file, const Element& element, Format format, QString& er
     if (format == Format::Ascii) {
         for (quint64 index = 0; index < element.count; ++index) {
             if (file.readLine().isEmpty() && file.atEnd()) {
-                error = QStringLiteral("PLY element %1 ended after %2 of %3 rows")
+                error = QCoreApplication::translate("PlyReader", "PLY 元素 %1 在 %3 行中的第 %2 行之后结束")
                             .arg(element.name)
                             .arg(index)
                             .arg(element.count);
@@ -497,7 +498,7 @@ bool skipElement(QFile& file, const Element& element, Format format, QString& er
             return true;
         }
         if (!advance(file, element.count * static_cast<quint64>(stride))) {
-            error = QStringLiteral("PLY element %1 is truncated").arg(element.name);
+            error = QCoreApplication::translate("PlyReader", "PLY 元素 %1 被截断").arg(element.name);
             return false;
         }
         return true;
@@ -509,24 +510,24 @@ bool skipElement(QFile& file, const Element& element, Format format, QString& er
         for (const Property& property : element.properties) {
             if (!property.isList) {
                 if (!advance(file, static_cast<quint64>(property.scalar.size))) {
-                    error = QStringLiteral("PLY element %1 is truncated").arg(element.name);
+                    error = QCoreApplication::translate("PlyReader", "PLY 元素 %1 被截断").arg(element.name);
                     return false;
                 }
                 continue;
             }
             QByteArray rawCount;
             if (!readFully(file, static_cast<quint64>(property.countType.size), rawCount)) {
-                error = QStringLiteral("PLY element %1 is truncated").arg(element.name);
+                error = QCoreApplication::translate("PlyReader", "PLY 元素 %1 被截断").arg(element.name);
                 return false;
             }
             double countValue = 0.0;
             if (!decodeBinaryScalar(rawCount.constData(), property.countType, littleEndian, countValue) || countValue < 0.0) {
-                error = QStringLiteral("PLY element %1 has an invalid list count").arg(element.name);
+                error = QCoreApplication::translate("PlyReader", "PLY 元素 %1 的列表计数无效").arg(element.name);
                 return false;
             }
             const quint64 items = static_cast<quint64>(countValue);
             if (!advance(file, items * static_cast<quint64>(property.itemType.size))) {
-                error = QStringLiteral("PLY element %1 is truncated").arg(element.name);
+                error = QCoreApplication::translate("PlyReader", "PLY 元素 %1 被截断").arg(element.name);
                 return false;
             }
         }
@@ -545,7 +546,7 @@ bool PlyReader::read(const QString& path, PlyCloud& cloud, QString& error)
 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        error = QStringLiteral("cannot open %1: %2").arg(path, file.errorString());
+        error = QCoreApplication::translate("PlyReader", "无法打开 %1：%2").arg(path, file.errorString());
         return false;
     }
 
@@ -563,11 +564,11 @@ bool PlyReader::read(const QString& path, PlyCloud& cloud, QString& error)
         }
     }
     if (vertexElement == nullptr) {
-        error = QStringLiteral("PLY file has no vertex element: %1").arg(path);
+        error = QCoreApplication::translate("PlyReader", "PLY 文件缺少顶点元素：%1").arg(path);
         return false;
     }
     if (vertexElement->count == 0) {
-        error = QStringLiteral("PLY file contains no vertices: %1").arg(path);
+        error = QCoreApplication::translate("PlyReader", "PLY 文件不包含顶点：%1").arg(path);
         return false;
     }
 
@@ -590,7 +591,7 @@ bool PlyReader::read(const QString& path, PlyCloud& cloud, QString& error)
     }
 
     if (cloud.positions.empty()) {
-        error = QStringLiteral("PLY file contains no vertices: %1").arg(path);
+        error = QCoreApplication::translate("PlyReader", "PLY 文件不包含顶点：%1").arg(path);
         return false;
     }
     return true;

@@ -24,6 +24,7 @@ public:
                                QWidget* dialogParent, QObject* parent = nullptr);
     void connectUi();
     void captureImage();
+    void captureViewport();
     void syncCaptureDistance();
 
 private:

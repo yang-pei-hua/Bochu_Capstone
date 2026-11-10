@@ -1,4 +1,5 @@
 #include "io/CameraInfoBuilder.h"
+#include <QCoreApplication>
 
 #include <QByteArray>
 #include <QDir>
@@ -369,11 +370,11 @@ bool writeCameraInfo(const QString& path, const std::vector<PreparedImage>& imag
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        error = QStringLiteral("cannot open %1 for writing: %2").arg(path, file.errorString());
+        error = QCoreApplication::translate("CameraInfoBuilder", "无法打开 %1 进行写入：%2").arg(path, file.errorString());
         return false;
     }
     if (file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) == -1) {
-        error = QStringLiteral("cannot write %1").arg(path);
+        error = QCoreApplication::translate("CameraInfoBuilder", "无法写入 %1").arg(path);
         return false;
     }
     return true;
@@ -407,7 +408,7 @@ CameraInfoBuildResult CameraInfoBuilder::build(const QString& imageDirectory,
     result.cameraMode = QStringLiteral("estimated");
 
     if (names.size() < 2) {
-        result.skipReason = QStringLiteral("not enough images");
+        result.skipReason = QCoreApplication::translate("CameraInfoBuilder", "图像数量不足");
         return result;
     }
 
@@ -466,15 +467,15 @@ CameraInfoBuildResult CameraInfoBuilder::build(const QString& imageDirectory,
     }
 
     if (missing + unusable == names.size()) {
-        result.skipReason = QStringLiteral("no capture metadata in the directory (manifest or sidecar)");
+        result.skipReason = QCoreApplication::translate("CameraInfoBuilder", "目录中没有拍摄元数据（manifest 或 sidecar）");
         return result;
     }
     if (missing + unusable > 0) {
-        result.skipReason = QStringLiteral("some images have no capture metadata");
+        result.skipReason = QCoreApplication::translate("CameraInfoBuilder", "部分图像缺少拍摄元数据");
         return result;
     }
     if (orthographic > 0) {
-        result.skipReason = QStringLiteral("one or more photos are orthographic");
+        result.skipReason = QCoreApplication::translate("CameraInfoBuilder", "存在正交投影的照片");
         return result;
     }
 

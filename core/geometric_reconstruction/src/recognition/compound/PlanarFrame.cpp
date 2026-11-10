@@ -23,7 +23,8 @@ bool recoverPlanarFrame(const std::vector<PointSample>& points, const CompoundRe
     }
     std::sort(directions.begin(), directions.end(),
               [](auto a, auto b) { return a.count > b.count; });
-    const std::size_t minimumSupport = std::max<std::size_t>(20, points.size() / 200);
+    const std::size_t minimumSupport = std::max<std::size_t>(options.minimumSupportPoints,
+        points.size() / std::max<std::size_t>(1, options.supportDivisor));
     auto refineDirection = [&](Vec3 normal) {
         const PlaneEvidence* best=nullptr;
         for(const auto& e : options.boundaryEvidence)
@@ -37,7 +38,8 @@ bool recoverPlanarFrame(const std::vector<PointSample>& points, const CompoundRe
         std::sort(data.begin(), data.end(), [](auto a, auto b) { return a.first < b.first; });
         std::size_t start = 0, bestStart = 0, bestEnd = 0;
         for (std::size_t end = 0; end < data.size(); ++end) {
-            while (data[end].first - data[start].first > options.distanceTolerance * 4)
+            while (data[end].first - data[start].first >
+                   options.distanceTolerance * options.frameDistanceToleranceMultiplier)
                 ++start;
             if (end + 1 - start > bestEnd - bestStart) {
                 bestStart = start;
@@ -61,7 +63,7 @@ bool recoverPlanarFrame(const std::vector<PointSample>& points, const CompoundRe
     };
     const Vec3 first = refineDirection(directions.front().axis);
     auto second = std::find_if(directions.begin() + 1, directions.end(),
-                               [&](auto g) { return std::abs(dot(first, g.axis)) < 0.1; });
+                               [&](auto g) { return std::abs(dot(first, g.axis)) < options.orthogonalCosine; });
     if (second == directions.end()) {
         error = "No supported orthogonal frame";
         return false;
@@ -92,7 +94,8 @@ bool recoverPlanarFrame(const std::vector<PointSample>& points, const CompoundRe
         for (std::size_t i = 0; i < values.size();) {
             std::size_t j = i + 1;
             // A bounded cluster prevents chains of noise/outliers joining two faces.
-            while (j < values.size() && values[j] - values[i] < options.distanceTolerance * 4)
+            while (j < values.size() && values[j] - values[i] <
+                   options.distanceTolerance * options.frameDistanceToleranceMultiplier)
                 ++j;
             if (j - i >= minimumSupport)
                 result.push_back(values[(i + j) / 2]);
@@ -101,7 +104,8 @@ bool recoverPlanarFrame(const std::vector<PointSample>& points, const CompoundRe
         // Merge split tails of the same noisy face, preserving actual thin walls.
         std::vector<double> merged;
         for (double v : result) {
-            if (!merged.empty() && v - merged.back() < options.distanceTolerance * 5)
+            if (!merged.empty() && v - merged.back() <
+                options.distanceTolerance * options.levelMergeToleranceMultiplier)
                 merged.back() = (v + merged.back()) / 2;
             else
                 merged.push_back(v);
@@ -121,9 +125,9 @@ bool recoverPlanarFrame(const std::vector<PointSample>& points, const CompoundRe
         }
         std::sort(boundaries[a].begin(),boundaries[a].end());
         boundaries[a].erase(std::unique(boundaries[a].begin(),boundaries[a].end(),[&](double a,double b){
-            return std::abs(a-b)<options.distanceTolerance*4;
+            return std::abs(a-b)<options.distanceTolerance*options.frameDistanceToleranceMultiplier;
         }),boundaries[a].end());
-        if (boundaries[a].size() < 2 || boundaries[a].size() > 10) {
+        if (boundaries[a].size() < 2 || boundaries[a].size() > options.maximumBoundaries) {
             error = "Insufficient or excessive planar boundaries";
             return false;
         }
@@ -141,7 +145,7 @@ bool recoverPlanarFrame(const std::vector<PointSample>& points, const CompoundRe
             int(std::min_element(n.begin(), n.end(),
                                  [](double a, double b) { return std::abs(a) < std::abs(b); }) -
                 n.begin());
-        if (std::abs(n[extrusion]) > 0.05)
+        if (std::abs(n[extrusion]) > options.extrusionAxisCosine)
             continue;
         std::vector<double> offsets;
         for (const auto &p : points)
@@ -151,7 +155,7 @@ bool recoverPlanarFrame(const std::vector<PointSample>& points, const CompoundRe
         for (double offset : levels(std::move(offsets)))
             obliques.push_back({n, -offset, extrusion});
     }
-    if (obliques.size() > 6) {
+    if (obliques.size() > options.maximumObliques) {
         error = "Curved or unsupported surface requires curved-feature recognition";
         return false;
     }

@@ -20,6 +20,34 @@ struct AssemblyOptions {
     std::size_t maximumLocalProfileAttempts=48;
     bool enableSpecializedRecovery=true;
     std::optional<ProjectionExtrusionOptions> projectionOptions;
+
+    // Closure and local-recovery gates previously embedded in the assembly
+    // implementation. Defaults reproduce the historical behaviour.
+    std::size_t minimumPartPatches=4, maximumPartPatches=32;
+    std::size_t maximumClosurePatches=128, maximumClosureVertices=4096;
+    double weldToleranceMultiplier=4;
+    double minimumPartSpanMultiplier=5;
+    std::size_t minimumClosureSamples=80, maximumClosureSamples=20000;
+    double closureSampleToleranceMultiplier=4;
+    double curvedClosureCoverage=0.95;
+    std::size_t minimumClosureConflicts=2, closureConflictPointDivisor=200;
+    std::size_t minimumProjectionPartPoints=60;
+    double patchSpacingToleranceMultiplier=2;
+    double connectionToleranceMultiplier=2;
+    double minimumConvexLinkFraction=0.7;
+    std::size_t minimumLinkCount=3;
+    std::size_t minimumPartPointsForLocalRecovery=400;
+    std::size_t minimumProfileSplitPoints=600;
+    std::size_t minimumParentSplitPoints=1200;
+    std::size_t minimumLargeParentPoints=3000;
+    std::size_t minimumHugeParentPoints=6000;
+    std::size_t minimumProfileSamples=600;
+    std::size_t minimumLargeProfileSamples=3000;
+    double minimumRetainedFraction=0.98;
+    std::size_t minimumResidualSamples=24;
+    double minimumParentSupportFraction=0.90;
+    std::size_t minimumPlaneCount=8, maximumPlaneCount=64;
+    std::size_t maximumBroadPairs=3, maximumProfilePairs=8;
 };
 // Counters only: diagnostics do not repair, filter or change recovered geometry.
 struct BoundaryRecoveryDiagnostics {

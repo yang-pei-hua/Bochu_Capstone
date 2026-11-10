@@ -84,7 +84,7 @@ void sharedBox() {
     const auto& support = std::get<PlaneEvidence>(analysis.surfaces.front()).supportPointIds;
     detail::guided::TemplateRegions templates;
     require(detail::guided::fitTemplateRegions(points, plane, {}, {{19, TemplateKind::Plane, support}},
-        templates, error, {}), error);
+        templates, error, {}, GuidedRecognitionOptions{}), error);
     require(templates.fits.size() == 1 && templates.fits.front().regionId == 19 &&
         templates.seeds.size() == 1 && templates.closed.empty(),
         "a known selected region yields a fit and seed independently of global recognition");
@@ -340,7 +340,7 @@ void tiltedCavityWalls() {
     PointStore points(samples);SurfaceAnalysisResult analysis;SurfaceAnalysisOptions options;std::string error;
     require(indexSurfaceEvidence(points,evidence,options,analysis,error),error);
     Frame host;host.x={1,0,0};host.y={0,1,0};host.z={0,0,1};host.c={0,8};
-    PrismCandidate cut;require(rectangularCut(points,analysis,host,0.05,cut),"observed noisy walls support a through cut");
+    PrismCandidate cut;require(rectangularCut(points,analysis,host,0.05,MixedFeatureRecognitionOptions{},cut),"observed noisy walls support a through cut");
     require(std::abs(dot(cut.plane.xDirection,host.z))<1e-12 && std::abs(dot(cut.plane.origin,host.z))<1e-12,"wall tilt cannot shift through-cut start plane");
     CompoundCandidate model;BoxCandidate plate;plate.primitive.sizeX=300;plate.primitive.sizeY=150;plate.primitive.sizeZ=8;model.boxes.push_back(plate);model.prisms.push_back(cut);
     modeling::ModelingCore core;const auto committed=commitCompoundCandidate(model,core);require(committed.success,committed.error);

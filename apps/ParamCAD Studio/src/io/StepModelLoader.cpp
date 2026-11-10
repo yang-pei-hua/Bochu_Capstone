@@ -1,4 +1,5 @@
 #include "io/StepModelLoader.h"
+#include <QCoreApplication>
 
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -103,7 +104,7 @@ bool moveCentroidToOrigin(TopoDS_Shape& shape)
 
 QString stepError(const QString& fileName, const QString& reason)
 {
-    return QStringLiteral("Could not import STEP file '%1': %2").arg(fileName, reason);
+    return QCoreApplication::translate("StepModelLoader", "无法导入 STEP 文件「%1」：%2").arg(fileName, reason);
 }
 
 }  // namespace
@@ -123,12 +124,11 @@ bool StepModelLoader::load(const QString& filePath, LoadedModel& model,
     const QFileInfo info(filePath);
     const QString fileName = info.fileName();
     if (!info.exists() || !info.isFile()) {
-        errorMessage = QStringLiteral("STEP file not found: %1").arg(filePath);
+        errorMessage = QCoreApplication::translate("StepModelLoader", "找不到 STEP 文件：%1").arg(filePath);
         return false;
     }
     if (!canLoad(filePath)) {
-        errorMessage = QStringLiteral(
-                           "'%1' is not a STEP file; only .step and .stp are supported")
+        errorMessage = QCoreApplication::translate("StepModelLoader", "「%1」不是 STEP 文件；仅支持 .step 与 .stp")
                            .arg(fileName);
         return false;
     }
@@ -144,8 +144,7 @@ bool StepModelLoader::load(const QString& filePath, LoadedModel& model,
         if (!input || reader.ReadStream(name.constData(), input) != IFSelect_RetDone) {
             errorMessage = stepError(
                 fileName,
-                QStringLiteral("OpenCASCADE could not read it; the file is "
-                               "corrupt or is not STEP data"));
+                QCoreApplication::translate("StepModelLoader", "OpenCASCADE 无法读取该文件；文件可能损坏或不是 STEP 数据"));
             return false;
         }
 
@@ -154,19 +153,19 @@ bool StepModelLoader::load(const QString& filePath, LoadedModel& model,
         const int transferredRoots = reader.TransferRoots();
         if (transferredRoots <= 0) {
             errorMessage = stepError(
-                fileName, QStringLiteral("it contains no transferable shape"));
+                fileName, QCoreApplication::translate("StepModelLoader", "文件中没有可转换的几何"));
             return false;
         }
         if (reader.NbShapes() <= 0) {
             errorMessage = stepError(
-                fileName, QStringLiteral("OpenCASCADE transferred no shape"));
+                fileName, QCoreApplication::translate("StepModelLoader", "OpenCASCADE 未转换出几何体"));
             return false;
         }
 
         TopoDS_Shape shape = reader.OneShape();
         if (shape.IsNull()) {
             errorMessage = stepError(
-                fileName, QStringLiteral("OpenCASCADE returned an empty shape"));
+                fileName, QCoreApplication::translate("StepModelLoader", "OpenCASCADE 返回了空几何体"));
             return false;
         }
 
@@ -190,7 +189,7 @@ bool StepModelLoader::load(const QString& filePath, LoadedModel& model,
     } catch (const Standard_Failure& failure) {
         errorMessage = stepError(
             fileName,
-            QStringLiteral("OpenCASCADE failed: %1")
+            QCoreApplication::translate("StepModelLoader", "OpenCASCADE 失败：%1")
                 .arg(QString::fromUtf8(failureText(failure).c_str())));
         return false;
     } catch (const std::exception& error) {

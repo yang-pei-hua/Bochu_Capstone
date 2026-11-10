@@ -16,6 +16,7 @@
 #include "ui/viewport/VTKViewer.h"
 #include <modeling/PrimitiveEditing.h>
 #include <reconstruction/recognition/ProjectionSettings.h>
+#include <reconstruction/settings/ModuleConfig.h>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <BRepBndLib.hxx>
@@ -30,10 +31,13 @@
 #include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
+#include <QGroupBox>
 #include <QImage>
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QMenu>
 #include <QMenuBar>
@@ -96,6 +100,20 @@ void hyperparameterSettingsWorkflow()
     const auto path = std::filesystem::path(filename.toStdU16String());
     require(reconstruction::projectionConfigPath() == path,"the configuration override uses the fixture path");
 
+    const auto preprocessingFilename = directory.filePath("preprocessing.conf");
+    QFile preprocessingFile(preprocessingFilename);
+    require(preprocessingFile.open(QIODevice::WriteOnly)
+            && preprocessingFile.write("voxel_diagonal_fraction = 0.002\n") > 0,
+            "write a partial preprocessing config");
+    preprocessingFile.close();
+    constexpr auto preprocessingVariable = "PARAMCAD_PREPROCESSING_CONFIG";
+    const auto previousPreprocessing = qgetenv(preprocessingVariable);
+    const auto restorePreprocessing = qScopeGuard([&] {
+        if (previousPreprocessing.isNull()) qunsetenv(preprocessingVariable);
+        else qputenv(preprocessingVariable,previousPreprocessing);
+    });
+    qputenv(preprocessingVariable,preprocessingFilename.toLocal8Bit());
+
     MainWindow window;
     window.setAttribute(Qt::WA_DontShowOnScreen);
     auto* menu = window.findChild<QMenu*>("settingsMenu");
@@ -104,13 +122,21 @@ void hyperparameterSettingsWorkflow()
             && menu->actions().contains(action),"hyperparameters open from a top-level Settings menu");
     action->trigger();
     auto* dialog = window.findChild<QDialog*>("hyperparameterSettingsDialog");
+    auto* modules = dialog ? dialog->findChild<QListWidget*>("hyperparameterModules") : nullptr;
     auto* axes = dialog ? dialog->findChild<QSpinBox*>("maximum_axes") : nullptr;
+    auto* fraction = dialog ? dialog->findChild<QLineEdit*>("voxel_diagonal_fraction") : nullptr;
     auto* buttons = dialog ? dialog->findChild<QDialogButtonBox*>() : nullptr;
-    require(axes && axes->value() == 17 && buttons,"the editor loads the current projection config");
+    require(modules && modules->count() == 7,"every module has a settings page");
+    require(!dialog->findChildren<QGroupBox*>().isEmpty(),"settings pages keep their subsection headings");
+    require(axes && axes->value() == 17 && fraction && buttons,
+            "the editor loads the current module configs");
     axes->setValue(5);
+    fraction->setText(QStringLiteral("0.003"));
     buttons->button(QDialogButtonBox::Save)->click();
     require(reconstruction::loadProjectionOptions().maximumAxes == 5,
             "settings save is read by the default C++ loader");
+    require(std::abs(reconstruction::loadPreprocessingSettings().voxelDiagonalFraction - 0.003) < 1e-12,
+            "settings save reaches a second module");
 }
 
 void projectionSketchDrawing()

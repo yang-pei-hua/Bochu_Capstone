@@ -197,7 +197,7 @@ bool ReconstructionController::buildArguments(const ReconstructRequest& request,
 
     // No usable capture metadata: leave --camera-info off entirely and let
     // COLMAP estimate the cameras, which is a normal outcome.
-    m_cameraInfoNote = tr("Camera metadata not used (%1); COLMAP will estimate the cameras")
+    m_cameraInfoNote = tr("未使用相机元数据（%1）；将由 COLMAP 估计相机")
                            .arg(cameraInfo.skipReason);
     return true;
 }
@@ -205,7 +205,7 @@ bool ReconstructionController::buildArguments(const ReconstructRequest& request,
 bool ReconstructionController::start(const ReconstructRequest& request)
 {
     if (m_running) {
-        m_lastError = tr("A reconstruction is already running");
+        m_lastError = tr("已有重建任务正在运行");
         return false;
     }
     m_lastError.clear();
@@ -221,21 +221,21 @@ bool ReconstructionController::start(const ReconstructRequest& request)
     m_dense = request.dense;
 
     if (!QFileInfo(request.imageDirectory).isDir()) {
-        m_lastError = tr("Image directory does not exist: %1").arg(request.imageDirectory);
+        m_lastError = tr("图像目录不存在：%1").arg(request.imageDirectory);
         return false;
     }
     if (CameraInfoBuilder::findImages(request.imageDirectory).size() < 2) {
-        m_lastError = tr("At least two images are needed in %1").arg(request.imageDirectory);
+        m_lastError = tr("%1 中至少需要两张图像").arg(request.imageDirectory);
         return false;
     }
     if (request.outputRoot.isEmpty()) {
-        m_lastError = tr("No output directory was given");
+        m_lastError = tr("未指定输出目录");
         return false;
     }
 
     m_repoRoot = resolveRepoRoot();
     if (m_repoRoot.isEmpty()) {
-        m_lastError = tr("Cannot locate core/reconstruction/reconstruct.py above %1")
+        m_lastError = tr("无法在 %1 之上找到 core/reconstruction/reconstruct.py")
                           .arg(QCoreApplication::applicationDirPath());
         return false;
     }
@@ -243,15 +243,13 @@ bool ReconstructionController::start(const ReconstructRequest& request)
     QStringList prefixArgs;
     const QString python = resolvePython(prefixArgs);
     if (python.isEmpty()) {
-        m_lastError = tr("No Python 3 interpreter was found. Run Install-Dependencies.cmd "
-                         "from the ParamCAD Studio installation folder, install Python, or "
-                         "set reconstruction/pythonInterpreter.");
+        m_lastError = tr("未找到 Python 3 解释器。请运行 ParamCAD Studio 安装目录下的 Install-Dependencies.cmd，或安装 Python，或设置 reconstruction/pythonInterpreter。");
         return false;
     }
 
     m_runDirectory = createRunDirectory(request.outputRoot);
     if (m_runDirectory.isEmpty()) {
-        m_lastError = tr("Cannot create a run directory under %1").arg(request.outputRoot);
+        m_lastError = tr("无法在 %1 下创建运行目录").arg(request.outputRoot);
         return false;
     }
 
@@ -273,7 +271,7 @@ bool ReconstructionController::start(const ReconstructRequest& request)
     m_running = true;
     m_process->start();
     if (!m_process->waitForStarted(5000)) {
-        const QString message = tr("Cannot start %1: %2").arg(python, m_process->errorString());
+        const QString message = tr("无法启动 %1：%2").arg(python, m_process->errorString());
         m_running = false;
         reportFailure(message);
         return false;
@@ -281,7 +279,7 @@ bool ReconstructionController::start(const ReconstructRequest& request)
 
     m_pollTimer->start();
     emit started(m_runDirectory, cameraModeHint);
-    emit progressChanged(0, m_dense ? kDenseStages : kSparseStages, tr("Starting"));
+    emit progressChanged(0, m_dense ? kDenseStages : kSparseStages, tr("正在启动"));
     if (!m_cameraInfoNote.isEmpty()) {
         emit logMessage(m_cameraInfoNote);
     }
@@ -415,12 +413,12 @@ void ReconstructionController::handleFinished(int exitCode, QProcess::ExitStatus
 
     m_running = false;
     if (m_cancelled) {
-        reportFailure(tr("Reconstruction cancelled"));
+        reportFailure(tr("重建已取消"));
         return;
     }
     if (exitCode != 0 || status == QProcess::CrashExit) {
         reportFailure(m_lastOutputLine.isEmpty()
-                          ? tr("Reconstruction failed with exit code %1").arg(exitCode)
+                          ? tr("重建失败，退出码 %1").arg(exitCode)
                           : m_lastOutputLine);
         return;
     }

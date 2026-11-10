@@ -16,7 +16,7 @@ bool detectMultiScalePrimitiveEvidence(const PointStore& points,const PrimitiveD
         options.sphere.minimumSupportPoints,options.cone.minimumSupportPoints,options.torus.minimumSupportPoints};
     std::size_t minimumSupport=points.size()+1;
     for(int family=0;family<5;++family)if(enabled[family])minimumSupport=std::min(minimumSupport,support[family]);
-    minimumSupport=std::max<std::size_t>(3,minimumSupport);
+    minimumSupport=std::max<std::size_t>(options.multiScaleMinimumSupportFloor,minimumSupport);
     std::unordered_set<PointId> assigned;
     std::vector<std::vector<PointId>> coherentRegions;
     auto detect=[&](const PointStore& local,bool recovery) {
@@ -41,7 +41,7 @@ bool detectMultiScalePrimitiveEvidence(const PointStore& points,const PrimitiveD
     if(!detect(points,false)){output={};error="Cancelled";return false;}
     // Rebuild on residual observations at each level. Dense small surfaces
     // otherwise lose the global sampling lottery against a sparse large host.
-    for(int round=0;round<3;++round) {
+    for(int round=0;round<int(options.multiScaleRounds);++round) {
         if(cancelled && cancelled()){output={};error="Cancelled";return false;}
         std::vector<PointSample> residual;
         for(const auto& p:points.points())if(p.normal && std::isfinite(math3::length(*p.normal)) &&
@@ -50,11 +50,11 @@ bool detectMultiScalePrimitiveEvidence(const PointStore& points,const PrimitiveD
         detail::preprocessing::KdTree tree(residual);
         std::vector<std::size_t> parent(residual.size());std::iota(parent.begin(),parent.end(),0);
         auto root=[&](std::size_t i){while(parent[i]!=i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
-        const double alignment=round==0?0.94:0.85;
+        const double alignment=round==0?options.multiScaleInitialAlignment:options.multiScaleRecoveryAlignment;
         for(std::size_t i=0;i<residual.size();++i) {
             if(i%256==0 && cancelled && cancelled()){output={};error="Cancelled";return false;}
             const auto n=math3::normalized(*residual[i].normal);
-            for(const auto& neighbor:tree.nearest(i,24)) {
+            for(const auto& neighbor:tree.nearest(i,options.multiScaleNeighborCount)) {
                 const auto j=neighbor.second;
                 if(math3::dot(n,math3::normalized(*residual[j].normal))>=alignment)
                     parent[root(j)]=root(i);

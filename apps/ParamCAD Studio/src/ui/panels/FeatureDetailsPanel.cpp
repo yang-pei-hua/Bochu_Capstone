@@ -15,6 +15,7 @@
 #include <cmath>
 #include <optional>
 #include <type_traits>
+#include <QCoreApplication>
 
 namespace {
 using namespace modeling;
@@ -40,19 +41,19 @@ const Feature* featureById(const std::vector<Feature>& features, FeatureId id)
 QString reference(const std::vector<Feature>& features, FeatureId id)
 {
     const auto* f = featureById(features, id);
-    if (!f) return QStringLiteral("#%1（引用不存在）").arg(id);
+    if (!f) return QCoreApplication::translate("FeatureDetailsPanel", "#%1（引用不存在）").arg(id);
     return QStringLiteral("<a href=\"feature:%1\">%2 (#%1)</a>")
         .arg(id).arg(QString::fromStdString(f->name).toHtmlEscaped());
 }
 QString operation(ExtrudeOperation op)
 {
     switch (op) {
-    case ExtrudeOperation::NewBody: return QStringLiteral("新实体（NewBody）");
-    case ExtrudeOperation::Join: return QStringLiteral("合并（Join）");
-    case ExtrudeOperation::Cut: return QStringLiteral("切除（Cut）");
-    case ExtrudeOperation::Intersect: return QStringLiteral("求交（Intersect）");
+    case ExtrudeOperation::NewBody: return QCoreApplication::translate("FeatureDetailsPanel", "新实体（NewBody）");
+    case ExtrudeOperation::Join: return QCoreApplication::translate("FeatureDetailsPanel", "合并（Join）");
+    case ExtrudeOperation::Cut: return QCoreApplication::translate("FeatureDetailsPanel", "切除（Cut）");
+    case ExtrudeOperation::Intersect: return QCoreApplication::translate("FeatureDetailsPanel", "求交（Intersect）");
     }
-    return QStringLiteral("未知");
+    return QCoreApplication::translate("FeatureDetailsPanel", "未知");
 }
 bool resolvedFrame(const std::vector<Feature>& features, const SketchPlaneReference& plane,
                    sketchapp::PlaneFrame& frame)
@@ -76,29 +77,29 @@ struct Details {
     void note(const QString& text) { html += "</table><p>" + text.toHtmlEscaped() + "</p><table cellspacing=\"6\">"; }
     void length(const QString& label, double value) { row(label, number(value) + " mm"); }
     void frame(const sketchapp::PlaneFrame& f) {
-        row("原点 O（mm）", vector(f.origin));
-        row("局部 X / U 轴", vector(f.xDirection));
-        row("局部 Y / V 轴", vector(f.yDirection));
-        row("法向 N", vector(f.normal));
+        row(QCoreApplication::translate("FeatureDetailsPanel", "原点 O（mm）"), vector(f.origin));
+        row(QCoreApplication::translate("FeatureDetailsPanel", "局部 X / U 轴"), vector(f.xDirection));
+        row(QCoreApplication::translate("FeatureDetailsPanel", "局部 Y / V 轴"), vector(f.yDirection));
+        row(QCoreApplication::translate("FeatureDetailsPanel", "法向 N"), vector(f.normal));
     }
     std::optional<sketchapp::PlaneFrame> sketch(const std::vector<Feature>& features,
                                               const SketchFeatureParams& params) {
-        section("草图平面与坐标系");
-        row("平面", sketchapp::planeLabel(params.plane));
+        section(QCoreApplication::translate("FeatureDetailsPanel", "草图平面与坐标系"));
+        row(QCoreApplication::translate("FeatureDetailsPanel", "平面"), sketchapp::planeLabel(params.plane));
         if (const auto* p = std::get_if<OffsetDatumPlane>(&params.plane)) {
-            row("基准平面", sketchapp::planeLabel(datumPlane(p->base)));
-            length("沿基准法向偏移", p->offset);
+            row(QCoreApplication::translate("FeatureDetailsPanel", "基准平面"), sketchapp::planeLabel(datumPlane(p->base)));
+            length(QCoreApplication::translate("FeatureDetailsPanel", "沿基准法向偏移"), p->offset);
         }
         if (const auto* p = std::get_if<FaceReference>(&params.plane)) {
-            row("依附特征", reference(features, p->ownerFeature), true);
-            row("依附面", QString::fromLatin1(modeling::faceRoleName(p->role)));
+            row(QCoreApplication::translate("FeatureDetailsPanel", "依附特征"), reference(features, p->ownerFeature), true);
+            row(QCoreApplication::translate("FeatureDetailsPanel", "依附面"), QString::fromLatin1(modeling::faceRoleName(p->role)));
         }
         sketchapp::PlaneFrame f;
         const bool resolved = resolvedFrame(features, params.plane, f);
         if (resolved) frame(f);
-        else row("坐标系", "平面引用无法解析，无法确定世界坐标。");
-        note("草图 (U,V) 使用毫米。世界点 P = O + U·X轴 + V·Y轴。");
-        section(QStringLiteral("草图轮廓（%1 个元素）").arg(params.entities.size()));
+        else row(QCoreApplication::translate("FeatureDetailsPanel", "坐标系"), QCoreApplication::translate("FeatureDetailsPanel", "平面引用无法解析，无法确定世界坐标。"));
+        note(QCoreApplication::translate("FeatureDetailsPanel", "草图 (U,V) 使用毫米。世界点 P = O + U·X轴 + V·Y轴。"));
+        section(QCoreApplication::translate("FeatureDetailsPanel", "草图轮廓（%1 个元素）").arg(params.entities.size()));
         for (const auto& e : params.entities) {
             const auto prefix = QStringLiteral("#%1 ").arg(e.id);
             const auto location = [&](double u, double v) {
@@ -106,23 +107,23 @@ struct Details {
             };
             std::visit([&](const auto& g) {
                 using T = std::decay_t<decltype(g)>;
-                if constexpr (std::is_same_v<T, Point2D>) row(prefix + "点", location(g.x,g.y));
+                if constexpr (std::is_same_v<T, Point2D>) row(prefix + QCoreApplication::translate("FeatureDetailsPanel", "点"), location(g.x,g.y));
                 else if constexpr (std::is_same_v<T, Line2D>) {
-                    row(prefix + "线段起点", location(g.x1,g.y1));
-                    row(prefix + "线段终点", location(g.x2,g.y2));
-                    length(prefix + "线段长度", std::hypot(g.x2-g.x1,g.y2-g.y1));
+                    row(prefix + QCoreApplication::translate("FeatureDetailsPanel", "线段起点"), location(g.x1,g.y1));
+                    row(prefix + QCoreApplication::translate("FeatureDetailsPanel", "线段终点"), location(g.x2,g.y2));
+                    length(prefix + QCoreApplication::translate("FeatureDetailsPanel", "线段长度"), std::hypot(g.x2-g.x1,g.y2-g.y1));
                 } else if constexpr (std::is_same_v<T, Rectangle2D>) {
-                    row(prefix + "矩形起点", location(g.x,g.y));
-                    row(prefix + "矩形尺寸", point(g.width,g.height) + " mm");
-                    row(prefix + "其他角点", location(g.x+g.width,g.y) + "\n"
+                    row(prefix + QCoreApplication::translate("FeatureDetailsPanel", "矩形起点"), location(g.x,g.y));
+                    row(prefix + QCoreApplication::translate("FeatureDetailsPanel", "矩形尺寸"), point(g.width,g.height) + " mm");
+                    row(prefix + QCoreApplication::translate("FeatureDetailsPanel", "其他角点"), location(g.x+g.width,g.y) + "\n"
                         + location(g.x+g.width,g.y+g.height) + "\n" + location(g.x,g.y+g.height));
                 } else {
-                    row(prefix + "圆心", location(g.x,g.y));
-                    length(prefix + "半径",g.radius); length(prefix + "直径",2*g.radius);
+                    row(prefix + QCoreApplication::translate("FeatureDetailsPanel", "圆心"), location(g.x,g.y));
+                    length(prefix + QCoreApplication::translate("FeatureDetailsPanel", "半径"),g.radius); length(prefix + QCoreApplication::translate("FeatureDetailsPanel", "直径"),2*g.radius);
                 }
             },e.geometry);
         }
-        if (params.entities.empty()) row("轮廓", "尚无草图元素");
+        if (params.entities.empty()) row(QCoreApplication::translate("FeatureDetailsPanel", "轮廓"), QCoreApplication::translate("FeatureDetailsPanel", "尚无草图元素"));
         return resolved ? std::optional<sketchapp::PlaneFrame>(f) : std::nullopt;
     }
 };
@@ -167,75 +168,75 @@ void FeatureDetailsPanel::setFeature(const std::vector<Feature>& features, Featu
     }
     Details d;
     d.html = "<h3>" + QString::fromStdString(feature->name).toHtmlEscaped() + "</h3><table cellspacing=\"6\">";
-    d.row("特征 ID", QString::number(feature->id));
-    d.row("来源", feature->reconstructed ? feature->type==FeatureType::ProfileBody?"已保存的参数实体":"点云重建" : "手动建模");
-    if (feature->manuallyEdited) d.row("调整状态", "已手动修改；重拟合覆盖需要确认");
-    d.row("状态", feature->suppressed ? "已抑制" : feature->valid ? "有效" : "无效");
-    if (!feature->errorText.empty()) d.row("错误", QString::fromStdString(feature->errorText));
-    d.note("尺寸与坐标单位：mm；方向向量无单位。坐标属于建模空间，未叠加 Object 面板的显示变换。");
+    d.row(QCoreApplication::translate("FeatureDetailsPanel", "特征 ID"), QString::number(feature->id));
+    d.row(QCoreApplication::translate("FeatureDetailsPanel", "来源"), feature->reconstructed ? feature->type==FeatureType::ProfileBody?QCoreApplication::translate("FeatureDetailsPanel", "已保存的参数实体"):QCoreApplication::translate("FeatureDetailsPanel", "点云重建") : QCoreApplication::translate("FeatureDetailsPanel", "手动建模"));
+    if (feature->manuallyEdited) d.row(QCoreApplication::translate("FeatureDetailsPanel", "调整状态"), QCoreApplication::translate("FeatureDetailsPanel", "已手动修改；重拟合覆盖需要确认"));
+    d.row(QCoreApplication::translate("FeatureDetailsPanel", "状态"), feature->suppressed ? QCoreApplication::translate("FeatureDetailsPanel", "已抑制") : feature->valid ? QCoreApplication::translate("FeatureDetailsPanel", "有效") : QCoreApplication::translate("FeatureDetailsPanel", "无效"));
+    if (!feature->errorText.empty()) d.row(QCoreApplication::translate("FeatureDetailsPanel", "错误"), QString::fromStdString(feature->errorText));
+    d.note(QCoreApplication::translate("FeatureDetailsPanel", "尺寸与坐标单位：mm；方向向量无单位。坐标属于建模空间，未叠加 Object 面板的显示变换。"));
     std::visit([&](const auto& p) {
         using T = std::decay_t<decltype(p)>;
         if constexpr (std::is_same_v<T, BoxPrimitiveParams>) {
-            d.section("长方体参数");
-            d.length("局部 X 长度",p.sizeX); d.length("局部 Y 长度",p.sizeY); d.length("局部 Z 长度",p.sizeZ);
-            d.row("融合设置",p.join ? "已有实体时合并（Join）；首个实体直接创建" : "创建独立实体（NewBody）");
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "长方体参数"));
+            d.length(QCoreApplication::translate("FeatureDetailsPanel", "局部 X 长度"),p.sizeX); d.length(QCoreApplication::translate("FeatureDetailsPanel", "局部 Y 长度"),p.sizeY); d.length(QCoreApplication::translate("FeatureDetailsPanel", "局部 Z 长度"),p.sizeZ);
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "融合设置"),p.join ? QCoreApplication::translate("FeatureDetailsPanel", "已有实体时合并（Join）；首个实体直接创建") : QCoreApplication::translate("FeatureDetailsPanel", "创建独立实体（NewBody）"));
             auto f = sketchapp::planeFrameOf({p.pose.origin,p.pose.zDirection,p.pose.xDirection});
-            d.section("长方体坐标系"); d.frame(f);
-            d.section("等价草图与拉伸步骤");
-            d.row("草图平面", "过原点 O，法向为 N，草图 U/V 轴为局部 X/Y 轴。");
-            d.row("矩形角点（U,V）", point(0,0) + "；" + point(p.sizeX,0) + "；"
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "长方体坐标系")); d.frame(f);
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "等价草图与拉伸步骤"));
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "草图平面"), QCoreApplication::translate("FeatureDetailsPanel", "过原点 O，法向为 N，草图 U/V 轴为局部 X/Y 轴。"));
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "矩形角点（U,V）"), point(0,0) + "；" + point(p.sizeX,0) + "；"
                 + point(p.sizeX,p.sizeY) + "；" + point(0,p.sizeY));
-            d.length("沿 +N 拉伸",p.sizeZ);
-            d.note("这是该长方体的等价建模方法。组合长方体可能重叠，不能把各自体积直接相加。");
+            d.length(QCoreApplication::translate("FeatureDetailsPanel", "沿 +N 拉伸"),p.sizeZ);
+            d.note(QCoreApplication::translate("FeatureDetailsPanel", "这是该长方体的等价建模方法。组合长方体可能重叠，不能把各自体积直接相加。"));
         } else if constexpr (std::is_same_v<T, SketchFeatureParams>) {
             d.sketch(features,p);
         } else if constexpr (std::is_same_v<T, ExtrudeFeatureParams> || std::is_same_v<T, CutFeatureParams>) {
             constexpr bool cut = std::is_same_v<T, CutFeatureParams>;
-            d.section(cut ? "切除参数" : "拉伸参数");
-            d.row("来源草图", reference(features,p.sketchId),true);
+            d.section(cut ? QCoreApplication::translate("FeatureDetailsPanel", "切除参数") : QCoreApplication::translate("FeatureDetailsPanel", "拉伸参数"));
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "来源草图"), reference(features,p.sketchId),true);
             if constexpr (cut) {
-                d.row("终止方式",p.throughAll ? "贯穿全部（沿切除方向）" : "给定深度");
-                if (!p.throughAll) d.length("深度",p.depth);
-                d.row("运算", "切除（Cut）");
-            } else { d.length("深度",p.depth); d.row("运算",operation(p.operation)); }
+                d.row(QCoreApplication::translate("FeatureDetailsPanel", "终止方式"),p.throughAll ? QCoreApplication::translate("FeatureDetailsPanel", "贯穿全部（沿切除方向）") : QCoreApplication::translate("FeatureDetailsPanel", "给定深度"));
+                if (!p.throughAll) d.length(QCoreApplication::translate("FeatureDetailsPanel", "深度"),p.depth);
+                d.row(QCoreApplication::translate("FeatureDetailsPanel", "运算"), QCoreApplication::translate("FeatureDetailsPanel", "切除（Cut）"));
+            } else { d.length(QCoreApplication::translate("FeatureDetailsPanel", "深度"),p.depth); d.row(QCoreApplication::translate("FeatureDetailsPanel", "运算"),operation(p.operation)); }
             const bool negative = cut ? !p.reverse : p.reverse;
-            d.row("方向",negative ? "沿草图法向 -N" : "沿草图法向 +N");
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "方向"),negative ? QCoreApplication::translate("FeatureDetailsPanel", "沿草图法向 -N") : QCoreApplication::translate("FeatureDetailsPanel", "沿草图法向 +N"));
             const auto* source = featureById(features,p.sketchId);
             const auto* sketch = source ? std::get_if<SketchFeatureParams>(&source->params) : nullptr;
             if (sketch) {
                 sketchapp::PlaneFrame f;
                 if (resolvedFrame(features,sketch->plane,f)) {
                     const double sign = negative ? -1.0 : 1.0;
-                    d.row("世界方向",vector(sign*f.normal[0],sign*f.normal[1],sign*f.normal[2]));
+                    d.row(QCoreApplication::translate("FeatureDetailsPanel", "世界方向"),vector(sign*f.normal[0],sign*f.normal[1],sign*f.normal[2]));
                 }
                 d.sketch(features,*sketch);
-            } else d.row("草图状态","来源草图不存在或类型不匹配，无法显示轮廓。");
+            } else d.row(QCoreApplication::translate("FeatureDetailsPanel", "草图状态"),QCoreApplication::translate("FeatureDetailsPanel", "来源草图不存在或类型不匹配，无法显示轮廓。"));
         } else if constexpr (std::is_same_v<T, ThroughHolePrimitiveParams>) {
-            d.section("贯穿孔参数"); d.row("轴线上一点（mm）",vector(p.axisPoint));
-            d.row("轴向",vector(p.axisDirection)); d.length("半径",p.radius); d.length("直径",2*p.radius);
-            d.row("运算","沿轴线双向贯穿当前实体（Cut）");
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "贯穿孔参数")); d.row(QCoreApplication::translate("FeatureDetailsPanel", "轴线上一点（mm）"),vector(p.axisPoint));
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "轴向"),vector(p.axisDirection)); d.length(QCoreApplication::translate("FeatureDetailsPanel", "半径"),p.radius); d.length(QCoreApplication::translate("FeatureDetailsPanel", "直径"),2*p.radius);
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "运算"),QCoreApplication::translate("FeatureDetailsPanel", "沿轴线双向贯穿当前实体（Cut）"));
         } else if constexpr (std::is_same_v<T, SpherePrimitiveParams>) {
-            d.section("球体参数"); d.row("球心（mm）",vector(p.center));
-            d.length("半径",p.radius); d.length("直径",2*p.radius);
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "球体参数")); d.row(QCoreApplication::translate("FeatureDetailsPanel", "球心（mm）"),vector(p.center));
+            d.length(QCoreApplication::translate("FeatureDetailsPanel", "半径"),p.radius); d.length(QCoreApplication::translate("FeatureDetailsPanel", "直径"),2*p.radius);
         } else if constexpr (std::is_same_v<T, CylinderPrimitiveParams>) {
-            d.section("圆柱参数"); d.row("底面中心（mm）",vector(p.baseCenter)); d.row("轴向",vector(p.axisDirection));
-            d.length("半径",p.radius); d.length("直径",2*p.radius); d.length("高度",p.height);
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "圆柱参数")); d.row(QCoreApplication::translate("FeatureDetailsPanel", "底面中心（mm）"),vector(p.baseCenter)); d.row(QCoreApplication::translate("FeatureDetailsPanel", "轴向"),vector(p.axisDirection));
+            d.length(QCoreApplication::translate("FeatureDetailsPanel", "半径"),p.radius); d.length(QCoreApplication::translate("FeatureDetailsPanel", "直径"),2*p.radius); d.length(QCoreApplication::translate("FeatureDetailsPanel", "高度"),p.height);
         } else if constexpr (std::is_same_v<T, ConePrimitiveParams>) {
-            d.section("圆锥 / 圆台参数"); d.row("起始面中心（mm）",vector(p.baseCenter)); d.row("轴向",vector(p.axisDirection));
-            d.length("起始半径",p.baseRadius); d.length("终止半径",p.topRadius); d.length("高度",p.height);
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "圆锥 / 圆台参数")); d.row(QCoreApplication::translate("FeatureDetailsPanel", "起始面中心（mm）"),vector(p.baseCenter)); d.row(QCoreApplication::translate("FeatureDetailsPanel", "轴向"),vector(p.axisDirection));
+            d.length(QCoreApplication::translate("FeatureDetailsPanel", "起始半径"),p.baseRadius); d.length(QCoreApplication::translate("FeatureDetailsPanel", "终止半径"),p.topRadius); d.length(QCoreApplication::translate("FeatureDetailsPanel", "高度"),p.height);
         } else if constexpr (std::is_same_v<T, TorusPrimitiveParams>) {
-            d.section("圆环体参数"); d.row("中心（mm）",vector(p.center)); d.row("轴向",vector(p.axisDirection));
-            d.length("主半径",p.majorRadius); d.length("管截面半径",p.minorRadius);
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "圆环体参数")); d.row(QCoreApplication::translate("FeatureDetailsPanel", "中心（mm）"),vector(p.center)); d.row(QCoreApplication::translate("FeatureDetailsPanel", "轴向"),vector(p.axisDirection));
+            d.length(QCoreApplication::translate("FeatureDetailsPanel", "主半径"),p.majorRadius); d.length(QCoreApplication::translate("FeatureDetailsPanel", "管截面半径"),p.minorRadius);
         } else if constexpr(std::is_same_v<T,ProfileBodyParams>) {
-            d.section("轮廓实体参数");d.length("整体局部 X",p.sizeX);d.length("整体局部 Y",p.sizeY);d.length("整体局部 Z",p.sizeZ);
-            d.row("解析轮廓边数",QString::number(p.outline.size()));d.row("回转外形段数",QString::number(p.envelope.size()));d.row("孔 / 腔段数",QString::number(p.cavities.size()));
-            d.row("异形贯通孔数",QString::number(p.profileVoids.size()));
-            if(p.boundary)d.row("拟合裁剪曲面数",QString::number(p.boundary->faces.size()));
-            d.note("整体尺寸按局部坐标缩放整个零件。孔段参数为缩放前的基准值，可在参数调整中单独修改。");
+            d.section(QCoreApplication::translate("FeatureDetailsPanel", "轮廓实体参数"));d.length(QCoreApplication::translate("FeatureDetailsPanel", "整体局部 X"),p.sizeX);d.length(QCoreApplication::translate("FeatureDetailsPanel", "整体局部 Y"),p.sizeY);d.length(QCoreApplication::translate("FeatureDetailsPanel", "整体局部 Z"),p.sizeZ);
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "解析轮廓边数"),QString::number(p.outline.size()));d.row(QCoreApplication::translate("FeatureDetailsPanel", "回转外形段数"),QString::number(p.envelope.size()));d.row(QCoreApplication::translate("FeatureDetailsPanel", "孔 / 腔段数"),QString::number(p.cavities.size()));
+            d.row(QCoreApplication::translate("FeatureDetailsPanel", "异形贯通孔数"),QString::number(p.profileVoids.size()));
+            if(p.boundary)d.row(QCoreApplication::translate("FeatureDetailsPanel", "拟合裁剪曲面数"),QString::number(p.boundary->faces.size()));
+            d.note(QCoreApplication::translate("FeatureDetailsPanel", "整体尺寸按局部坐标缩放整个零件。孔段参数为缩放前的基准值，可在参数调整中单独修改。"));
             for(std::size_t i=0;i<p.cavities.size();++i) {
-                const auto& c=p.cavities[i];d.section(QStringLiteral("孔 / 腔段 %1").arg(i+1));
-                d.length("起始直径",c.startRadius*2);d.length("终止直径",c.endRadius*2);d.length("段深度",c.end-c.start);
-                if(std::max(c.innerStartRadius,c.innerEndRadius)>0){d.length("环形腔起始内径",c.innerStartRadius*2);d.length("环形腔终止内径",c.innerEndRadius*2);}
+                const auto& c=p.cavities[i];d.section(QCoreApplication::translate("FeatureDetailsPanel", "孔 / 腔段 %1").arg(i+1));
+                d.length(QCoreApplication::translate("FeatureDetailsPanel", "起始直径"),c.startRadius*2);d.length(QCoreApplication::translate("FeatureDetailsPanel", "终止直径"),c.endRadius*2);d.length(QCoreApplication::translate("FeatureDetailsPanel", "段深度"),c.end-c.start);
+                if(std::max(c.innerStartRadius,c.innerEndRadius)>0){d.length(QCoreApplication::translate("FeatureDetailsPanel", "环形腔起始内径"),c.innerStartRadius*2);d.length(QCoreApplication::translate("FeatureDetailsPanel", "环形腔终止内径"),c.innerEndRadius*2);}
             }
         }
     },feature->params);

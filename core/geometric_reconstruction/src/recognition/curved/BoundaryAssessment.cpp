@@ -61,7 +61,7 @@ bool assess(const PointStore &points, const CurvedSolidRecognitionOptions &optio
     double residual = 0;
     for (const auto &p : points.points()) {
         const auto b = boundary(result.primitive, p.position);
-        if (b.distance <= 2 * options.distanceTolerance &&
+        if (b.distance <= options.assessDistanceMultiplier * options.distanceTolerance &&
             dot(b.normal, normalized(*p.normal)) >= options.minimumNormalAlignment) {
             fitted.push_back(&p);
             residual += b.distance;
@@ -91,30 +91,45 @@ bool assess(const PointStore &points, const CurvedSolidRecognitionOptions &optio
                 const auto d = subtract(p->position, center);
                 const double z = dot(d, axis), x = dot(d, u), y = dot(d, v), rho = std::hypot(x, y);
                 if constexpr (std::is_same_v<P, modeling::SpherePrimitiveParams>) {
-                    bins.insert(angleBin(y, x, 12) * 6 + unitBin((z / length(d) + 1) / 2, 6));
+                    bins.insert(angleBin(y, x, static_cast<int>(options.sphereAngularBins))
+                        * static_cast<int>(options.sphereAxialBins)
+                        + unitBin((z / length(d) + 1) / 2,
+                                  static_cast<int>(options.sphereAxialBins)));
                 } else if constexpr (std::is_same_v<P, modeling::TorusPrimitiveParams>) {
-                    bins.insert(angleBin(y, x, 24) * 12 + angleBin(z, rho - shape.majorRadius, 12));
+                    bins.insert(angleBin(y, x, static_cast<int>(options.torusAngularBins))
+                        * static_cast<int>(options.torusTubeBins)
+                        + angleBin(z, rho - shape.majorRadius,
+                                   static_cast<int>(options.torusTubeBins)));
                 } else {
                     const double alignment = dot(normalized(*p->normal), axis);
-                    if (std::abs(alignment) > 0.98) {
+                    if (std::abs(alignment) > options.capNormalCosine) {
                         double radius;
                         if constexpr (std::is_same_v<P, modeling::CylinderPrimitiveParams>)
                             radius = shape.radius;
                         else
                             radius = alignment < 0 ? shape.baseRadius : shape.topRadius;
                         if (radius > options.distanceTolerance)
-                            capBins[alignment < 0 ? 0 : 1].insert(angleBin(y, x, 8) * 2 +
-                                                                  unitBin(rho / radius, 2));
+                            capBins[alignment < 0 ? 0 : 1].insert(
+                                angleBin(y, x, static_cast<int>(options.capAngularBins))
+                                * static_cast<int>(options.capRadialBins)
+                                + unitBin(rho / radius,
+                                          static_cast<int>(options.capRadialBins)));
                     } else
-                        bins.insert(angleBin(y, x, 24) * 6 + unitBin(z / shape.height, 6));
+                        bins.insert(angleBin(y, x, static_cast<int>(options.curvedSideAngularBins))
+                            * static_cast<int>(options.curvedSideAxialBins)
+                            + unitBin(z / shape.height,
+                                      static_cast<int>(options.curvedSideAxialBins)));
                 }
             }
             if constexpr (std::is_same_v<P, modeling::SpherePrimitiveParams>)
-                return double(bins.size()) / 72;
+                return double(bins.size())
+                    / double(options.sphereAngularBins * options.sphereAxialBins);
             else if constexpr (std::is_same_v<P, modeling::TorusPrimitiveParams>)
-                return double(bins.size()) / 288;
+                return double(bins.size())
+                    / double(options.torusAngularBins * options.torusTubeBins);
             else {
-                double coverage = double(bins.size()) / 144;
+                double coverage = double(bins.size())
+                    / double(options.curvedSideAngularBins * options.curvedSideAxialBins);
                 double r0, r1;
                 if constexpr (std::is_same_v<P, modeling::CylinderPrimitiveParams>)
                     r0 = r1 = shape.radius;
@@ -122,18 +137,19 @@ bool assess(const PointStore &points, const CurvedSolidRecognitionOptions &optio
                     r0 = shape.baseRadius;
                     r1 = shape.topRadius;
                 }
+                const double capBinsTotal = double(options.capAngularBins * options.capRadialBins);
                 if (r0 > options.distanceTolerance)
-                    coverage = std::min(coverage, double(capBins[0].size()) / 16);
+                    coverage = std::min(coverage, double(capBins[0].size()) / capBinsTotal);
                 if (r1 > options.distanceTolerance)
-                    coverage = std::min(coverage, double(capBins[1].size()) / 16);
+                    coverage = std::min(coverage, double(capBins[1].size()) / capBinsTotal);
                 // A pointed cone must have observations near the apex itself.
                 if (std::min(r0, r1) == 0) {
                     auto apex = add(center, scale(axis, r0 == 0 ? 0 : shape.height));
                     bool observed = false;
                     // At an apex the geometric surface normal is not unique.
                     for (const auto &p : points.points())
-                        observed |=
-                            length(subtract(p.position, apex)) <= 3 * options.distanceTolerance;
+                        observed |= length(subtract(p.position, apex))
+                            <= options.apexToleranceMultiplier * options.distanceTolerance;
                     if (!observed)
                         return 0.0;
                 }

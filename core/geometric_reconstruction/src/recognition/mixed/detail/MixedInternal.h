@@ -20,7 +20,8 @@ struct Frame {
 
 double median(std::vector<double> values);
 
-std::vector<PrimitiveEvidence> restrictEvidence(const SurfaceAnalysisResult& a,const std::vector<PointId>& group);
+std::vector<PrimitiveEvidence> restrictEvidence(const SurfaceAnalysisResult& a,const std::vector<PointId>& group,
+                                                const MixedFeatureRecognitionOptions& options);
 
 bool inBox(const modeling::BoxPrimitiveParams& b,Vec3 p);
 
@@ -28,14 +29,17 @@ bool inPrism(const PrismCandidate& prism,Vec3 p);
 
 bool material(const CompoundCandidate& model,Vec3 p);
 
-bool hostFrame(const PointStore& points,const SurfaceAnalysisResult& analysis,Frame& frame,BoxCandidate& host);
+bool hostFrame(const PointStore& points,const SurfaceAnalysisResult& analysis,Frame& frame,BoxCandidate& host,
+               const MixedFeatureRecognitionOptions& options);
 
 bool attachedCurved(const PointStore& local,const SurfaceAnalysisResult& a,const Frame& host,
-                    double tolerance,CurvedSolidCandidate& output);
+                    double tolerance,const MixedFeatureRecognitionOptions& options,CurvedSolidCandidate& output);
 
 bool recognizeLocalFeature(const PointStore& observed, const SurfaceAnalysisResult& candidates,
-    const Frame& frame, double tolerance, bool subtractive, CompoundCandidate& output, std::string& error);
+    const Frame& frame, double tolerance, bool subtractive,
+    const MixedFeatureRecognitionOptions& options, const CompoundRecognitionOptions& compound,
+    CompoundCandidate& output, std::string& error);
 
 bool rectangularCut(const PointStore& local,const SurfaceAnalysisResult& a,const Frame& host,
-                    double tolerance,PrismCandidate& cut);
+                    double tolerance,const MixedFeatureRecognitionOptions& options,PrismCandidate& cut);
 } // namespace reconstruction::detail::mixed

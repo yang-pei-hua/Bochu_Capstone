@@ -69,11 +69,11 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
             report.rejected.push_back(r);continue;
         }
         if(!seen.emplace(std::min(a,b),std::max(a,b),r.kind).second)continue;
-        if(++attempts>32) {report.rejected.push_back(r);continue;}
+        if(++attempts>analysis.options.relations.optimizationMaximumAttempts) {report.rejected.push_back(r);continue;}
         auto constraints=accepted;constraints.push_back({a,b,r});
         std::unordered_set<std::size_t> active;
         for(const auto& c:constraints){active.insert(c.a);active.insert(c.b);}
-        if(active.size()>12) {report.rejected.push_back(r);continue;}
+        if(active.size()>analysis.options.relations.optimizationMaximumActiveSurfaces) {report.rejected.push_back(r);continue;}
         Eigen::VectorXd initial=Eigen::VectorXd::Zero(Eigen::Index(original.size()*7));
         for(auto i:active) {
             auto k=Eigen::Index(i*7);const auto u=axis(fitted[i]);initial[k]=u.x;initial[k+1]=u.y;initial[k+2]=u.z;
@@ -86,7 +86,7 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
         auto residual=[&](const Eigen::VectorXd& x) {
             const auto decoded=decode(x,equations,origins);std::vector<double> values;
             for(auto i:active) {
-                const auto& support=ids(original[i]);const std::size_t stride=std::max<std::size_t>(1,(support.size()+255)/256);
+                const auto& support=ids(original[i]);const std::size_t stride=std::max<std::size_t>(1,(support.size()+analysis.options.relations.optimizationResidualSampleTarget-1)/analysis.options.relations.optimizationResidualSampleTarget);
                 const double weight=1/std::sqrt(double((support.size()+stride-1)/stride));
                 for(std::size_t j=0;j<support.size();j+=stride)values.push_back(surfaceResidual(decoded[i],map.at(support[j])->position)/tolerance*weight);
                 // Retain the observed direction and remove parameter scale nullspace.
@@ -95,23 +95,23 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
                 const auto k=Eigen::Index(i*7);values.push_back((std::sqrt(x[k]*x[k]+x[k+1]*x[k+1]+x[k+2]*x[k+2])-1));
             }
             for(const auto& c:constraints) {
-                if(c.relation.kind==SurfaceRelationKind::SameRadius) {values.push_back((radius(decoded[c.a])-radius(decoded[c.b]))/tolerance*5);continue;}
+                if(c.relation.kind==SurfaceRelationKind::SameRadius) {values.push_back((radius(decoded[c.a])-radius(decoded[c.b]))/tolerance*analysis.options.relations.constraintWeight);continue;}
                 const auto u=axis(decoded[c.a]),v=axis(decoded[c.b]);
                 if(c.relation.kind==SurfaceRelationKind::Coplanar) {
                     const auto& pa=std::get<PlaneEvidence>(decoded[c.a]).plane;const auto& pb=std::get<PlaneEvidence>(decoded[c.b]).plane;
-                    values.push_back((pa.offset-(dot(u,v)<0?-pb.offset:pb.offset))/tolerance*5);
+                    values.push_back((pa.offset-(dot(u,v)<0?-pb.offset:pb.offset))/tolerance*analysis.options.relations.constraintWeight);
                 }
                 const auto d=c.relation.kind==SurfaceRelationKind::Perpendicular ? Vec3{dot(u,v),0,0} : cross(u,v);
-                values.push_back(d.x/angleTolerance*5);values.push_back(d.y/angleTolerance*5);values.push_back(d.z/angleTolerance*5);
+                values.push_back(d.x/angleTolerance*analysis.options.relations.constraintWeight);values.push_back(d.y/angleTolerance*analysis.options.relations.constraintWeight);values.push_back(d.z/angleTolerance*analysis.options.relations.constraintWeight);
                 if(c.relation.kind==SurfaceRelationKind::Coaxial) {
                     auto delta=subtract(center(decoded[c.a]),center(decoded[c.b]));delta=subtract(delta,scale(u,dot(delta,u)));
-                    values.push_back(delta.x/tolerance*5);values.push_back(delta.y/tolerance*5);values.push_back(delta.z/tolerance*5);
+                    values.push_back(delta.x/tolerance*analysis.options.relations.constraintWeight);values.push_back(delta.y/tolerance*analysis.options.relations.constraintWeight);values.push_back(delta.z/tolerance*analysis.options.relations.constraintWeight);
                 }
             }
             return Eigen::Map<Eigen::VectorXd>(values.data(),Eigen::Index(values.size())).eval();
         };
-        auto x=initial;double damping=1e-3;
-        for(int iteration=0;iteration<15;++iteration) {
+        auto x=initial;double damping=analysis.options.relations.initialDamping;
+        for(int iteration=0;iteration<int(analysis.options.relations.optimizationIterations);++iteration) {
             const auto base=residual(x);Eigen::MatrixXd jac(base.size(),Eigen::Index(variables.size()));
             for(std::size_t j=0;j<variables.size();++j) {
                 auto shifted=x;const double step=1e-6*std::max(1.0,std::abs(x[variables[j]]));shifted[variables[j]]+=step;
@@ -121,29 +121,33 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
             const Eigen::VectorXd delta=h.ldlt().solve(-jac.transpose()*base);
             if(!delta.allFinite())break;
             auto trial=x;for(std::size_t j=0;j<variables.size();++j)trial[variables[j]]+=delta[Eigen::Index(j)];
-            if(residual(trial).squaredNorm()<base.squaredNorm()) {x=trial;damping*=0.5;if(delta.norm()<1e-7)break;}
+            if(residual(trial).squaredNorm()<base.squaredNorm()) {x=trial;damping*=0.5;if(delta.norm()<analysis.options.relations.convergenceStep)break;}
             else damping*=10;
         }
         auto trial=decode(x,original,origins);bool valid=true;
         for(auto i:active) {
             const auto& e=trial[i];std::size_t inliers=0;
-            for(auto id:ids(e))inliers+=surfaceResidual(e,map.at(id)->position)<=tolerance*2;
-            valid &= inliers>=ids(e).size()*0.9 && meanError(e)<=meanError(original[i])+tolerance*0.15 &&
+            for(auto id:ids(e))inliers+=surfaceResidual(e,map.at(id)->position)<=tolerance*analysis.options.recoveryHaloToleranceMultiplier;
+            valid &= inliers>=ids(e).size()*analysis.options.relations.optimizationInlierFraction &&
+                meanError(e)<=meanError(original[i])+
+                    tolerance*analysis.options.relations.maximumMeanErrorIncreaseMultiplier &&
                 std::abs(dot(axis(e),axis(original[i])))>=std::cos(angleTolerance);
             if(const auto* c=std::get_if<CylinderEvidence>(&e))valid &= c->cylinder.radius>0;
             if(const auto* c=std::get_if<ConeEvidence>(&e))valid &= c->cone.openingAngleRadians>0.001 && c->cone.openingAngleRadians<1.56;
         }
         for(const auto& c:constraints) {
-            if(c.relation.kind==SurfaceRelationKind::SameRadius) {valid &= std::abs(radius(trial[c.a])-radius(trial[c.b]))<=tolerance*0.25;continue;}
+            if(c.relation.kind==SurfaceRelationKind::SameRadius) {valid &= std::abs(radius(trial[c.a])-radius(trial[c.b]))<=tolerance*analysis.options.relations.validationToleranceFraction;continue;}
             if(c.relation.kind==SurfaceRelationKind::Coplanar) {
                 const auto& pa=std::get<PlaneEvidence>(trial[c.a]).plane;const auto& pb=std::get<PlaneEvidence>(trial[c.b]).plane;
-                valid &= std::abs(pa.offset-(dot(pa.normal,pb.normal)<0?-pb.offset:pb.offset))<=tolerance*0.25;
+                valid &= std::abs(pa.offset-(dot(pa.normal,pb.normal)<0?-pb.offset:pb.offset))<=tolerance*analysis.options.relations.validationToleranceFraction;
             }
             const double alignment=std::abs(dot(axis(trial[c.a]),axis(trial[c.b])));
-            valid &= c.relation.kind==SurfaceRelationKind::Perpendicular ? alignment<=std::sin(angleTolerance)*0.25 : alignment>=std::cos(angleTolerance*0.25);
+            valid &= c.relation.kind==SurfaceRelationKind::Perpendicular
+                ? alignment<=std::sin(angleTolerance)*analysis.options.relations.validationToleranceFraction
+                : alignment>=std::cos(angleTolerance*analysis.options.relations.validationToleranceFraction);
             if(c.relation.kind==SurfaceRelationKind::Coaxial) {
                 auto d=subtract(center(trial[c.a]),center(trial[c.b]));auto u=axis(trial[c.a]);
-                valid &= length(subtract(d,scale(u,dot(d,u))))<=analysis.options.relations.distanceTolerance*0.25;
+                valid &= length(subtract(d,scale(u,dot(d,u))))<=analysis.options.relations.distanceTolerance*analysis.options.relations.validationToleranceFraction;
             }
         }
         if(valid) {fitted=std::move(trial);accepted=std::move(constraints);report.accepted.push_back(r);}
@@ -161,17 +165,19 @@ bool optimizeSurfaceRelations(const PointStore& points, SurfaceAnalysisResult& a
         for(const auto& p:points.points()) {
             const auto q=p.position;
             if(q.x<lo.x-tolerance || q.x>hi.x+tolerance || q.y<lo.y-tolerance || q.y>hi.y+tolerance || q.z<lo.z-tolerance || q.z>hi.z+tolerance)continue;
-            if(!p.normal || surfaceResidual(fitted[i],q)>tolerance*2)continue;
+            if(!p.normal || surfaceResidual(fitted[i],q)>tolerance*analysis.options.recoveryHaloToleranceMultiplier)continue;
             auto n=axis(fitted[i]);
             if(std::holds_alternative<ConeEvidence>(fitted[i])) {const auto d=subtract(q,center(fitted[i]));const auto radial=normalized(subtract(d,scale(n,dot(d,n))));n=normalized(subtract(radial,scale(n,std::tan(std::get<ConeEvidence>(fitted[i]).cone.openingAngleRadians))));}
             if(std::holds_alternative<CylinderEvidence>(fitted[i])) {const auto d=subtract(q,center(fitted[i]));n=normalized(subtract(d,scale(n,dot(d,n))));}
-            if(std::abs(dot(normalized(*p.normal),n))>=0.9)support.push_back(p.id);
+            if(std::abs(dot(normalized(*p.normal),n))>=analysis.options.relations.supportNormalCosine)support.push_back(p.id);
         }
         double reassignedError=0;for(auto id:support)reassignedError+=surfaceResidual(fitted[i],map.at(id)->position);
         reassignedError/=std::max<std::size_t>(1,support.size());
         // Reassignment must meet the same observation budget as the fit.
         // Keep the already validated support if normals are unavailable.
-        if(support.size()>=ids(original[i]).size()*0.9 && reassignedError<=meanError(original[i])+tolerance*0.15)std::visit([&](auto& e){e.supportPointIds=std::move(support);e.coverage=double(e.supportPointIds.size())/points.size();},fitted[i]);
+        if(support.size()>=ids(original[i]).size()*analysis.options.relations.optimizationInlierFraction &&
+           reassignedError<=meanError(original[i])+tolerance*analysis.options.relations.maximumMeanErrorIncreaseMultiplier)
+            std::visit([&](auto& e){e.supportPointIds=std::move(support);e.coverage=double(e.supportPointIds.size())/points.size();},fitted[i]);
         if(auto c=std::get_if<CylinderEvidence>(&fitted[i])) {
             c->axialMinimum=INFINITY;c->axialMaximum=-INFINITY;
             for(auto id:c->supportPointIds) {const double t=dot(subtract(map.at(id)->position,c->cylinder.axisPoint),c->cylinder.axisDirection);c->axialMinimum=std::min(c->axialMinimum,t);c->axialMaximum=std::max(c->axialMaximum,t);}

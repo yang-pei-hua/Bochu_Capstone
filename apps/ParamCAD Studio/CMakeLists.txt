@@ -4,6 +4,7 @@ project(CadPointCloudClient VERSION 0.2.2 LANGUAGES CXX)
 
 option(CAD_CLIENT_BUILD_TESTS "Build ParamCAD Studio I/O tests" OFF)
 option(CAD_CLIENT_BUILD_VALIDATION_TOOLS "Build standard STEP and CAD validation tools" OFF)
+option(CAD_CLIENT_BUILD_MODULE_CLIS "Build one standalone CLI per reconstruction module" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -47,6 +48,12 @@ if(CAD_CLIENT_BUILD_TESTS)
     target_include_directories(surface_analysis_test PRIVATE ${OpenCASCADE_INCLUDE_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/../../core/geometric_reconstruction/src")
     target_link_directories(surface_analysis_test PRIVATE ${OpenCASCADE_LIBRARY_DIR})
     add_test(NAME surface_analysis_test COMMAND surface_analysis_test)
+    add_executable(module_settings_test ../../core/geometric_reconstruction/tests/settings/module_settings_test.cpp)
+    target_link_libraries(module_settings_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    target_include_directories(module_settings_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../core/geometric_reconstruction/src")
+    target_compile_definitions(module_settings_test PRIVATE
+        RECONSTRUCTION_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config")
+    add_test(NAME module_settings_test COMMAND module_settings_test)
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../core/geometric_reconstruction/cmake/RegressionSources.cmake")
     add_executable(geometric_reconstruction_regression_test ${GEOMETRIC_RECONSTRUCTION_REGRESSION_SOURCES})
     target_link_libraries(geometric_reconstruction_regression_test PRIVATE GeometricReconstruction::GeometricReconstruction)
@@ -59,7 +66,7 @@ if(CAD_CLIENT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
 endif()
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets LinguistTools)
 # OpenCASCADE is resolved here as well as inside CadModelCore because the client
 # names the STEP data-exchange toolkits its importer uses directly.
 find_package(OpenCASCADE REQUIRED)
@@ -82,10 +89,18 @@ qt_add_executable(CadPointCloudClient WIN32
     resources/app.qrc
     src/app/MainWindow.h
     src/app/MainWindow.cpp
+    src/app/UiLanguage.h
+    src/app/UiLanguage.cpp
+    src/app/ShortcutSettings.h
+    src/app/ShortcutSettings.cpp
+    src/app/SchemaTranslation.h
+    src/app/SchemaTranslation.cpp
     src/app/WorkspaceController.h
     src/app/CadReconstructionTask.h
     src/app/CadReconstructionTask.cpp
     src/app/CapturePlan.h
+    src/app/CaptureSettings.h
+    src/app/CaptureSettings.cpp
     src/app/SketchWorkspaceController.h
     src/app/SketchWorkspaceController.cpp
     src/app/PointCloudWorkspaceController.h
@@ -196,6 +211,17 @@ set_target_properties(CadPointCloudClient PROPERTIES
     OUTPUT_NAME "ParamCAD Studio"
 )
 
+# Interface catalogs. The .ts file is the maintained source of English text;
+# qt_add_translations compiles it with lrelease and embeds the .qm under :/i18n,
+# so the runtime does not depend on the translation file being deployed.
+# IMMEDIATE_CALL avoids Qt's deferred wrapper, which splits on the space in the
+# "ParamCAD Studio" directory name on this checkout.
+qt_add_translations(CadPointCloudClient
+    TS_FILES translations/paramcad_en.ts
+    RESOURCE_PREFIX "/i18n"
+    IMMEDIATE_CALL
+)
+
 if(WIN32)
     configure_file(resources/app-icon.rc.in
         "${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc" @ONLY)
@@ -262,6 +288,22 @@ if(WIN32)
         COMMENT "Staging Qt, VTK and OpenCASCADE runtime DLLs"
         VERBATIM
     )
+
+    # Chinese is the source language, so the widgets catalog is the only Qt
+    # catalog needed: it translates QDialogButtonBox and QMessageBox defaults.
+    get_filename_component(CAD_CLIENT_QT_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
+    set(CAD_CLIENT_QT_TRANSLATIONS "${CAD_CLIENT_QT_PREFIX}/translations")
+    if(EXISTS "${CAD_CLIENT_QT_TRANSLATIONS}/qtbase_zh_CN.qm")
+        add_custom_command(TARGET CadPointCloudClient POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:CadPointCloudClient>/translations"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CAD_CLIENT_QT_TRANSLATIONS}/qtbase_zh_CN.qm"
+                    "$<TARGET_FILE_DIR:CadPointCloudClient>/translations/"
+            COMMENT "Staging the Qt Chinese widgets catalog"
+            VERBATIM
+        )
+    endif()
 endif()
 
 vtk_module_autoinit(
@@ -269,15 +311,44 @@ vtk_module_autoinit(
     MODULES ${VTK_LIBRARIES}
 )
 
-function(stage_projection_config target)
+function(stage_module_configs target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND}
-            "-DPROJECTION_CONFIG_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/config/projection.conf"
-            "-DPROJECTION_CONFIG_DIRECTORY=$<TARGET_FILE_DIR:${target}>/config"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/config/StageProjectionConfig.cmake"
+            "-DMODULE_CONFIG_SOURCE_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}/config"
+            "-DMODULE_CONFIG_DIRECTORY=$<TARGET_FILE_DIR:${target}>/config"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/config/StageModuleConfigs.cmake"
         VERBATIM)
 endfunction()
-stage_projection_config(CadPointCloudClient)
+stage_module_configs(CadPointCloudClient)
+
+if(CAD_CLIENT_BUILD_MODULE_CLIS)
+    set(MODULE_CLI_COMMON
+        ../../tools/module_cli/ModuleCli.cpp
+        src/io/PlyReader.cpp
+        src/io/PlyWriter.cpp
+        src/io/PointCloudAdapter.cpp)
+    function(add_module_cli name source)
+        add_executable(${name} ${source} ${MODULE_CLI_COMMON})
+        target_include_directories(${name} PRIVATE
+            src ../../tools/module_cli)
+        target_link_directories(${name} PRIVATE ${OpenCASCADE_LIBRARY_DIR})
+        target_link_libraries(${name} PRIVATE
+            Qt6::Core
+            CadModelCore::CadModelCore
+            GeometricReconstruction::GeometricReconstruction
+            TKDE TKXSBase TKDESTEP)
+        if(MSVC)
+            target_compile_options(${name} PRIVATE /W4 /permissive- /utf-8)
+        endif()
+        stage_module_configs(${name})
+    endfunction()
+    add_module_cli(pcad_preprocess ../../tools/module_cli/pcad_preprocess.cpp)
+    add_module_cli(pcad_detect ../../tools/module_cli/pcad_detect.cpp)
+    add_module_cli(pcad_analyze ../../tools/module_cli/pcad_analyze.cpp)
+    add_module_cli(pcad_recognize ../../tools/module_cli/pcad_recognize.cpp)
+    add_module_cli(pcad_assemble ../../tools/module_cli/pcad_assemble.cpp)
+    add_module_cli(pcad_project ../../tools/module_cli/pcad_project.cpp)
+endif()
 
 if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
     find_package(Eigen3 CONFIG REQUIRED)
@@ -308,7 +379,7 @@ if(CAD_CLIENT_BUILD_VALIDATION_TOOLS)
     target_link_directories(cad_reconstruction_validation PRIVATE ${OpenCASCADE_LIBRARY_DIR})
     target_link_libraries(cad_reconstruction_validation PRIVATE
         Qt6::Core Qt6::Gui VTK::CommonCore VTK::CommonDataModel GeometricReconstruction::GeometricReconstruction Eigen3::Eigen TKDE TKXSBase TKDESTEP)
-    stage_projection_config(cad_reconstruction_validation)
+    stage_module_configs(cad_reconstruction_validation)
     if(MSVC)
         target_compile_options(cad_reconstruction_validation PRIVATE /W4 /permissive- /utf-8)
         # Native failures get a bounded symbolized JSON stack beside the report.
@@ -530,4 +601,42 @@ if(CAD_CLIENT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${OpenCASCADE_BINARY_DIR}"
     )
+
+    # Language resolution order (--lang, environment, stored preference) and
+    # the normalization used by the Settings > Language menu.
+    add_executable(ui_language_test tests/ui_language_test.cpp src/app/UiLanguage.cpp)
+    target_include_directories(ui_language_test PRIVATE src)
+    target_link_libraries(ui_language_test PRIVATE Qt6::Core)
+    if(MSVC)
+        target_compile_options(ui_language_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME ui_language_test COMMAND ui_language_test)
+    set_tests_properties(ui_language_test PROPERTIES TIMEOUT 30
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
+
+    add_executable(shortcut_settings_test tests/shortcut_settings_test.cpp src/app/ShortcutSettings.cpp)
+    target_include_directories(shortcut_settings_test PRIVATE src)
+    target_link_libraries(shortcut_settings_test PRIVATE Qt6::Core Qt6::Widgets)
+    if(MSVC)
+        target_compile_options(shortcut_settings_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME shortcut_settings_test COMMAND shortcut_settings_test)
+    set_tests_properties(shortcut_settings_test PROPERTIES TIMEOUT 30
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
+
+    # Every module title, group heading and field label in config/i18n/en.json.
+    # Run with --dump-missing to list gaps while adding a module.
+    add_executable(schema_translation_test tests/schema_translation_test.cpp
+        src/app/SchemaTranslation.cpp src/app/UiLanguage.cpp src/app/CaptureSettings.cpp)
+    target_include_directories(schema_translation_test PRIVATE src)
+    target_compile_definitions(schema_translation_test PRIVATE
+        SCHEMA_I18N_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/i18n/en.json")
+    target_link_libraries(schema_translation_test PRIVATE
+        Qt6::Core Qt6::Gui GeometricReconstruction::GeometricReconstruction)
+    if(MSVC)
+        target_compile_options(schema_translation_test PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    add_test(NAME schema_translation_test COMMAND schema_translation_test)
+    set_tests_properties(schema_translation_test PROPERTIES TIMEOUT 60
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:CadPointCloudClient>")
 endif()

@@ -140,67 +140,107 @@ reconstruction::LengthUnit PointCloudAdapter::lengthUnitFor(
 reconstruction::PointCloudPreprocessingOptions
 PointCloudAdapter::preprocessingOptionsFor(const PlyCloud& cloud)
 {
-    reconstruction::PointCloudPreprocessingOptions options;
-    // A few distant observations must not collapse the part into a handful
-    // of oversized voxels before statistical filtering can remove them.
+    return preprocessingOptionsFor(cloud, reconstruction::loadPreprocessingSettings());
+}
+
+reconstruction::PointCloudPreprocessingOptions
+PointCloudAdapter::preprocessingOptionsFor(const PlyCloud& cloud,
+                                           const reconstruction::PreprocessingSettings& settings)
+{
+    auto options = settings.options;
+    // A few distant observations must not collapse the part into a handful of
+    // oversized voxels before statistical filtering can remove them.
     const double diagonal = robustDiagonalOf(cloud.positions);
-    if (diagonal > 0.0) {
+    if (settings.voxelSizeMm > 0) {
+        options.voxelSize = settings.voxelSizeMm;
+    } else if (diagonal > 0.0) {
         // Preserve thin walls in mixed-scale scenes. The former diagonal/200
         // voxel erased most axial samples of a small hole in a large plate.
-        // This coarse budget is still explicit; fine local analysis can use
-        // the original observations without changing the recognition contract.
-        options.voxelSize = diagonal * 2.0e-3;
+        options.voxelSize = diagonal * settings.voxelDiagonalFraction;
     }
     return options;
+}
+
+void PointCloudAdapter::applyDetectionScale(reconstruction::PrimitiveDetectionOptions& options,
+                                            double diagonal, std::size_t pointCount,
+                                            const reconstruction::DetectionSettings& settings)
+{
+    const double threshold = diagonal > 0.0
+        ? diagonal * settings.distanceToleranceDiagonalFraction : 0.0;
+    const auto support = [pointCount](std::size_t divisor, std::size_t floor, std::size_t ceiling) {
+        if (divisor == 0) return floor;
+        return std::max(floor, std::min(ceiling, pointCount / divisor));
+    };
+    auto apply = [&](auto& family, std::size_t divisor, std::size_t floor, std::size_t ceiling) {
+        if (family.distanceThreshold <= 0.0) family.distanceThreshold = threshold;
+        if (family.minimumSupportPoints == 0)
+            family.minimumSupportPoints = support(divisor, floor, ceiling);
+    };
+    apply(options.plane, settings.planeSupportDivisor, settings.planeSupportFloor, settings.planeSupportCeiling);
+    apply(options.cylinder, settings.cylinderSupportDivisor, settings.cylinderSupportFloor, settings.cylinderSupportCeiling);
+    apply(options.sphere, settings.curvedSupportDivisor, settings.curvedSupportFloor, settings.curvedSupportCeiling);
+    apply(options.cone, settings.curvedSupportDivisor, settings.curvedSupportFloor, settings.curvedSupportCeiling);
+    apply(options.torus, settings.curvedSupportDivisor, settings.curvedSupportFloor, settings.curvedSupportCeiling);
+    if (!std::isfinite(options.cylinder.maximumRadius))
+        options.cylinder.maximumRadius = diagonal * settings.cylinderMaximumRadiusDiagonalFraction;
+    if (!std::isfinite(options.sphere.maximumRadius))
+        options.sphere.maximumRadius = diagonal * settings.cylinderMaximumRadiusDiagonalFraction;
+    if (!std::isfinite(options.torus.maximumMajorRadius))
+        options.torus.maximumMajorRadius = diagonal * settings.cylinderMaximumRadiusDiagonalFraction;
+    if (!std::isfinite(options.torus.maximumMinorRadius))
+        options.torus.maximumMinorRadius = diagonal * settings.cylinderMaximumRadiusDiagonalFraction;
+    if (options.cylinder.minimumRadius <= 0.0)
+        options.cylinder.minimumRadius = options.cylinder.distanceThreshold
+            * settings.cylinderMinimumRadiusToleranceMultiplier;
+    if (options.sphere.minimumRadius <= 0.0)
+        options.sphere.minimumRadius = options.sphere.distanceThreshold
+            * settings.cylinderMinimumRadiusToleranceMultiplier;
+    if (options.torus.minimumMajorRadius <= 0.0)
+        options.torus.minimumMajorRadius = options.torus.distanceThreshold
+            * settings.cylinderMinimumRadiusToleranceMultiplier;
+    if (options.torus.minimumMinorRadius <= 0.0)
+        options.torus.minimumMinorRadius = options.torus.distanceThreshold
+            * settings.cylinderMinimumRadiusToleranceMultiplier;
 }
 
 reconstruction::PlaneDetectionOptions PointCloudAdapter::planeOptionsFor(
     const PlyCloud& cloud)
 {
-    reconstruction::PlaneDetectionOptions options;
-    if (cloud.positions.empty()) {
-        return options;
-    }
+    return planeOptionsFor(cloud, reconstruction::loadDetectionSettings());
+}
 
-    const double diagonal = diagonalOf(cloud.positions);
-
-    // A tenth of a percent of the diagonal: tight enough that two parallel
-    // sides of a box stay separate planes, loose enough for scan noise, and
-    // free of any assumption about the cloud's unit.
-    if (diagonal > 0.0) {
-        options.distanceThreshold = diagonal * 1.0e-3;
-    }
-    return options;
+reconstruction::PlaneDetectionOptions PointCloudAdapter::planeOptionsFor(
+    const PlyCloud& cloud, const reconstruction::DetectionSettings& settings)
+{
+    reconstruction::PrimitiveDetectionOptions options = settings.options;
+    applyDetectionScale(options, diagonalOf(cloud.positions), cloud.positions.size(), settings);
+    return options.plane;
 }
 
 reconstruction::CylinderDetectionOptions PointCloudAdapter::cylinderOptionsFor(
     const reconstruction::PointStore& cloud)
 {
-    reconstruction::CylinderDetectionOptions options;
-    const double diagonal = diagonalOf(cloud);
-    if (diagonal > 0.0) {
-        options.distanceThreshold = diagonal * 1.0e-3;
-        // Reject sub-resolution cylinders before the semantic containment test.
-        options.minimumRadius = options.distanceThreshold * 2.0;
-        options.maximumRadius = diagonal * 0.5;
-    }
-    options.minimumSupportPoints = std::max<std::size_t>(
-        30U, std::min<std::size_t>(150U, cloud.size() / 500U));
-    options.maximumCylinders = 8;
-    return options;
+    return cylinderOptionsFor(cloud, reconstruction::loadDetectionSettings());
+}
+
+reconstruction::CylinderDetectionOptions PointCloudAdapter::cylinderOptionsFor(
+    const reconstruction::PointStore& cloud, const reconstruction::DetectionSettings& settings)
+{
+    reconstruction::PrimitiveDetectionOptions options = settings.options;
+    applyDetectionScale(options, diagonalOf(cloud), cloud.size(), settings);
+    return options.cylinder;
 }
 
 reconstruction::PlaneDetectionOptions PointCloudAdapter::planeOptionsFor(
     const reconstruction::PointStore& cloud)
 {
-    reconstruction::PlaneDetectionOptions options;
-    const double diagonal = diagonalOf(cloud);
-    if (diagonal > 0.0) {
-        options.distanceThreshold = diagonal * 1.0e-3;
-    }
-    // Downsampling changes absolute support counts. A relative floor keeps all
-    // six faces eligible while still rejecting tiny accidental patches.
-    options.minimumSupportPoints = std::max<std::size_t>(
-        20U, std::min<std::size_t>(200U, cloud.size() / 200U));
-    return options;
+    return planeOptionsFor(cloud, reconstruction::loadDetectionSettings());
+}
+
+reconstruction::PlaneDetectionOptions PointCloudAdapter::planeOptionsFor(
+    const reconstruction::PointStore& cloud, const reconstruction::DetectionSettings& settings)
+{
+    reconstruction::PrimitiveDetectionOptions options = settings.options;
+    applyDetectionScale(options, diagonalOf(cloud), cloud.size(), settings);
+    return options.plane;
 }

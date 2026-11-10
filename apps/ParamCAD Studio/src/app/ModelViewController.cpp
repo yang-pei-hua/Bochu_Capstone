@@ -1,5 +1,6 @@
 #include "app/ModelViewController.h"
 #include "app/CapturePlan.h"
+#include "app/CaptureSettings.h"
 #include "app/ProjectPaths.h"
 #include "io/CameraInfoBuilder.h"
 #include "io/StepModelLoader.h"
@@ -61,7 +62,7 @@ void ModelViewController::connectUi()
     connect(renderPanel, &RenderPanel::textureCleared, this, &ModelViewController::clearTexture);
     connect(renderPanel, &RenderPanel::textureEnabledChanged, this, [this](bool enabled) {
         m_ui.viewer->setBodyTextureEnabled(enabled);
-        emit logInfo(enabled ? workspaceTr("Texture display on") : workspaceTr("Texture display off"));
+        emit logInfo(enabled ? workspaceTr("纹理显示已开启") : workspaceTr("纹理显示已关闭"));
     });
     connect(renderPanel, &RenderPanel::textureProjectionChanged, this, [this](int axis) {
         m_ui.viewer->setTextureProjection(axis);
@@ -77,7 +78,7 @@ void ModelViewController::openModel()
     // Only STEP is parsed today, so that is the only filter offered: the dialog
     // must not promise OBJ or PLY meshes the client cannot read. Point clouds
     // keep their own "Open Point Cloud" entry.
-    const QString filePath = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("Open Model"), QString(), workspaceTr("STEP Files (*.step *.stp)"));
+    const QString filePath = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("打开模型"), QString(), workspaceTr("STEP 文件 (*.step *.stp)"));
     if (filePath.isEmpty()) {
         return;
     }
@@ -91,10 +92,9 @@ void ModelViewController::loadModelFromFile(const QString& filePath)
     const QString fileName = QFileInfo(filePath).fileName();
     StepModelLoader stepLoader;
     if (!stepLoader.canLoad(filePath)) {
-        const QString message = workspaceTr("'%1' is not a STEP file; only .step and .stp "
-                                   "models can be imported.").arg(fileName);
+        const QString message = workspaceTr("'%1' 不是 STEP 文件；仅支持导入 .step 或 .stp 模型。").arg(fileName);
         emit logError(message);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Open Model"), message);
+        QMessageBox::warning(m_dialogParent, workspaceTr("打开模型"), message);
         return;
     }
 
@@ -105,7 +105,7 @@ void ModelViewController::loadModelFromFile(const QString& filePath)
         // whatever model is already on screen keeps its shape, its name and its
         // status, so a failure can never be mistaken for a successful load.
         emit logError(error);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Open Model"), error);
+        QMessageBox::warning(m_dialogParent, workspaceTr("打开模型"), error);
         return;
     }
 
@@ -120,10 +120,10 @@ void ModelViewController::loadModelFromFile(const QString& filePath)
     emit sceneFramed();
 
     m_ui.scenePanel->updateNodeLabel(SceneNodeType::Model, fileName);
-    emit statusTextChanged(workspaceTr("Ready | Model: %1 | Camera: %2")
+    emit statusTextChanged(workspaceTr("就绪 | 模型：%1 | 相机：%2")
                                .arg(fileName,
                                     m_ui.viewer->cameraParameters().parallelProjection
-                                        ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
+                                        ? workspaceTr("正交投影") : workspaceTr("透视投影")));
     emit logInfo(workspaceTr("STEP model loaded from %1: %2 solids, %3 faces, %4 edges, %5 vertices")
                 .arg(fileName)
                 .arg(m_loadedModel.solidCount)
@@ -137,14 +137,14 @@ void ModelViewController::chooseTexture()
 {
     if (!m_ui.viewer->hasBody()) {
         emit logWarning(workspaceTr("Model a body before projecting a texture onto it."));
-        emit statusMessage(workspaceTr("Nothing to texture yet"), 3500);
+        emit statusMessage(workspaceTr("暂无可贴图的对象"), 3500);
         return;
     }
 
     // Any picture will do: it is projected onto the body rather than unwrapped
     // onto it, so no texture coordinates have to be authored first.
-    const QString filePath = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("Apply Texture"), ProjectPaths::outputsRoot(),
-        workspaceTr("Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"));
+    const QString filePath = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("应用纹理"), ProjectPaths::outputsRoot(),
+        workspaceTr("图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"));
     if (filePath.isEmpty()) {
         return;
     }
@@ -152,7 +152,7 @@ void ModelViewController::chooseTexture()
     QString error;
     if (!m_ui.viewer->loadBodyTexture(filePath, error)) {
         emit logError(error);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Apply Texture"), error);
+        QMessageBox::warning(m_dialogParent, workspaceTr("应用纹理"), error);
         return;
     }
 
@@ -160,7 +160,7 @@ void ModelViewController::chooseTexture()
     renderPanel->setTexturePath(filePath);
     renderPanel->setTextureEnabled(true);
     const QString name = QFileInfo(filePath).fileName();
-    emit statusMessage(workspaceTr("Texture projected from %1").arg(name), 4000);
+    emit statusMessage(workspaceTr("已从 %1 投影纹理").arg(name), 4000);
     emit logInfo(workspaceTr("Texture projected from %1").arg(name));
 }
 
@@ -178,9 +178,9 @@ void ModelViewController::closeModel()
     m_ui.viewer->setObjectVisible(false);
     m_currentBody.Nullify();
     m_ui.exportStepAction->setEnabled(false);
-    emit statusTextChanged(workspaceTr("Ready | Model: None | Camera: %1")
+    emit statusTextChanged(workspaceTr("就绪 | 模型：无 | 相机：%1")
                                .arg(m_ui.viewer->cameraParameters().parallelProjection
-                                        ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
+                                        ? workspaceTr("正交投影") : workspaceTr("透视投影")));
     emit logInfo(workspaceTr("Model closed"));
 }
 
@@ -190,10 +190,10 @@ void ModelViewController::deleteModel()
     clearTexture();
     m_ui.viewer->clearBody();
     m_ui.viewer->setObjectVisible(true);
-    m_ui.scenePanel->updateNodeLabel(SceneNodeType::Model, workspaceTr("Model"));
-    emit statusTextChanged(workspaceTr("Ready | Model: None | Camera: %1")
+    m_ui.scenePanel->updateNodeLabel(SceneNodeType::Model, workspaceTr("模型"));
+    emit statusTextChanged(workspaceTr("就绪 | 模型：无 | 相机：%1")
         .arg(m_ui.viewer->cameraParameters().parallelProjection
-            ? workspaceTr("Orthographic") : workspaceTr("Perspective")));
+            ? workspaceTr("正交投影") : workspaceTr("透视投影")));
     emit logInfo(workspaceTr("Model deleted"));
 }
 
@@ -206,13 +206,13 @@ void ModelViewController::exportModel()
 {
     if (m_currentBody.IsNull()) {
         emit logWarning(workspaceTr("Create or import a CAD model before exporting STEP."));
-        emit statusMessage(workspaceTr("No CAD model to export"), 3500);
+        emit statusMessage(workspaceTr("没有可导出的 CAD 模型"), 3500);
         return;
     }
     const quint64 revision = m_ui.viewer->bodyRevision();
-    QString path = QFileDialog::getSaveFileName(m_dialogParent, workspaceTr("Export STEP"),
+    QString path = QFileDialog::getSaveFileName(m_dialogParent, workspaceTr("导出 STEP"),
         QDir(ProjectPaths::outputsRoot()).filePath(QStringLiteral("model.step")),
-        workspaceTr("STEP Files (*.step *.stp)"));
+        workspaceTr("STEP 文件 (*.step *.stp)"));
     if (path.isEmpty()) return;
     const QString suffix = QFileInfo(path).suffix().toLower();
     if (suffix != QStringLiteral("step") && suffix != QStringLiteral("stp")) path += QStringLiteral(".step");
@@ -220,20 +220,20 @@ void ModelViewController::exportModel()
     // The save dialog runs a nested event loop: imports, close and a background
     // CAD completion must not silently change which body the user is exporting.
     if (revision != m_ui.viewer->bodyRevision() || m_currentBody.IsNull()) {
-        const QString message = workspaceTr("The model changed while choosing a file. Export STEP again.");
+        const QString message = workspaceTr("选择文件期间模型已更改，请重新导出 STEP。");
         emit logWarning(message);
         emit statusMessage(message, 5000);
         return;
     }
     QString error;
     if (!exportStepTo(path, error)) {
-        const QString message = workspaceTr("Could not export STEP to %1: %2").arg(path, error);
+        const QString message = workspaceTr("无法导出 STEP 到 %1：%2").arg(path, error);
         emit logError(message);
         emit statusMessage(message, 5000);
-        QMessageBox::warning(m_dialogParent, workspaceTr("Export STEP"), message);
+        QMessageBox::warning(m_dialogParent, workspaceTr("导出 STEP"), message);
         return;
     }
-    const QString message = workspaceTr("STEP model exported to %1").arg(QFileInfo(path).absoluteFilePath());
+    const QString message = workspaceTr("STEP 模型已导出到 %1").arg(QFileInfo(path).absoluteFilePath());
     emit logInfo(message);
     emit statusMessage(message, 5000);
 }
@@ -246,11 +246,11 @@ bool ModelViewController::runPerformanceCapture(const QString& modelPath,
     errorMessage.clear();
     QDir output(outputDirectory);
     if (!output.exists() && !QDir().mkpath(output.absolutePath())) {
-        errorMessage = workspaceTr("Cannot create validation directory %1").arg(output.absolutePath());
+        errorMessage = workspaceTr("无法创建验证目录 %1").arg(output.absolutePath());
         return false;
     }
     if (output.exists(QStringLiteral("images"))) {
-        errorMessage = workspaceTr("Validation image directory already exists: %1")
+        errorMessage = workspaceTr("验证图像目录已存在：%1")
                            .arg(output.filePath(QStringLiteral("images")));
         return false;
     }
@@ -283,10 +283,16 @@ bool ModelViewController::runPerformanceCapture(const QString& modelPath,
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     const double distance = m_captureController->currentDistance();
-    const std::vector<OrbitRing> rings = sphericalCaptureRings();
+    CaptureSettings captureSettings;
+    try {
+        captureSettings = loadCaptureSettings();
+    } catch (const std::exception&) {
+    }
+    const std::vector<OrbitRing> rings = captureSettings.orbitRings();
     m_captureController->setBaseDirectory(output.absolutePath());
     stageTimer.restart();
-    if (!m_captureController->captureOrbit(rings, distance, 1920, 1080)) {
+    if (!m_captureController->captureOrbit(rings, distance,
+                                           captureSettings.imageWidth, captureSettings.imageHeight)) {
         errorMessage = m_captureController->lastError();
         return false;
     }
@@ -294,12 +300,12 @@ bool ModelViewController::runPerformanceCapture(const QString& modelPath,
 
     const std::vector<CaptureShot>& shots = m_captureController->shots();
     if (shots.empty()) {
-        errorMessage = workspaceTr("Performance capture produced no images");
+        errorMessage = workspaceTr("拍摄未生成任何图像");
         return false;
     }
     const QString groupName = shots.back().groupName;
     if (!output.rename(groupName, QStringLiteral("images"))) {
-        errorMessage = workspaceTr("Cannot rename capture group %1 to images").arg(groupName);
+        errorMessage = workspaceTr("无法将拍摄分组 %1 重命名为 images").arg(groupName);
         return false;
     }
 
@@ -311,7 +317,7 @@ bool ModelViewController::runPerformanceCapture(const QString& modelPath,
     if (!cameraInfoError.isEmpty() || !cameraInfo.built) {
         errorMessage = !cameraInfoError.isEmpty()
                            ? cameraInfoError
-                           : workspaceTr("Could not build camera metadata: %1")
+                           : workspaceTr("无法构建相机元数据：%1")
                                  .arg(cameraInfo.skipReason);
         return false;
     }
@@ -347,8 +353,8 @@ bool ModelViewController::runPerformanceCapture(const QString& modelPath,
     report.insert(QStringLiteral("topology"), topology);
     report.insert(QStringLiteral("imageCount"), cameraInfo.totalImages);
     report.insert(QStringLiteral("posedImageCount"), cameraInfo.posedImages);
-    report.insert(QStringLiteral("width"), 1920);
-    report.insert(QStringLiteral("height"), 1080);
+    report.insert(QStringLiteral("width"), captureSettings.imageWidth);
+    report.insert(QStringLiteral("height"), captureSettings.imageHeight);
     report.insert(QStringLiteral("cameraDistance"), distance);
     report.insert(QStringLiteral("rings"), ringReport);
     report.insert(QStringLiteral("timing"), timing);
@@ -356,7 +362,7 @@ bool ModelViewController::runPerformanceCapture(const QString& modelPath,
     QFile reportFile(output.filePath(QStringLiteral("capture_report.json")));
     if (!reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)
         || reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented)) < 0) {
-        errorMessage = workspaceTr("Cannot write capture performance report: %1")
+        errorMessage = workspaceTr("无法写入拍摄性能报告：%1")
                            .arg(reportFile.fileName());
         return false;
     }

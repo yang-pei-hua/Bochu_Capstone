@@ -25,12 +25,12 @@ ReconstructPanel::ReconstructPanel(QWidget* parent)
     // what the UI automation relies on to fill the field.
     m_imageDirectory = new QLineEdit(this);
     m_imageDirectory->setObjectName(QStringLiteral("reconstructImageDir"));
-    m_imageDirectory->setToolTip(tr("Folder of multi-view images to reconstruct"));
+    m_imageDirectory->setToolTip(tr("用于重建的多视角图像文件夹"));
 
-    m_browseImagesButton = new QPushButton(tr("Browse..."), this);
+    m_browseImagesButton = new QPushButton(tr("浏览…"), this);
     m_browseImagesButton->setObjectName(QStringLiteral("reconstructBrowseButton"));
 
-    m_useLatestButton = new QPushButton(tr("Use Latest Capture"), this);
+    m_useLatestButton = new QPushButton(tr("使用最近一次拍摄"), this);
     m_useLatestButton->setObjectName(QStringLiteral("reconstructUseLatestButton"));
 
     auto* imagesRow = new QWidget(this);
@@ -40,17 +40,17 @@ ReconstructPanel::ReconstructPanel(QWidget* parent)
     imagesLayout->addWidget(m_imageDirectory, 1);
     imagesLayout->addWidget(m_browseImagesButton);
 
-    auto* imagesGroup = new QGroupBox(tr("Images"), this);
+    auto* imagesGroup = new QGroupBox(tr("图像"), this);
     auto* imagesForm = new QFormLayout(imagesGroup);
-    imagesForm->addRow(tr("Directory"), imagesRow);
+    imagesForm->addRow(tr("目录"), imagesRow);
     imagesForm->addRow(QString(), m_useLatestButton);
 
     m_outputDirectory = new QLineEdit(this);
     m_outputDirectory->setObjectName(QStringLiteral("reconstructOutputDir"));
     m_outputDirectory->setText(QDir::cleanPath(ProjectPaths::reconstructionsRoot()));
-    m_outputDirectory->setToolTip(tr("Each run gets its own timestamped sub-folder here"));
+    m_outputDirectory->setToolTip(tr("每次运行都会在此处创建独立的时间戳子目录"));
 
-    m_browseOutputButton = new QPushButton(tr("Browse..."), this);
+    m_browseOutputButton = new QPushButton(tr("浏览…"), this);
     m_browseOutputButton->setObjectName(QStringLiteral("reconstructOutputBrowseButton"));
 
     auto* outputRow = new QWidget(this);
@@ -60,32 +60,32 @@ ReconstructPanel::ReconstructPanel(QWidget* parent)
     outputLayout->addWidget(m_outputDirectory, 1);
     outputLayout->addWidget(m_browseOutputButton);
 
-    auto* outputGroup = new QGroupBox(tr("Output"), this);
+    auto* outputGroup = new QGroupBox(tr("输出"), this);
     auto* outputForm = new QFormLayout(outputGroup);
-    outputForm->addRow(tr("Directory"), outputRow);
+    outputForm->addRow(tr("目录"), outputRow);
 
-    m_useCameraInfo = new QCheckBox(tr("Use capture poses and intrinsics"), this);
+    m_useCameraInfo = new QCheckBox(tr("使用拍摄位姿与内参"), this);
     m_useCameraInfo->setObjectName(QStringLiteral("reconstructUseCameraInfo"));
     m_useCameraInfo->setChecked(true);
 
-    m_dense = new QCheckBox(tr("Dense reconstruction (GPU)"), this);
+    m_dense = new QCheckBox(tr("稠密重建（GPU）"), this);
     m_dense->setObjectName(QStringLiteral("reconstructDense"));
 
     m_matcher = new QComboBox(this);
     m_matcher->setObjectName(QStringLiteral("reconstructMatcher"));
-    m_matcher->addItems({tr("Exhaustive"), tr("Sequential")});
+    m_matcher->addItems({tr("穷举匹配"), tr("顺序匹配")});
 
-    auto* optionsGroup = new QGroupBox(tr("Options"), this);
+    auto* optionsGroup = new QGroupBox(tr("选项"), this);
     auto* optionsForm = new QFormLayout(optionsGroup);
     optionsForm->addRow(QString(), m_useCameraInfo);
     optionsForm->addRow(QString(), m_dense);
-    optionsForm->addRow(tr("Matcher"), m_matcher);
+    optionsForm->addRow(tr("匹配器"), m_matcher);
 
-    m_runButton = new QPushButton(tr("Reconstruct"), this);
+    m_runButton = new QPushButton(tr("重建"), this);
     m_runButton->setObjectName(QStringLiteral("reconstructRunButton"));
     m_runButton->setProperty("primary", true);
 
-    m_cancelButton = new QPushButton(tr("Cancel"), this);
+    m_cancelButton = new QPushButton(tr("取消"), this);
     m_cancelButton->setObjectName(QStringLiteral("reconstructCancelButton"));
     m_cancelButton->setEnabled(false);
 
@@ -99,7 +99,7 @@ ReconstructPanel::ReconstructPanel(QWidget* parent)
     m_progress->setValue(0);
     m_progress->setFormat(tr("%1/%2").arg(0).arg(4));
 
-    m_status = new QLabel(tr("Ready"), this);
+    m_status = new QLabel(tr("就绪"), this);
     m_status->setObjectName(QStringLiteral("reconstructStatus"));
     m_status->setWordWrap(true);
 
@@ -214,7 +214,7 @@ QString ReconstructPanel::latestCaptureDirectory() const
 void ReconstructPanel::browseForImages()
 {
     const QString directory =
-        QFileDialog::getExistingDirectory(this, tr("Image Directory"), imageDirectory());
+        QFileDialog::getExistingDirectory(this, tr("图像目录"), imageDirectory());
     if (directory.isEmpty()) {
         return;
     }
@@ -224,7 +224,7 @@ void ReconstructPanel::browseForImages()
 void ReconstructPanel::browseForOutput()
 {
     const QString directory =
-        QFileDialog::getExistingDirectory(this, tr("Output Directory"), outputRoot());
+        QFileDialog::getExistingDirectory(this, tr("输出目录"), outputRoot());
     if (directory.isEmpty()) {
         return;
     }
@@ -235,11 +235,11 @@ void ReconstructPanel::useLatestCapture()
 {
     const QString latest = latestCaptureDirectory();
     if (latest.isEmpty()) {
-        setStatusText(tr("No capture folder found in %1").arg(m_captureBaseDirectory));
+        setStatusText(tr("在 %1 中未找到拍摄文件夹").arg(m_captureBaseDirectory));
         return;
     }
     setImageDirectory(latest);
-    setStatusText(tr("Using %1").arg(latest));
+    setStatusText(tr("使用 %1").arg(latest));
 }
 
 void ReconstructPanel::startReconstruction()

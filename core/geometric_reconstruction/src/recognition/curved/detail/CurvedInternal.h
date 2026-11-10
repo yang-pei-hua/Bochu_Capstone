@@ -56,7 +56,8 @@ double coneResidual(const Eigen::VectorXd &x, Vec3 p);
 double torusResidual(const Eigen::VectorXd &x, Vec3 p);
 
 std::vector<Cap> caps(const PointStore &points, Vec3 origin, Vec3 axis, double tolerance,
-                      const std::function<double(double)> &radius);
+                      const std::function<double(double)> &radius,
+                      const CurvedSolidRecognitionOptions &options);
 
 bool ends(const std::vector<Cap> &planes, double &start, double &end, bool pointed);
 

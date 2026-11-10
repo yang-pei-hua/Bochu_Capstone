@@ -42,7 +42,7 @@ void ProjectController::reportFailure(const QString& message)
 {
     emit logError(message);
     emit statusMessage(message, 5000);
-    QMessageBox::warning(m_dialogParent, workspaceTr("Project"), message);
+    QMessageBox::warning(m_dialogParent, workspaceTr("项目"), message);
 }
 void ProjectController::saveProject()
 {
@@ -65,9 +65,9 @@ void ProjectController::save(bool choosePath)
     QString path = m_projectPath;
     if (choosePath || path.isEmpty()) {
         path = QFileDialog::getSaveFileName(
-            m_dialogParent, workspaceTr("Save Project"),
+            m_dialogParent, workspaceTr("保存项目"),
             path.isEmpty() ? QDir(ProjectPaths::outputsRoot()).filePath("project.pcad") : path,
-            workspaceTr("ParamCAD Projects (*.pcad)"));
+            workspaceTr("ParamCAD 项目 (*.pcad)"));
         if (path.isEmpty())
             return;
         if (!path.endsWith(".pcad", Qt::CaseInsensitive))
@@ -75,7 +75,7 @@ void ProjectController::save(bool choosePath)
     }
     QString error;
     if (!saveTo(path, error))
-        reportFailure(workspaceTr("Could not save project: %1").arg(error));
+        reportFailure(workspaceTr("无法保存项目：%1").arg(error));
 }
 void ProjectController::openProject()
 {
@@ -87,21 +87,21 @@ void ProjectController::openProject()
         m_processing = false;
         updateActions();
     });
-    const QString path = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("Open Project"),
+    const QString path = QFileDialog::getOpenFileName(m_dialogParent, workspaceTr("打开项目"),
                                                       m_projectPath.isEmpty()
                                                           ? ProjectPaths::outputsRoot()
                                                           : QFileInfo(m_projectPath).absolutePath(),
-                                                      workspaceTr("ParamCAD Projects (*.pcad)"));
+                                                      workspaceTr("ParamCAD 项目 (*.pcad)"));
     if (path.isEmpty())
         return;
     QString error;
     if (!loadFrom(path, error))
-        reportFailure(workspaceTr("Could not open project: %1").arg(error));
+        reportFailure(workspaceTr("无法打开项目：%1").arg(error));
 }
 bool ProjectController::saveTo(const QString& path, QString& error)
 {
     if (m_captureBusy) {
-        error = workspaceTr("Wait for capture to finish before saving a project.");
+        error = workspaceTr("请等待拍摄结束后再保存项目。");
         return false;
     }
     ProjectSnapshot snapshot;
@@ -131,14 +131,14 @@ bool ProjectController::saveTo(const QString& path, QString& error)
     m_projectPath = QFileInfo(path).absoluteFilePath();
     emit projectPathChanged(m_projectPath);
     emit logInfo(workspaceTr("Project saved to %1").arg(m_projectPath));
-    emit statusMessage(workspaceTr("Project saved"), 4000);
+    emit statusMessage(workspaceTr("项目已保存"), 4000);
     return true;
 }
 bool ProjectController::loadFrom(const QString& path, QString& error)
 {
     if (m_captureBusy || m_reconstruction->isRunning()) {
         error =
-            workspaceTr("Finish or cancel capture/photo reconstruction before opening a project.");
+            workspaceTr("请先完成或取消拍摄 / 照片重建，再打开项目。");
         return false;
     }
     auto prepared = ProjectStore::load(path, error);
@@ -184,14 +184,14 @@ bool ProjectController::loadFrom(const QString& path, QString& error)
     m_ui.viewer->applyCamera(v.camera);
     m_ui.viewer->setParallelScale(v.parallelScale);
     m_ui.scene->updateNodeLabel(SceneNodeType::Model, prepared->currentBody.IsNull()
-                                                          ? workspaceTr("Model")
+                                                          ? workspaceTr("模型")
                                                           : QFileInfo(path).fileName());
     if (!m_cloud->hasCloud())
-        m_ui.scene->updateNodeLabel(SceneNodeType::PointCloud, workspaceTr("PointCloud"));
+        m_ui.scene->updateNodeLabel(SceneNodeType::PointCloud, workspaceTr("点云"));
     m_projectPath = QFileInfo(path).absoluteFilePath();
     emit projectPathChanged(m_projectPath);
     emit logInfo(workspaceTr("Project loaded from %1").arg(m_projectPath));
     emit sceneFramed();
-    emit statusTextChanged(workspaceTr("Ready | Project: %1").arg(QFileInfo(path).fileName()));
+    emit statusTextChanged(workspaceTr("就绪 | 项目：%1").arg(QFileInfo(path).fileName()));
     return true;
 }

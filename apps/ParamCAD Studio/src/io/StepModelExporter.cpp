@@ -1,4 +1,5 @@
 #include "io/StepModelExporter.h"
+#include <QCoreApplication>
 #include <modeling/StepExporter.h>
 
 #include <QSaveFile>
@@ -35,11 +36,11 @@ bool StepModelExporter::write(const TopoDS_Shape& shape, const QString& path, QS
 {
     error.clear();
     if (shape.IsNull()) {
-        error = QStringLiteral("No CAD geometry is available for STEP export.");
+        error = QCoreApplication::translate("StepModelExporter", "没有可导出为 STEP 的 CAD 几何。");
         return false;
     }
     if (path.isEmpty()) {
-        error = QStringLiteral("Choose a STEP output file.");
+        error = QCoreApplication::translate("StepModelExporter", "请选择 STEP 输出文件。");
         return false;
     }
     QSaveFile file(path);
@@ -56,7 +57,7 @@ bool StepModelExporter::write(const TopoDS_Shape& shape, const QString& path, QS
         if (!written || !output.good()) {
             error = file.error() == QFileDevice::NoError
                 ? QString::fromStdString(failure) : file.errorString();
-            if (error.isEmpty()) error = QStringLiteral("Could not write STEP output.");
+            if (error.isEmpty()) error = QCoreApplication::translate("StepModelExporter", "无法写入 STEP 输出。");
             file.cancelWriting();
             return false;
         }

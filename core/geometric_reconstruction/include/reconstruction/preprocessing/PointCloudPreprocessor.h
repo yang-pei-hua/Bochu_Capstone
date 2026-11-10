@@ -26,6 +26,7 @@ struct PointCloudPreprocessingOptions {
     double normalOrientationMinimumAlignment = 0.75;
     double normalOrientationMaximumTangentDeviation = 0.55;
     double normalOrientationMaximumSpacingRatio = 4.0;
+    double normalOrientationDistanceCostWeight = 0.001;
 
     // The modeling core uses millimetres. Meter input is converted before any
     // thresholds are applied; arbitrary input remains arbitrary.

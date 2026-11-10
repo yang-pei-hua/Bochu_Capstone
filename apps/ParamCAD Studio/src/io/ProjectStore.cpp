@@ -1,4 +1,5 @@
 #include "io/ProjectStore.h"
+#include <QCoreApplication>
 #include "io/FeatureCodec.h"
 #include "io/PlyWriter.h"
 #include <BRepTools.hxx>
@@ -80,7 +81,7 @@ bool sameMaterial(const TopoDS_Shape& a, const TopoDS_Shape& b)
     }
     return true;
 }
-void check(bool ok, const QString& message = QStringLiteral("Invalid or incomplete project data"))
+void check(bool ok, const QString& message = QCoreApplication::translate("ProjectStore", "项目数据无效或不完整"))
 {
     if (!ok)
         throw std::runtime_error(message.isEmpty() ? "Invalid or incomplete project data"
@@ -174,7 +175,7 @@ ProjectViewState readView(const QJsonObject& j)
     const double cross = std::hypot(direction[1] * v.camera.up[2] - direction[2] * v.camera.up[1],
                                     direction[2] * v.camera.up[0] - direction[0] * v.camera.up[2],
                                     direction[0] * v.camera.up[1] - direction[1] * v.camera.up[0]);
-    check(length > 1e-12 && cross > 1e-12, QStringLiteral("Project camera is degenerate"));
+    check(length > 1e-12 && cross > 1e-12, QCoreApplication::translate("ProjectStore", "项目相机参数退化"));
     check(!v.originLock ||
           std::hypot(v.camera.target[0], v.camera.target[1], v.camera.target[2]) < 1e-9);
     check(j["object"].isObject() && j["render"].isObject());
@@ -224,7 +225,7 @@ void transfer(QFile& input, QIODevice& output, qint64 count, QCryptographicHash*
 {
     while (count > 0) {
         const auto bytes = input.read(std::min<qint64>(count, 65536));
-        check(!bytes.isEmpty(), QStringLiteral("Truncated project asset"));
+        check(!bytes.isEmpty(), QCoreApplication::translate("ProjectStore", "项目资源被截断"));
         check(output.write(bytes) == bytes.size(), output.errorString());
         if (hash)
             hash->addData(bytes);
@@ -238,7 +239,7 @@ bool ProjectStore::save(const QString& path, const ProjectSnapshot& state, QStri
     error.clear();
     try {
         QTemporaryDir stage;
-        check(stage.isValid(), QStringLiteral("Cannot create project staging directory"));
+        check(stage.isValid(), QCoreApplication::translate("ProjectStore", "无法创建项目暂存目录"));
         // Reject a history that cannot be loaded before replacing an existing save.
         modeling::ModelingCore checked;
         if (!checked.restoreFeatures(state.features))
@@ -258,13 +259,13 @@ bool ProjectStore::save(const QString& path, const ProjectSnapshot& state, QStri
         QStringList names;
         if (!state.currentBody.IsNull()) {
             if (state.parametricBody) check(sameMaterial(state.currentBody,checked.bodyShape()),
-                QStringLiteral("Current body does not match its parametric features"));
+                QCoreApplication::translate("ProjectStore", "当前实体与其参数特征不匹配"));
             check(BRepCheck_Analyzer(state.currentBody).IsValid(),
-                  QStringLiteral("Invalid project CAD body"));
+                  QCoreApplication::translate("ProjectStore", "项目 CAD 实体无效"));
             std::ofstream output(nativePath(stage.filePath("body.brep")), std::ios::binary);
             BRepTools::Write(state.currentBody, output);
             output.flush();
-            check(output.good(), QStringLiteral("Cannot store project body"));
+            check(output.good(), QCoreApplication::translate("ProjectStore", "无法保存项目实体"));
             names << "body.brep";
         }
         QJsonArray selected;
@@ -281,9 +282,9 @@ bool ProjectStore::save(const QString& path, const ProjectSnapshot& state, QStri
         manifest["selection"] = selected;
         if (!state.view.render.texturePath.isEmpty()) {
             QImage image(state.view.render.texturePath);
-            check(!image.isNull(), QStringLiteral("Cannot read project texture"));
+            check(!image.isNull(), QCoreApplication::translate("ProjectStore", "无法读取项目纹理"));
             check(image.save(stage.filePath("texture.png")),
-                  QStringLiteral("Cannot store project texture"));
+                  QCoreApplication::translate("ProjectStore", "无法保存项目纹理"));
             names << "texture.png";
         }
         QJsonArray assets;
@@ -294,7 +295,7 @@ bool ProjectStore::save(const QString& path, const ProjectSnapshot& state, QStri
                             {"sha256", QString::fromLatin1(digest(stage.filePath(name)))}});
         manifest["assets"] = assets;
         const auto json = QJsonDocument(manifest).toJson(QJsonDocument::Compact);
-        check(json.size() <= 16 * 1024 * 1024, QStringLiteral("Project metadata is too large"));
+        check(json.size() <= 16 * 1024 * 1024, QCoreApplication::translate("ProjectStore", "项目元数据过大"));
         QSaveFile output(path);
         check(output.open(QIODevice::WriteOnly), output.errorString());
         check(output.write("PCADPRJ1", 8) == 8, output.errorString());
@@ -324,7 +325,7 @@ std::unique_ptr<PreparedProject> ProjectStore::load(const QString& path, QString
     try {
         QFile input(path);
         check(input.open(QIODevice::ReadOnly), input.errorString());
-        check(input.read(8) == "PCADPRJ1", QStringLiteral("Not a supported ParamCAD project"));
+        check(input.read(8) == "PCADPRJ1", QCoreApplication::translate("ProjectStore", "不是受支持的 ParamCAD 项目"));
         QDataStream stream(&input);
         quint32 length = 0;
         stream >> length;
@@ -338,7 +339,7 @@ std::unique_ptr<PreparedProject> ProjectStore::load(const QString& path, QString
         const auto manifest = document.object();
         check(manifest["schema"] == "paramcad.project" &&
                   (manifest["version"] == 1 || manifest["version"] == 2 || manifest["version"] == 3),
-              QStringLiteral("Unsupported project format/version"));
+              QCoreApplication::translate("ProjectStore", "不支持的项目格式/版本"));
         check(manifest["features"].isArray() && manifest["view"].isObject() &&
               manifest["assets"].isArray() && manifest["selection"].isArray());
         auto result = std::make_unique<PreparedProject>();
@@ -363,9 +364,9 @@ std::unique_ptr<PreparedProject> ProjectStore::load(const QString& path, QString
             output.close();
             check(asset["sha256"].isString() &&
                       hash.result().toHex() == asset["sha256"].toString().toLatin1(),
-                  QStringLiteral("Project asset checksum mismatch"));
+                  QCoreApplication::translate("ProjectStore", "项目资源校验和不匹配"));
         }
-        check(input.atEnd(), QStringLiteral("Unexpected trailing project data"));
+        check(input.atEnd(), QCoreApplication::translate("ProjectStore", "项目数据末尾存在多余内容"));
         std::vector<modeling::Feature> features;
         check(FeatureCodec::decode(manifest["features"].toArray(), features, error), error);
         if (!result->model.restoreFeatures(features))
@@ -376,17 +377,17 @@ std::unique_ptr<PreparedProject> ProjectStore::load(const QString& path, QString
             BRepTools::Read(result->currentBody, body, builder);
             check(!body.fail() && !result->currentBody.IsNull() &&
                       BRepCheck_Analyzer(result->currentBody).IsValid(),
-                  QStringLiteral("Invalid project CAD body"));
+                  QCoreApplication::translate("ProjectStore", "项目 CAD 实体无效"));
             const bool parametric = manifest.contains("parametricBody")
                 ? boolean(manifest["parametricBody"])
                 : sameMaterial(result->currentBody,result->model.bodyShape());
             if (parametric) {
                 check(sameMaterial(result->currentBody,result->model.bodyShape()),
-                    QStringLiteral("Stored body does not match its parametric features"));
+                    QCoreApplication::translate("ProjectStore", "保存的实体与其参数特征不匹配"));
                 result->currentBody=result->model.bodyShape();
             }
         } else if (manifest.contains("parametricBody")) {
-            check(!boolean(manifest["parametricBody"]),QStringLiteral("Parametric body asset is missing"));
+            check(!boolean(manifest["parametricBody"]),QCoreApplication::translate("ProjectStore", "缺少参数实体资源"));
         }
         check(names.count("cloud.ply") == names.count("annotations.json"));
         if (names.count("cloud.ply")) {
@@ -418,7 +419,7 @@ std::unique_ptr<PreparedProject> ProjectStore::load(const QString& path, QString
         if (names.count("texture.png")) {
             result->view.render.texturePath = result->assets->filePath("texture.png");
             result->texture = QImage(result->view.render.texturePath);
-            check(!result->texture.isNull(), QStringLiteral("Invalid project texture"));
+            check(!result->texture.isNull(), QCoreApplication::translate("ProjectStore", "项目纹理无效"));
         }
         return result;
     } catch (const Standard_Failure& failure) {

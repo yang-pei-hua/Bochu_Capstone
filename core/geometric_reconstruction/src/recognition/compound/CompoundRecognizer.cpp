@@ -6,7 +6,7 @@ bool reconstructCompound(const PointStore& store, const CompoundRecognitionOptio
                          CompoundCandidate& output, std::string& error) {
     output = {};
     error.clear();
-    if (store.unit() != LengthUnit::Millimeter || store.size() < 30 ||
+    if (store.unit() != LengthUnit::Millimeter || store.size() < options.minimumPoints ||
         !(options.distanceTolerance > 0) ||
         !(options.normalAlignment > 0.9 && options.normalAlignment < 1) ||
         !(options.maximumCellError >= 0 && options.maximumCellError < 0.5)) {

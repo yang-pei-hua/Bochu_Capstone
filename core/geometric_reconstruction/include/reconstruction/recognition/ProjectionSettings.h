@@ -1,6 +1,7 @@
 #pragma once
 
 #include "reconstruction/recognition/ProjectionExtrusion.h"
+#include "reconstruction/settings/ModuleSettings.h"
 
 #include <filesystem>
 #include <string_view>
@@ -8,16 +9,7 @@
 
 namespace reconstruction {
 
-struct ProjectionSetting {
-    enum class Type { Integer, Real, Boolean };
-    const char* key;
-    const char* group;
-    const char* label;
-    Type type;
-    double minimum, maximum;
-    double (*value)(const ProjectionExtrusionOptions&);
-    void (*assign)(ProjectionExtrusionOptions&, double);
-};
+using ProjectionSetting = settings::Setting<ProjectionExtrusionOptions>;
 
 const std::vector<ProjectionSetting>& projectionSettings();
 std::filesystem::path projectionConfigPath();
@@ -25,5 +17,6 @@ ProjectionExtrusionOptions loadProjectionOptions(const std::filesystem::path& pa
 std::string serializeProjectionOptions(const ProjectionExtrusionOptions& options);
 void setProjectionOption(ProjectionExtrusionOptions& options, std::string_view assignment);
 void validateProjectionOptions(const ProjectionExtrusionOptions& options);
+settings::DocumentPtr makeProjectionSettings();
 
-} // namespace reconstruction
+}  // namespace reconstruction

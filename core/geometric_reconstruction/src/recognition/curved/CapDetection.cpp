@@ -2,7 +2,8 @@
 
 namespace reconstruction::detail::curved {
 std::vector<Cap> caps(const PointStore &points, Vec3 origin, Vec3 axis, double tolerance,
-                      const std::function<double(double)> &radius) {
+                      const std::function<double(double)> &radius,
+                      const CurvedSolidRecognitionOptions &options) {
     struct Item {
         double t;
         const PointSample *p;
@@ -11,11 +12,11 @@ std::vector<Cap> caps(const PointStore &points, Vec3 origin, Vec3 axis, double t
     std::vector<Item> items;
     for (const auto &p : points.points()) {
         const double projection = dot(normalized(*p.normal), axis);
-        if (std::abs(projection) < 0.98)
+        if (std::abs(projection) < options.capNormalCosine)
             continue;
         auto d = subtract(p.position, origin);
         const double t = dot(d, axis);
-        if (radialLength(d, axis) > radius(t) + 2 * tolerance)
+        if (radialLength(d, axis) > radius(t) + options.capRadialToleranceMultiplier * tolerance)
             continue;
         items.push_back({t, &p, projection > 0 ? 1 : -1});
     }
@@ -23,7 +24,8 @@ std::vector<Cap> caps(const PointStore &points, Vec3 origin, Vec3 axis, double t
     std::vector<Cap> result;
     for (std::size_t i = 0; i < items.size();) {
         auto end = i + 1;
-        while (end < items.size() && items[end].t - items[i].t <= 4 * tolerance)
+        while (end < items.size() &&
+               items[end].t - items[i].t <= options.capGroupToleranceMultiplier * tolerance)
             ++end;
         for (int sign : {-1, 1}) {
             Cap cap;
@@ -31,7 +33,8 @@ std::vector<Cap> caps(const PointStore &points, Vec3 origin, Vec3 axis, double t
             for (auto j = i; j < end; ++j)
                 if (items[j].sign == sign)
                     cap.data.push_back(items[j].p);
-            if (cap.data.size() >= std::max<std::size_t>(12, points.size() / 1000)) {
+            if (cap.data.size() >= std::max<std::size_t>(options.minimumCapPoints,
+                    points.size() / std::max<std::size_t>(1, options.capPointDivisor))) {
                 std::sort(cap.data.begin(), cap.data.end(),
                           [](auto a, auto b) { return a->id < b->id; });
                 for (auto p : cap.data)

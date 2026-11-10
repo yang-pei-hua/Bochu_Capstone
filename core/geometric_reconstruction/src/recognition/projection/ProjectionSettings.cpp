@@ -1,72 +1,25 @@
 #include "reconstruction/recognition/ProjectionSettings.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdlib>
-#include <fstream>
-#include <iomanip>
-#include <limits>
-#include <locale>
-#include <set>
-#include <sstream>
-#include <stdexcept>
-
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#elif defined(__APPLE__)
-#include <mach-o/dyld.h>
-#endif
+#include <string>
 
 namespace reconstruction {
 namespace {
 
-std::string_view trim(std::string_view value)
+void validateProjection(const ProjectionExtrusionOptions& options, std::string& reason)
 {
-    const auto first = value.find_first_not_of(" \t\r\n");
-    if (first == value.npos) return {};
-    return value.substr(first, value.find_last_not_of(" \t\r\n") - first + 1);
+    if (options.minimumCapPoints > options.maximumFitPoints / 2)
+        reason = "maximum_fit_points must be at least twice minimum_cap_points";
+    else if (options.innerWallMinimumBands > options.innerWallDepthBands)
+        reason = "inner_wall_minimum_bands cannot exceed inner_wall_depth_bands";
 }
 
-std::filesystem::path executableDirectory()
-{
-#if defined(_WIN32)
-    std::wstring path(32768, L'\0');
-    const auto count = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
-    if (count && count < path.size()) {
-        path.resize(count);
-        return std::filesystem::path(path).parent_path();
-    }
-#elif defined(__APPLE__)
-    std::uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::string path(size, '\0');
-    if (_NSGetExecutablePath(path.data(), &size) == 0)
-        return std::filesystem::path(path.c_str()).parent_path();
-#elif defined(__linux__)
-    std::error_code error;
-    return std::filesystem::read_symlink("/proc/self/exe", error).parent_path();
-#endif
-    return {};
-}
-
-bool inRange(const ProjectionSetting& setting, double value)
-{
-    return std::isfinite(value) && value >= setting.minimum && value <= setting.maximum
-        && (setting.type == ProjectionSetting::Type::Real || std::trunc(value) == value);
-}
-
-} // namespace
-
-const std::vector<ProjectionSetting>& projectionSettings()
+const std::vector<ProjectionSetting>& projectionSchema()
 {
 #define SETTING(field, key, group, label, type, low, high) \
     {key, group, label, ProjectionSetting::Type::type, low, high, \
      [](const ProjectionExtrusionOptions& options) { return double(options.field); }, \
      [](ProjectionExtrusionOptions& options, double value) { options.field = static_cast<decltype(options.field)>(value); }}
-    static const std::vector<ProjectionSetting> settings{
+    static const std::vector<ProjectionSetting> values{
         SETTING(distanceTolerance, "distance_tolerance_mm", "输入与候选轴", "绝对距离容差 mm，0 为自动", Real, 0, 10000),
         SETTING(relativeDistanceTolerance, "relative_distance_tolerance", "输入与候选轴", "自动容差占包围盒对角线比例", Real, 0.000001, 0.5),
         SETTING(maximumAxes, "maximum_axes", "输入与候选轴", "候选轴上限", Integer, 1, 128),
@@ -158,98 +111,42 @@ const std::vector<ProjectionSetting>& projectionSettings()
         SETTING(minimumBooleanVolumeMultiplier, "minimum_boolean_volume_multiplier", "评分与搜索", "布尔体积变化门槛与容差立方之比", Real, 0, 100),
     };
 #undef SETTING
-    return settings;
+    return values;
 }
+
+}  // namespace
+
+const std::vector<ProjectionSetting>& projectionSettings() { return projectionSchema(); }
 
 std::filesystem::path projectionConfigPath()
 {
-#ifdef _WIN32
-    if (const auto* path = _wgetenv(L"PARAMCAD_PROJECTION_CONFIG"); path && *path) return path;
-#else
-    if (const auto* path = std::getenv("PARAMCAD_PROJECTION_CONFIG"); path && *path) return path;
-#endif
-    const auto installed = executableDirectory() / "config" / "projection.conf";
-    if (std::filesystem::exists(installed)) return installed;
-    return std::filesystem::u8path(PARAMCAD_PROJECTION_SOURCE_CONFIG);
+    return settings::configPath("projection", "projection.conf");
 }
 
 void setProjectionOption(ProjectionExtrusionOptions& options, std::string_view assignment)
 {
-    const auto separator = assignment.find('=');
-    if (separator == assignment.npos) throw std::invalid_argument("Expected projection key=value");
-    const auto key = trim(assignment.substr(0, separator));
-    const auto raw = trim(assignment.substr(separator + 1));
-    const auto& settings = projectionSettings();
-    const auto setting = std::find_if(settings.begin(), settings.end(),
-        [key](const auto& candidate) { return key == candidate.key; });
-    if (setting == settings.end()) throw std::invalid_argument("Unknown projection parameter: " + std::string(key));
-
-    double value = 0;
-    if (setting->type == ProjectionSetting::Type::Boolean && (raw == "true" || raw == "false")) {
-        value = raw == "true";
-    } else {
-        std::istringstream stream{std::string(raw)};
-        stream.imbue(std::locale::classic());
-        if (!(stream >> value) || !(stream >> std::ws).eof())
-            throw std::invalid_argument("Invalid projection value for " + std::string(key));
-    }
-    if (!inRange(*setting, value))
-        throw std::invalid_argument("Projection parameter is outside its range: " + std::string(key));
-    setting->assign(options, value);
+    settings::setOption(projectionSchema(), options, assignment, "projection");
 }
 
 void validateProjectionOptions(const ProjectionExtrusionOptions& options)
 {
-    for (const auto& setting : projectionSettings())
-        if (!inRange(setting, setting.value(options)))
-            throw std::invalid_argument(std::string("Projection parameter is outside its range: ") + setting.key);
-    if (options.minimumCapPoints > options.maximumFitPoints / 2)
-        throw std::invalid_argument("maximum_fit_points must be at least twice minimum_cap_points");
-    if (options.innerWallMinimumBands > options.innerWallDepthBands)
-        throw std::invalid_argument("inner_wall_minimum_bands cannot exceed inner_wall_depth_bands");
+    settings::validateOptions(projectionSchema(), options, "projection", validateProjection);
 }
 
 ProjectionExtrusionOptions loadProjectionOptions(const std::filesystem::path& path)
 {
-    const auto file = path.empty() ? projectionConfigPath() : path;
-    std::ifstream input(file);
-    if (!input) throw std::runtime_error("Cannot open projection config: " + file.u8string());
-    ProjectionExtrusionOptions options;
-    std::set<std::string> keys;
-    std::string line;
-    for (std::size_t number = 1; std::getline(input, line); ++number) {
-        if (number == 1 && line.compare(0, 3, "\xef\xbb\xbf") == 0) line.erase(0, 3);
-        const auto comment = line.find('#');
-        const auto assignment = trim(std::string_view(line).substr(0, comment));
-        if (assignment.empty()) continue;
-        try {
-            const auto key = trim(assignment.substr(0, assignment.find('=')));
-            if (!keys.emplace(key).second) throw std::invalid_argument("Duplicate projection parameter: " + std::string(key));
-            setProjectionOption(options, assignment);
-        } catch (const std::exception& error) {
-            throw std::runtime_error(file.u8string() + ":" + std::to_string(number) + ": " + error.what());
-        }
-    }
-    if (!input.eof()) throw std::runtime_error("Cannot read projection config: " + file.u8string());
-    validateProjectionOptions(options);
-    return options;
+    return settings::loadOptions(projectionSchema(), "projection", "projection.conf", path, validateProjection);
 }
 
 std::string serializeProjectionOptions(const ProjectionExtrusionOptions& options)
 {
     validateProjectionOptions(options);
-    std::ostringstream output;
-    output.imbue(std::locale::classic());
-    output << "# Projection hyperparameters. Distances use millimetres.\n";
-    output << std::setprecision(std::numeric_limits<double>::max_digits10);
-    for (const auto& setting : projectionSettings()) {
-        output << setting.key << " = ";
-        const auto value = setting.value(options);
-        if (setting.type == ProjectionSetting::Type::Boolean) output << (value ? "true" : "false");
-        else output << value;
-        output << '\n';
-    }
-    return output.str();
+    return settings::serializeOptions(projectionSchema(), options, "Projection");
 }
 
-} // namespace reconstruction
+settings::DocumentPtr makeProjectionSettings()
+{
+    return settings::makeDocument(projectionSchema(), "projection", "投影拟合", "projection.conf", validateProjection);
+}
+
+}  // namespace reconstruction

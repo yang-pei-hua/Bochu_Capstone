@@ -1,5 +1,7 @@
 #include "ui/panels/PointCloudRelationsPanel.h"
 
+#include <reconstruction/settings/ModuleConfig.h>
+
 #include <QAbstractItemView>
 #include <QAction>
 #include <QFileInfo>
@@ -27,21 +29,32 @@
 
 #include <algorithm>
 #include <set>
+#include <QCoreApplication>
 
 namespace {
 enum Kind { Category = 0, Region = 1, Relation = 2, PointList = 3, Point = 4, More = 5 };
 constexpr int KindRole = Qt::UserRole, IdRole = Qt::UserRole + 1, OffsetRole = Qt::UserRole + 2;
 constexpr int PageSize = 200;
-const std::vector<std::pair<QString, QString>> geometries{
-    {"cuboid", "长方体集合"}, {"plane", "平面"}, {"sphere", "球面"},
-    {"cylinder", "圆柱面"}, {"cone", "圆锥面"}, {"ring", "环面"}};
-const std::vector<std::pair<QString, QString>> relationTypes{
-    {"parallel", "平行"}, {"perpendicular", "垂直"}, {"adjacent", "邻近 / 相邻"},
-    {"intersect", "相交"}, {"coaxial", "同轴"}, {"tangent", "相切"},
-    {"same_radius", "等半径"}, {"coplanar", "共面"}};
+// Built on first use so the names are translated after the UI language is
+// installed; a namespace-scope table would be fixed before main() runs.
+const std::vector<std::pair<QString, QString>>& geometries()
+{
+    static const std::vector<std::pair<QString, QString>> values{
+        {"cuboid", QCoreApplication::translate("PointCloudRelationsPanel", "长方体集合")}, {"plane", QCoreApplication::translate("PointCloudRelationsPanel", "平面")}, {"sphere", QCoreApplication::translate("PointCloudRelationsPanel", "球面")},
+        {"cylinder", QCoreApplication::translate("PointCloudRelationsPanel", "圆柱面")}, {"cone", QCoreApplication::translate("PointCloudRelationsPanel", "圆锥面")}, {"ring", QCoreApplication::translate("PointCloudRelationsPanel", "环面")}};
+    return values;
+}
+const std::vector<std::pair<QString, QString>>& relationTypes()
+{
+    static const std::vector<std::pair<QString, QString>> values{
+        {"parallel", QCoreApplication::translate("PointCloudRelationsPanel", "平行")}, {"perpendicular", QCoreApplication::translate("PointCloudRelationsPanel", "垂直")}, {"adjacent", QCoreApplication::translate("PointCloudRelationsPanel", "邻近 / 相邻")},
+        {"intersect", QCoreApplication::translate("PointCloudRelationsPanel", "相交")}, {"coaxial", QCoreApplication::translate("PointCloudRelationsPanel", "同轴")}, {"tangent", QCoreApplication::translate("PointCloudRelationsPanel", "相切")},
+        {"same_radius", QCoreApplication::translate("PointCloudRelationsPanel", "等半径")}, {"coplanar", QCoreApplication::translate("PointCloudRelationsPanel", "共面")}};
+    return values;
+}
 QString label(const std::vector<std::pair<QString, QString>>& values, const QString& key)
 {
-    if(key=="part")return QStringLiteral("部件候选");
+    if(key=="part")return QCoreApplication::translate("PointCloudRelationsPanel", "部件候选");
     for (const auto& [value, text] : values) if (value == key) return text;
     return key;
 }
@@ -174,7 +187,12 @@ PointCloudRelationsPanel::PointCloudRelationsPanel(QWidget* parent) : QWidget(pa
     form->setContentsMargins(6, 8, 6, 6); form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     m_surfaceTolerance = tolerance(settings, 0.1); m_surfaceTolerance->setObjectName("surfaceFitTolerance");
     m_relationTolerance = tolerance(settings, 1.0);
-    m_angleTolerance = tolerance(settings, 2.0); m_angleTolerance->setRange(0.01, 30);
+    double defaultAngle = 2.0;
+    try {
+        defaultAngle = reconstruction::loadAnalysisSettings().defaultAngleToleranceDegrees;
+    } catch (const std::exception&) {
+    }
+    m_angleTolerance = tolerance(settings, defaultAngle); m_angleTolerance->setRange(0.01, 30);
     m_angleTolerance->setDecimals(2); m_angleTolerance->setSuffix(QStringLiteral("°"));
     form->addRow(tr("拟合距离容差"), m_surfaceTolerance);
     form->addRow(tr("关系距离容差"), m_relationTolerance);
@@ -302,7 +320,7 @@ void PointCloudRelationsPanel::createRegion()
     auto* name = new QLineEdit(&dialog); name->setObjectName("pointCloudCollectionName");
     name->setPlaceholderText(tr("留空则自动命名"));
     auto* geometry = new QComboBox(&dialog); geometry->setObjectName("pointCloudTemplateGeometry");
-    for (const auto& [key, text] : geometries) geometry->addItem(text, key);
+    for (const auto& [key, text] : geometries()) geometry->addItem(text, key);
     form->addRow(tr("名称"), name); form->addRow(tr("几何模板"), geometry);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     form->addRow(buttons);
@@ -341,7 +359,7 @@ void PointCloudRelationsPanel::setDocument(const PointCloudSelection& document, 
         const auto* first = document.region(relation.first); const auto* second = document.region(relation.second);
         if (!first || !second) return;
         auto* item = node(parent, {QStringLiteral("%1 ↔ %2").arg(first->name, second->name),
-            label(relationTypes, relation.type), QString()}, Relation, relation.id);
+            label(relationTypes(), relation.type), QString()}, Relation, relation.id);
         item->setToolTip(0, tr("%1 · 置信度 %2\n点击同时高亮两个集合")
             .arg(relation.automatic ? tr("按容差自动推断") : tr("手动标注"))
             .arg(relation.confidence, 0, 'f', 3));
@@ -349,7 +367,7 @@ void PointCloudRelationsPanel::setDocument(const PointCloudSelection& document, 
             tr("置信度 %1").arg(relation.confidence, 0, 'f', 3)}, Relation, relation.id);
     };
     for (const auto& region : document.regions()) {
-        auto* item = node(collections, {region.name, label(geometries, region.geometry),
+        auto* item = node(collections, {region.name, label(geometries(), region.geometry),
             QString::number(m_points[region.id].size())}, Region, region.id);
         item->setToolTip(0, tr("集合 #%1 · %2").arg(region.id).arg(region.name));
         if (region.id == previousRegion) m_tree->setCurrentItem(item);
@@ -358,9 +376,9 @@ void PointCloudRelationsPanel::setDocument(const PointCloudSelection& document, 
         if (!region.parameters.isEmpty()) {
             node(item, {tr("平均残差 / 置信度"), QStringLiteral("%1 / %2").arg(region.residual, 0, 'g', 6)
                 .arg(region.confidence, 0, 'f', 3)}, Region, region.id);
-            const std::map<QString, QString> names{{"normal", "法向"}, {"offset", "平面偏移"}, {"center", "中心 / 轴点"},
-                {"axis", "轴方向"}, {"radius", "半径"}, {"major_radius", "主半径"}, {"minor_radius", "管半径"},
-                {"angle", "半角（弧度）"}, {"axial_min", "轴向下界"}, {"axial_max", "轴向上界"}};
+            const std::map<QString, QString> names{{"normal", QCoreApplication::translate("PointCloudRelationsPanel", "法向")}, {"offset", QCoreApplication::translate("PointCloudRelationsPanel", "平面偏移")}, {"center", QCoreApplication::translate("PointCloudRelationsPanel", "中心 / 轴点")},
+                {"axis", QCoreApplication::translate("PointCloudRelationsPanel", "轴方向")}, {"radius", QCoreApplication::translate("PointCloudRelationsPanel", "半径")}, {"major_radius", QCoreApplication::translate("PointCloudRelationsPanel", "主半径")}, {"minor_radius", QCoreApplication::translate("PointCloudRelationsPanel", "管半径")},
+                {"angle", QCoreApplication::translate("PointCloudRelationsPanel", "半角（弧度）")}, {"axial_min", QCoreApplication::translate("PointCloudRelationsPanel", "轴向下界")}, {"axial_max", QCoreApplication::translate("PointCloudRelationsPanel", "轴向上界")}};
             for (auto param = region.parameters.begin(); param != region.parameters.end(); ++param) {
                 QString text;
                 if (param.value().isArray()) {
@@ -492,7 +510,7 @@ void PointCloudRelationsPanel::editRegion()
     auto* form = new QFormLayout(&dialog);
     auto* name = new QLineEdit(region->name, &dialog); name->setObjectName("pointCloudCollectionName");
     auto* geometry = new QComboBox(&dialog);
-    for (const auto& [key, text] : geometries) geometry->addItem(text, key);
+    for (const auto& [key, text] : geometries()) geometry->addItem(text, key);
     geometry->setCurrentIndex(geometry->findData(region->geometry));
     form->addRow(tr("名称"), name); form->addRow(tr("模板"), geometry);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -514,7 +532,7 @@ void PointCloudRelationsPanel::editRelation(bool create)
     for (const auto& region : m_document->regions()) if (m_document->regionPointCount(region.id)) {
         first->addItem(region.name, region.id); second->addItem(region.name, region.id);
     }
-    for (const auto& [key, text] : relationTypes) type->addItem(text, key);
+    for (const auto& [key, text] : relationTypes()) type->addItem(text, key);
     if (current) {
         first->setCurrentIndex(first->findData(current->first)); second->setCurrentIndex(second->findData(current->second));
         type->setCurrentIndex(type->findData(current->type));
@@ -535,8 +553,15 @@ void PointCloudRelationsPanel::setCadReconstructionBusy(bool busy, bool cancella
 void PointCloudRelationsPanel::setStatus(const QString& text) { m_status->setText(text); }
 void PointCloudRelationsPanel::setDefaultTolerances(double diagonal)
 {
-    m_surfaceTolerance->setValue(std::max(0.000001, diagonal*0.001));
-    m_relationTolerance->setValue(std::max(0.000001, diagonal*0.01));
+    double surfaceFraction = 0.001, relationFraction = 0.01;
+    try {
+        const auto settings = reconstruction::loadAnalysisSettings();
+        surfaceFraction = settings.surfaceToleranceDiagonalFraction;
+        relationFraction = settings.relationToleranceDiagonalFraction;
+    } catch (const std::exception&) {
+    }
+    m_surfaceTolerance->setValue(std::max(0.000001, diagonal*surfaceFraction));
+    m_relationTolerance->setValue(std::max(0.000001, diagonal*relationFraction));
 }
 double PointCloudRelationsPanel::surfaceTolerance() const { return m_surfaceTolerance->value(); }
 double PointCloudRelationsPanel::relationTolerance() const { return m_relationTolerance->value(); }

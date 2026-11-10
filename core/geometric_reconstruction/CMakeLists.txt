@@ -52,6 +52,8 @@ add_library(GeometricReconstruction
     src/preprocessing/NormalEstimation.cpp
     src/preprocessing/OutlierFilter.cpp
     src/preprocessing/PointCloudPreprocessor.cpp
+    src/settings/ModuleSettings.cpp
+    src/settings/ModuleConfig.cpp
     src/recognition/AxisAlignedBoxRecognizer.cpp
     src/recognition/BoxRecognizer.cpp
     src/recognition/ParametricSolidRecognizer.cpp
@@ -94,7 +96,7 @@ add_library(GeometricReconstruction::GeometricReconstruction ALIAS
 
 target_compile_features(GeometricReconstruction PUBLIC cxx_std_17)
 target_compile_definitions(GeometricReconstruction PRIVATE
-    PARAMCAD_PROJECTION_SOURCE_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/../../apps/ParamCAD Studio/config/projection.conf")
+    PARAMCAD_CONFIG_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../apps/ParamCAD Studio/config")
 target_include_directories(GeometricReconstruction PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -121,6 +123,14 @@ if(GEOMETRIC_RECONSTRUCTION_BUILD_TESTS)
     target_link_libraries(projection_stage_test PRIVATE GeometricReconstruction::GeometricReconstruction)
     add_test(NAME projection_stage_test COMMAND projection_stage_test)
     set_tests_properties(projection_stage_test PROPERTIES TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${OpenCASCADE_BINARY_DIR}")
+    add_executable(module_settings_test tests/settings/module_settings_test.cpp)
+    target_include_directories(module_settings_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(module_settings_test PRIVATE GeometricReconstruction::GeometricReconstruction)
+    target_compile_definitions(module_settings_test PRIVATE
+        RECONSTRUCTION_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../apps/ParamCAD Studio/config")
+    add_test(NAME module_settings_test COMMAND module_settings_test)
+    set_tests_properties(module_settings_test PROPERTIES TIMEOUT 60
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${OpenCASCADE_BINARY_DIR}")
     add_executable(assembly_reconstruction_test tests/assembly_reconstruction_test.cpp)
     target_include_directories(assembly_reconstruction_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")

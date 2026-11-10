@@ -891,6 +891,29 @@ bool VTKViewer::captureImage(const QString& filePath, int width, int height)
     return written;
 }
 
+bool VTKViewer::captureViewport(const QString& filePath)
+{
+    if (filePath.isEmpty()) {
+        return false;
+    }
+
+    renderNow();
+
+    vtkNew<vtkWindowToImageFilter> windowCapture;
+    windowCapture->SetInput(m_renderWindow);
+    windowCapture->SetInputBufferTypeToRGB();
+    windowCapture->ReadFrontBufferOff();
+    windowCapture->Update();
+
+    vtkNew<vtkPNGWriter> writer;
+    const QByteArray nativePath = filePath.toLocal8Bit();
+    writer->SetFileName(nativePath.constData());
+    writer->SetInputConnection(windowCapture->GetOutputPort());
+    writer->Write();
+
+    return writer->GetErrorCode() == 0;
+}
+
 QSize VTKViewer::captureSourceSize() const
 {
     int* const size = m_renderWindow->GetSize();

@@ -35,37 +35,37 @@ SketchToolPalette::SketchToolPalette(QWidget* parent)
     outer->setContentsMargins(6, 6, 6, 6);
     outer->setSpacing(6);
 
-    m_selection = new QLabel(tr("Nothing selected"), this);
+    m_selection = new QLabel(tr("未选择任何对象"), this);
     m_selection->setObjectName(QStringLiteral("selectionLabel"));
     m_selection->setWordWrap(true);
     outer->addWidget(m_selection);
 
-    m_sketchSelect = addToolButton(QStringLiteral("sketchSelect"), tr("Select"),
-                                   tr("Pick a sketch entity and show its properties"), true);
+    m_sketchSelect = addToolButton(QStringLiteral("sketchSelect"), tr("选择"),
+                                   tr("选择草图图元并查看其属性"), true);
     m_sketchSelect->setChecked(true);
-    m_toolPoint = addToolButton(QStringLiteral("toolPoint"), tr("Point"),
-                                tr("Click the sketch plane to place a point"), true);
-    m_toolLine = addToolButton(QStringLiteral("toolLine"), tr("Line"),
-                               tr("Click two points to draw a line"), true);
+    m_toolPoint = addToolButton(QStringLiteral("toolPoint"), tr("点"),
+                                tr("在草图平面上点击放置点"), true);
+    m_toolLine = addToolButton(QStringLiteral("toolLine"), tr("直线"),
+                               tr("点击两点绘制直线"), true);
 
     m_shapeButton = new QToolButton(this);
     m_shapeButton->setObjectName(QStringLiteral("shapeButton"));
-    m_shapeButton->setText(tr("Shape"));
-    m_shapeButton->setToolTip(tr("Rectangle or circle"));
+    m_shapeButton->setText(tr("形状"));
+    m_shapeButton->setToolTip(tr("矩形或圆"));
     m_shapeButton->setCheckable(true);
     m_shapeButton->setFixedHeight(kButtonHeight);
     m_shapeButton->setPopupMode(QToolButton::InstantPopup);
     auto* shapeMenu = new QMenu(m_shapeButton);
-    QAction* rectangleAction = shapeMenu->addAction(tr("Rectangle"));
+    QAction* rectangleAction = shapeMenu->addAction(tr("矩形"));
     rectangleAction->setObjectName(QStringLiteral("shapeRectangle"));
-    QAction* circleAction = shapeMenu->addAction(tr("Circle"));
+    QAction* circleAction = shapeMenu->addAction(tr("圆"));
     circleAction->setObjectName(QStringLiteral("shapeCircle"));
     m_shapeButton->setMenu(shapeMenu);
 
-    m_shapeLabel = new QLabel(tr("Shape"), this);
+    m_shapeLabel = new QLabel(tr("形状"), this);
     m_shapeLabel->setObjectName(QStringLiteral("shapeLabel"));
-    m_exitSketch = addToolButton(QStringLiteral("exitSketch"), tr("Exit Sketch"),
-                                 tr("Leave sketch editing; the sketch is kept"), false);
+    m_exitSketch = addToolButton(QStringLiteral("exitSketch"), tr("退出草图"),
+                                 tr("退出草图编辑，草图会保留"), false);
 
     outer->addWidget(m_sketchSelect);
     outer->addWidget(m_toolPoint);
@@ -105,7 +105,7 @@ QToolButton* SketchToolPalette::addToolButton(const QString& objectName, const Q
 
 void SketchToolPalette::setSelectionText(const QString& text)
 {
-    m_selection->setText(text.isEmpty() ? tr("Nothing selected") : text);
+    m_selection->setText(text.isEmpty() ? tr("未选择任何对象") : text);
 }
 
 void SketchToolPalette::setActiveTool(ViewportTool tool)

@@ -1,14 +1,15 @@
 #include "core/Scene.h"
+#include <QCoreApplication>
 
 Scene::Scene()
     : m_nodes{
-          {QStringLiteral("scene"), QStringLiteral("Scene"), SceneNodeType::Root, {}},
-          {QStringLiteral("models"), QStringLiteral("Models"), SceneNodeType::Group, QStringLiteral("scene")},
-          {QStringLiteral("model"), QStringLiteral("Model"), SceneNodeType::Model, QStringLiteral("models")},
-          {QStringLiteral("cameras"), QStringLiteral("Cameras"), SceneNodeType::Group, QStringLiteral("scene")},
-          {QStringLiteral("camera-01"), QStringLiteral("Camera01"), SceneNodeType::Camera, QStringLiteral("cameras")},
-          {QStringLiteral("point-clouds"), QStringLiteral("Point Clouds"), SceneNodeType::Group, QStringLiteral("scene")},
-          {QStringLiteral("point-cloud-01"), QStringLiteral("PointCloud"), SceneNodeType::PointCloud, QStringLiteral("point-clouds")}}
+          {QStringLiteral("scene"), QCoreApplication::translate("Scene", "场景"), SceneNodeType::Root, {}},
+          {QStringLiteral("models"), QCoreApplication::translate("Scene", "模型"), SceneNodeType::Group, QStringLiteral("scene")},
+          {QStringLiteral("model"), QCoreApplication::translate("Scene", "模型"), SceneNodeType::Model, QStringLiteral("models")},
+          {QStringLiteral("cameras"), QCoreApplication::translate("Scene", "相机"), SceneNodeType::Group, QStringLiteral("scene")},
+          {QStringLiteral("camera-01"), QCoreApplication::translate("Scene", "相机 01"), SceneNodeType::Camera, QStringLiteral("cameras")},
+          {QStringLiteral("point-clouds"), QCoreApplication::translate("Scene", "点云"), SceneNodeType::Group, QStringLiteral("scene")},
+          {QStringLiteral("point-cloud-01"), QCoreApplication::translate("Scene", "点云"), SceneNodeType::PointCloud, QStringLiteral("point-clouds")}}
 {
 }
 const QVector<SceneNode>& Scene::nodes() const
