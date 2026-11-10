@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(CadPointCloudClient VERSION 0.2.2 LANGUAGES CXX)
+project(CadPointCloudClient VERSION 0.3.0 LANGUAGES CXX)
 
 option(CAD_CLIENT_BUILD_TESTS "Build ParamCAD Studio I/O tests" OFF)
 option(CAD_CLIENT_BUILD_VALIDATION_TOOLS "Build standard STEP and CAD validation tools" OFF)

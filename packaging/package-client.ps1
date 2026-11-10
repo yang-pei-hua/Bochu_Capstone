@@ -5,7 +5,7 @@ param(
     [string]$QtRoot = $env:QTDIR,
     [string]$VcpkgRoot = $env:VCPKG_ROOT,
     [string]$VCRuntimeRoot,
-    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$')][string]$Version = '0.2.2',
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$')][string]$Version = '0.3.0',
     [string]$OutputDirectory,
     [string]$BuildDirectory,
     [string]$LocalColmapPath,
@@ -103,7 +103,16 @@ if (-not $SkipBuild) {
         "-DOpenCASCADE_DIR=$(Join-Path $projectRoot 'deps\occt-8.0.1\cmake')")
     Invoke-Native 'cmake' @('--build',$BuildDirectory,'--config','Release','--target','CadPointCloudClient','--parallel')
 }
+# A build tree may redirect binaries away from <build>/Release (the cloud-only
+# validation configuration does). Copying from the default path would ship a
+# stale executable, so always resolve the configured runtime output directory.
 $release = Join-Path $BuildDirectory 'Release'
+$runtimeOutput = Get-CacheValue 'CMAKE_RUNTIME_OUTPUT_DIRECTORY'
+if ($runtimeOutput) { $release = Join-Path $runtimeOutput 'Release' }
+if (-not (Test-Path -LiteralPath (Join-Path $release 'ParamCAD Studio.exe') -PathType Leaf)) {
+    throw "Release executable not found in $release"
+}
+Write-Host "Packaging binaries from $release"
 $name = "ParamCAD-Studio-$Version-windows-x64-full-$ColmapFlavor"
 $stage = Join-Path $projectRoot "artifacts\staging\release\$name"
 Reset-Directory $stage

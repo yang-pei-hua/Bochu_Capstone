@@ -7,10 +7,12 @@ created through the core's command API and displayed as a tessellated solid.
 Point-cloud preprocessing and CGAL Efficient RANSAC live in
 `core/geometric_reconstruction` and expose only project-owned evidence types.
 
-Version 0.2.2 adds bounded Chinese text parameter commands in the feature tab:
-preview edits to boxes, cylinders and through holes, validate the dependency
-rebuild on a separate model, then apply through the existing undoable editor.
-Earlier examples, unit and anchor semantics, and limits are archived.
+Version 0.3.0 externalizes the stage hyperparameters into the `config/*.conf`
+catalogs, adds a bilingual interface with a Settings language menu and a
+configurable screenshot shortcut, and ships per-stage command-line entry points
+under `tools/module_cli`.
+Feature-tab text parameter commands, unit and anchor semantics, and limits are
+archived.
 [Historical text parameter editing notes](../../docs/Outdated/Text_Parameter_Editing.md)
 
 ## Requirements

@@ -8,7 +8,7 @@
 
 ## 安装（可选）
 
-双击 **Install-ParamCADStudio.cmd**。安装程序只验证、复制包内文件并创建开始菜单快捷方式，无需管理员权限。
+双击 **Install-ParamCADStudio.cmd**。安装程序只验证、复制包内文件并创建开始菜单与桌面快捷方式，无需管理员权限。
 
 默认安装位置：`%LOCALAPPDATA%\Programs\ParamCAD Studio`。
 

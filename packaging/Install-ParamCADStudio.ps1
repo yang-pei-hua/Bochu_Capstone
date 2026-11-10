@@ -84,13 +84,26 @@ try {
     Move-Item -LiteralPath $temporary -Destination $destinationPath
     $replaced = $true
     if (-not $NoShortcut) {
-        $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-        New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut((Join-Path $startMenu 'ParamCAD Studio.lnk'))
-        $shortcut.TargetPath = Join-Path $destinationPath 'app\ParamCAD Studio.exe'
-        $shortcut.WorkingDirectory = $destinationPath
-        $shortcut.Save()
+        $target = Join-Path $destinationPath 'app\ParamCAD Studio.exe'
+        $shell = $null
+        try {
+            $shell = New-Object -ComObject WScript.Shell
+            # Start menu plus desktop. The desktop folder is read from the shell
+            # known folder so a redirected (OneDrive) desktop still works.
+            foreach ($folder in @(
+                (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'),
+                [Environment]::GetFolderPath('Desktop'))) {
+                if ([string]::IsNullOrWhiteSpace($folder)) { continue }
+                New-Item -ItemType Directory -Path $folder -Force | Out-Null
+                $shortcut = $shell.CreateShortcut((Join-Path $folder 'ParamCAD Studio.lnk'))
+                $shortcut.TargetPath = $target
+                $shortcut.WorkingDirectory = $destinationPath
+                $shortcut.Description = 'ParamCAD Studio'
+                $shortcut.Save()
+            }
+        } finally {
+            if ($null -ne $shell) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+        }
     }
 } catch {
     if ($replaced -and (Test-Path -LiteralPath $destinationPath)) {
@@ -114,4 +127,4 @@ if (Test-Path -LiteralPath $backup) {
 }
 Write-Host "ParamCAD Studio installed at $destinationPath"
 Write-Host 'All dependencies were copied from the package. Nothing was downloaded.'
-if (-not $NoShortcut) { Write-Host 'Start menu shortcut: ParamCAD Studio' }
+if (-not $NoShortcut) { Write-Host 'Start menu and desktop shortcuts: ParamCAD Studio' }

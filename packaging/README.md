@@ -12,10 +12,10 @@
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\package-client.ps1
 ```
 
-默认版本为 `0.2.2`。指定新包版本：
+默认版本为 `0.3.0`。指定新包版本：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\package-client.ps1 -Version 0.2.2
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\package-client.ps1 -Version 0.3.0
 ```
 
 `-Version` 设置包名、输出目录和 manifest 的版本，不会修改客户端源码中的产品版本。产品版本有变化时，应同步修改 `apps/ParamCAD Studio/CMakeLists.txt` 的项目版本、`src/main.cpp` 的 applicationVersion、`src/app/MainWindow.cpp` 的 About 显示，以及 `package-client.ps1` 的默认版本。
@@ -87,8 +87,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\package-clie
 
 | 参数 | 用途 |
 | --- | --- |
-| `-Version` | 包版本，默认 `0.2.2` |
-| `-BuildDirectory` | 构建目录，默认 `apps/ParamCAD Studio/build/msvc-debug`；实际构建配置始终为 `Release` |
+| `-Version` | 包版本，默认 `0.3.0` |
+| `-BuildDirectory` | 构建目录，默认 `apps/ParamCAD Studio/build/msvc-debug`；实际构建配置始终为 `Release`。缓存设置了 `CMAKE_RUNTIME_OUTPUT_DIRECTORY`（如 cloud-only 验证构建）时，脚本从该目录的 `Release` 子目录取二进制 |
 | `-OutputDirectory` | ZIP 和校验文件的输出目录，必须位于项目目录内 |
 | `-QtRoot`、`-VcpkgRoot`、`-VCRuntimeRoot` | 显式指定打包机工具和运行库来源 |
 | `-LocalColmapPath`、`-PythonArchive` | 指定已有的完整 COLMAP 目录及 Python 嵌入式 ZIP |
@@ -168,7 +168,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\Test-Package
 if ($LASTEXITCODE -ne 0) { throw '安装后的包验证失败' }
 ```
 
-`-NoShortcut` 避免测试修改用户开始菜单。需要测试损坏包时，只修改测试解压副本中的一个已记录文件，再调用安装入口：应报 `Package integrity check failed`，原安装和 `outputs/` 应保持不变。随后恢复副本文件；不要修改正式 ZIP 或 staging 来做损坏测试。
+`-NoShortcut` 避免测试修改用户开始菜单和桌面。需要测试损坏包时，只修改测试解压副本中的一个已记录文件，再调用安装入口：应报 `Package integrity check failed`，原安装和 `outputs/` 应保持不变。随后恢复副本文件；不要修改正式 ZIP 或 staging 来做损坏测试。
 
 测试副本每份约需 720 MiB，验证结束后可删除本次创建的隔离测试目录。发布前同时检查 manifest 中的 `workingTreeModified`：未提交的代码也会进入包，manifest 的 Git 提交号不能单独代表这些修改。
 
@@ -189,7 +189,7 @@ if ($LASTEXITCODE -ne 0) { throw '安装后的包验证失败' }
 - Qt 插件迁到 `app/plugins/` 后，`app/qt.conf` 必须保留 `Prefix=.`、`Plugins=plugins`。
 - 嵌入式 Python 的 `python*._pth` 加入 `../../core/reconstruction`，使其能导入包内模块。
 - GUI 放入 `app/` 后，包根通过 `core/reconstruction/reconstruct.py` 标记定位；不要只移动或分发 GUI EXE。
-- 启动入口设置工作目录为包根；安装后快捷方式指向 `app/ParamCAD Studio.exe`，工作目录为安装根。
+- 启动入口设置工作目录为包根；安装后开始菜单和桌面快捷方式均指向 `app/ParamCAD Studio.exe`，工作目录为安装根。
 
 其他常见失败：输入缺失时准备本地文件或指定对应参数；Python 哈希不符时换回与 `dependencies.json` 匹配的完整 ZIP；COLMAP flavor 不符时提供正确运行时。构建出现文件占用错误时先关闭对应客户端，重新执行默认命令。不要用未通过检查的旧 ZIP 作为本轮成功产物。
 
@@ -211,7 +211,7 @@ ParamCAD-Studio-<版本>-windows-x64-full-cuda/
 └── docs/                         第三方说明和许可证
 ```
 
-使用者完整解压后双击 `Start-ParamCADStudio.cmd`，或运行 `app/ParamCAD Studio.exe`。可选双击 `Install-ParamCADStudio.cmd`，默认安装到 `%LOCALAPPDATA%/Programs/ParamCAD Studio` 并创建开始菜单快捷方式，无需管理员权限。自定义位置：
+使用者完整解压后双击 `Start-ParamCADStudio.cmd`，或运行 `app/ParamCAD Studio.exe`。可选双击 `Install-ParamCADStudio.cmd`，默认安装到 `%LOCALAPPDATA%/Programs/ParamCAD Studio` 并创建开始菜单和桌面快捷方式，无需管理员权限。自定义位置：
 
 ```powershell
 .\Install-ParamCADStudio.cmd -Destination "D:\Applications\ParamCAD Studio"
